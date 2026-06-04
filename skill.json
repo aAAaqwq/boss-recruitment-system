@@ -1,0 +1,55 @@
+{
+  "name": "boss-recruitment",
+  "version": "2.0.0",
+  "description": "BOSS直聘自动化招聘系统 - 支持自动打招呼、获取简历、AI对话",
+  "author": "轩辕",
+  "license": "MIT",
+  "main": "boss_auto_v2.py",
+  "repository": {
+    "type": "local",
+    "path": "~/.openclaw/workspace/agents/workspace-xuanyuan/boss-recruitment-system"
+  },
+  "dependencies": {
+    "python": ">=3.8",
+    "playwright": ">=1.40.0"
+  },
+  "install": {
+    "pip": ["playwright"],
+    "post_install": "playwright install chromium"
+  },
+  "commands": {
+    "greet": {
+      "description": "自动打招呼",
+      "command": "python boss_auto_v2.py --mode greet"
+    },
+    "resume": {
+      "description": "自动获取简历",
+      "command": "python boss_auto_v2.py --mode resume"
+    },
+    "chat": {
+      "description": "AI自动对话",
+      "command": "python boss_auto_v2.py --mode chat"
+    },
+    "all": {
+      "description": "完整流程（打招呼→简历→聊天）",
+      "command": "python boss_auto_v2.py --mode all"
+    }
+  },
+  "config": {
+    "daily_greet_cap": 80,
+    "school_whitelist": [
+      "清华大学", "北京大学", "浙江大学", "复旦大学",
+      "上海交通大学", "南京大学", "中国科学技术大学"
+    ],
+    "delay_min": 1.5,
+    "delay_max": 4.0
+  },
+  "keywords": [
+    "boss",
+    "recruitment",
+    "automation",
+    "playwright",
+    "招聘",
+    "自动化"
+  ]
+}

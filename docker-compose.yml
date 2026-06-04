@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # 主服务：招聘自动化系统
+  boss-recruitment:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: boss-recruitment-pro
+    ports:
+      - "3101:3001"    # Web管理界面 (外部:内部)
+      - "5901:5901"    # VNC端口 (外部:内部) - 修正为一致
+      - "6901:6901"    # noVNC Web端口 (外部:内部) - 修正为一致
+      - "8001:8001"    # API端口 (外部:内部) - 修正为一致
+    environment:
+      - CUSTOMER_ID=${CUSTOMER_ID:-default}
+      - VNC_PASSWORD=${VNC_PASSWORD:-boss123}
+      - DISPLAY=:1
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./.env:/app/.env
+      - ./app:/app/app
+      - ./run_chat_and_resume.py:/app/run_chat_and_resume.py  # 挂载主脚本
+    restart: unless-stopped
+    privileged: true  # 需要权限来控制鼠标键盘
+    shm_size: '2gb'   # Chrome需要共享内存
+
+# 可以添加多个客户实例
+# boss-recruitment-customer-a:
+#   extends:
+#     service: boss-recruitment
+#   container_name: boss-recruitment-customer-a
+#   ports:
+#     - "3102:3001"    # Web管理界面
+#     - "5902:5901"    # VNC端口
+#     - "6902:6901"    # noVNC Web端口
+#     - "8002:8001"    # API端口
+#   environment:
+#     - CUSTOMER_ID=customer-a
+#     - VNC_PASSWORD=customer-a-password

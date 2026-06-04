@@ -1,0 +1,52 @@
+{
+  "resolution": "1920x1080",
+  "description": "BOSS直聘聊天页面坐标配置（需根据实际屏幕调整）",
+  "regions": {
+    "left_sidebar": {
+      "x": 0,
+      "y": 80,
+      "width": 230,
+      "height": 460,
+      "description": "左侧导航栏（推荐牛人/沟通等）"
+    },
+    "candidate_card_area": {
+      "x": 235,
+      "y": 130,
+      "width": 650,
+      "height": 410,
+      "description": "候选人卡片区域"
+    },
+    "chat_content_area": {
+      "x": 420,
+      "y": 130,
+      "width": 560,
+      "height": 410,
+      "description": "聊天内容区域"
+    },
+    "chat_input_box": {
+      "x": 650,
+      "y": 505,
+      "description": "聊天输入框坐标"
+    },
+    "send_button": {
+      "x": 850,
+      "y": 505,
+      "description": "发送按钮坐标"
+    }
+  },
+  "buttons": {
+    "recommend_talent": {
+      "text": "推荐牛人",
+      "region": [0, 80, 140, 460]
+    },
+    "filter": {
+      "text": "筛选",
+      "region": [235, 80, 650, 130]
+    },
+    "hello_button": {
+      "text": "打招呼",
+      "region": [760, 130, 130, 410]
+    }
+  },
+  "note": "首次使用请运行 tools/mark_coordinates.py 标注实际坐标"
+}

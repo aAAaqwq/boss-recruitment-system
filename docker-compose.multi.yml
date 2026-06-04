@@ -1,0 +1,128 @@
+version: '3.8'
+
+# ============================================================
+# BOSS直聘三位一体系统 - 多客户部署配置 (方案A)
+# 每个客户独立容器，完全隔离
+# ============================================================
+
+services:
+  # -------- 客户A --------
+  boss-customer-a:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: boss-customer-a
+    ports:
+      - "3101:3001"    # Web管理界面
+      - "5901:5901"    # VNC端口
+      - "6901:6901"    # noVNC Web端口
+      - "8001:8001"    # API端口
+    environment:
+      - CUSTOMER_ID=customer-a
+      - CUSTOMER_NAME=客户A
+      - VNC_PASSWORD=${CUSTOMER_A_PASSWORD:-customer-a-pass}
+      - DISPLAY=:1
+      - DB_PATH=/app/data/customer_a.db
+    volumes:
+      - ./data/customer_a:/app/data
+      - ./logs/customer_a:/app/logs
+      - ./config/customer_a:/app/config
+      - ./run_chat_and_resume.py:/app/run_chat_and_resume.py:ro
+    restart: unless-stopped
+    privileged: true
+    shm_size: '2gb'
+    networks:
+      - boss-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # -------- 客户B --------
+  boss-customer-b:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: boss-customer-b
+    ports:
+      - "3102:3001"    # Web管理界面
+      - "5902:5901"    # VNC端口
+      - "6902:6901"    # noVNC Web端口
+      - "8002:8001"    # API端口
+    environment:
+      - CUSTOMER_ID=customer-b
+      - CUSTOMER_NAME=客户B
+      - VNC_PASSWORD=${CUSTOMER_B_PASSWORD:-customer-b-pass}
+      - DISPLAY=:1
+      - DB_PATH=/app/data/customer_b.db
+    volumes:
+      - ./data/customer_b:/app/data
+      - ./logs/customer_b:/app/logs
+      - ./config/customer_b:/app/config
+      - ./run_chat_and_resume.py:/app/run_chat_and_resume.py:ro
+    restart: unless-stopped
+    privileged: true
+    shm_size: '2gb'
+    networks:
+      - boss-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # -------- 客户C --------
+  boss-customer-c:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: boss-customer-c
+    ports:
+      - "3103:3001"    # Web管理界面
+      - "5903:5901"    # VNC端口
+      - "6903:6901"    # noVNC Web端口
+      - "8003:8001"    # API端口
+    environment:
+      - CUSTOMER_ID=customer-c
+      - CUSTOMER_NAME=客户C
+      - VNC_PASSWORD=${CUSTOMER_C_PASSWORD:-customer-c-pass}
+      - DISPLAY=:1
+      - DB_PATH=/app/data/customer_c.db
+    volumes:
+      - ./data/customer_c:/app/data
+      - ./logs/customer_c:/app/logs
+      - ./config/customer_c:/app/config
+      - ./run_chat_and_resume.py:/app/run_chat_and_resume.py:ro
+    restart: unless-stopped
+    privileged: true
+    shm_size: '2gb'
+    networks:
+      - boss-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # -------- 集中管理面板 (可选) --------
+  admin-panel:
+    image: nginx:alpine
+    container_name: boss-admin-panel
+    ports:
+      - "3000:80"
+    volumes:
+      - ./admin-panel:/usr/share/nginx/html:ro
+    networks:
+      - boss-network
+    depends_on:
+      - boss-customer-a
+      - boss-customer-b
+      - boss-customer-c
+
+networks:
+  boss-network:
+    driver: bridge

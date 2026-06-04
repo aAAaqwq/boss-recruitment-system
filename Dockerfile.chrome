@@ -1,0 +1,56 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DISPLAY=:1
+ENV VNC_PASSWORD=***
+
+# 安装基础工具
+RUN apt-get update && apt-get install -y \
+    wget curl gnupg2 ca-certificates \
+    python3 python3-pip \
+    xfce4 xfce4-terminal xterm \
+    tigervnc-standalone-server tigervnc-common \
+    novnc websockify \
+    supervisor \
+    # 安装依赖库
+    libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdbus-1-3 \
+    libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 \
+    libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装Google Chrome (ARM版本)
+RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb || \
+    wget -q https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_125.0.6422.112-1_arm64.deb || \
+    echo "Chrome ARM not available, using alternative" && \
+    apt-get update && apt-get install -y firefox-esr 2>/dev/null || apt-get install -y firefox || true
+
+# 如果Chrome安装失败，尝试安装Firefox
+RUN apt-get update && apt-get install -y firefox || apt-get install -y firefox-esr || true
+
+# 安装Python依赖
+RUN pip3 install --no-cache-dir \
+    pyautogui \
+    opencv-python-headless \
+    numpy \
+    pillow \
+    fastapi \
+    uvicorn \
+    python-multipart \
+    requests
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制应用代码
+COPY app/ /app/app/
+COPY run_serial.py /app/
+COPY web/ /app/web/
+
+# 暴露端口
+EXPOSE 3001 5901 6901 8001
+
+# 启动脚本
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
