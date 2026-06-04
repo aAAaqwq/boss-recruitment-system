@@ -3,6 +3,7 @@ import json
 import time
 import random
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -14,6 +15,13 @@ from app.screen import activate_chrome, move_and_click, type_text, press_hotkey
 import httpx
 
 
+# 名校白名单 + 可扩展筛选条件（从轻量模块导入，避免循环依赖）
+from app.filter_criteria import (
+    DOMESTIC_ELITE_SCHOOLS, US_ELITE_SCHOOLS, UK_ELITE_SCHOOLS, OTHER_ELITE_SCHOOLS,
+    ALL_ELITE_SCHOOLS, FilterCriteria,
+)
+
+
 # ========== 3.1 主动筛选沟通流程 ==========
 
 def workflow_3_1_auto_contact(
@@ -21,26 +29,32 @@ def workflow_3_1_auto_contact(
     school_whitelist: List[str] = None,
     min_degree: str = "本科",
     min_years: int = 3,
-    dry_run: bool = True
+    dry_run: bool = True,
+    criteria: Optional[FilterCriteria] = None,
 ) -> Dict:
     """
     3.1 主动筛选沟通流程
-    
+
     Args:
         daily_cap: 每日上限
-        school_whitelist: 学校白名单
-        min_degree: 最低学历
-        min_years: 最低年限
+        school_whitelist: 学校白名单（向后兼容，优先使用criteria参数）
+        min_degree: 最低学历（向后兼容）
+        min_years: 最低年限（向后兼容）
         dry_run: 是否dry run模式
-    
+        criteria: 可扩展筛选条件对象（推荐使用）
+
     Returns:
         执行结果
     """
-    if school_whitelist is None:
-        school_whitelist = [
-            "清华大学", "北京大学", "浙江大学", "复旦大学",
-            "上海交通大学", "华中科技大学", "武汉大学", "中山大学"
-        ]
+    # 构建筛选条件（criteria优先，fallback到单独参数）
+    if criteria is None:
+        criteria = FilterCriteria(
+            school_whitelist=school_whitelist,
+            min_degree=min_degree,
+            min_years=min_years,
+        )
+    if criteria.school_whitelist is None:
+        criteria.school_whitelist = DOMESTIC_ELITE_SCHOOLS + US_ELITE_SCHOOLS + UK_ELITE_SCHOOLS
     
     with Database() as db:
         # 1. 检查每日上限
@@ -85,7 +99,7 @@ def workflow_3_1_auto_contact(
         # 6. 筛选候选人
         passed = []
         for candidate in candidates:
-            if _should_contact(candidate, school_whitelist, min_degree, min_years):
+            if _should_contact(candidate, criteria):
                 passed.append(candidate)
         
         # 限制数量
@@ -200,34 +214,100 @@ def _extract_degree(text: str) -> Optional[str]:
 
 
 def _extract_school(text: str) -> Optional[str]:
-    """提取学校"""
-    match = re.search(r'([\u4e00-\u9fa5]{2,8}(?:大学|学院|学校))', text)
-    return match.group(1) if match else None
+    """提取学校（支持中英文名校名）
+
+    匹配模式:
+        中文: XX大学, XX学院 (含海外学校中文译名如"哈佛大学")
+        英文: Harvard University, MIT, UC Berkeley, etc.
+    """
+    # 1. 先尝试匹配中文学校名
+    cn_match = re.search(r'([\u4e00-\u9fa5]{2,8}(?:大学|学院|学校))', text)
+    if cn_match:
+        return cn_match.group(1)
+
+    # 2. 匹配常见海外名校英文名（含缩写）
+    # 大小写不敏感的完整校名模式
+    ci_patterns = [
+        # Harvard University, Massachusetts Institute of Technology, etc.
+        r'((?:[A-Z][a-z]+\s){0,4}(?:University|College|Institute|School)(?:\s(?:of|at|in)\s[A-Z][a-z]+)?)',
+        # Well-known short names
+        r'(Caltech|ETH\s?Zurich|EPFL|KAIST)',
+        r'\b(Oxford|Cambridge)\b',
+        # Mixed-case abbreviations
+        r'\b(UPenn|UChicago|UMich)\b',
+    ]
+    for pattern in ci_patterns:
+        en_match = re.search(pattern, text, re.IGNORECASE)
+        if en_match:
+            return en_match.group(1).strip()
+
+    # 大小写敏感的大写缩写模式（避免匹配到普通英文名如 John, Alice）
+    cs_patterns = [
+        r'\b([A-Z]{2,7})\b',   # MIT, CMU, UCLA, NYU, UIUC, UBC, NUS, NTU, etc.
+    ]
+    for pattern in cs_patterns:
+        en_match = re.search(pattern, text)  # no IGNORECASE
+        if en_match:
+            return en_match.group(1).strip()
+
+    # 其他常见缩写（大小写不敏感但更精确）
+    more_abbr = r'\b(LSE|UCL|HKU|CUHK|HKUST|ANU|UNSW|JHU)\b'
+    en_match = re.search(more_abbr, text, re.IGNORECASE)
+    if en_match:
+        return en_match.group(1).strip()
+
+    return None
+
+
+# _match_school: 从轻量模块导入，避免重复定义
+from app.filter_criteria import match_school as _match_school
 
 
 def _should_contact(
     candidate: Dict,
-    school_whitelist: List[str],
-    min_degree: str,
-    min_years: int
+    criteria: "FilterCriteria",
 ) -> bool:
-    """判断是否应该联系"""
+    """判断是否应该联系（基于可扩展筛选条件）
+
+    Args:
+        candidate: 候选人信息字典
+        criteria: 可扩展筛选条件
+
+    Returns:
+        是否应该联系
+    """
     # 年限检查
-    if candidate.get('years') is None or candidate['years'] < min_years:
-        return False
-    
+    if criteria.min_years is not None:
+        if candidate.get('years') is None or candidate['years'] < criteria.min_years:
+            return False
+
     # 学历检查
-    degree_rank = {"博士": 4, "硕士": 3, "本科": 2, "大专": 1}
-    if candidate.get('degree') not in degree_rank:
-        return False
-    if degree_rank[candidate['degree']] < degree_rank.get(min_degree, 0):
-        return False
-    
+    if criteria.min_degree:
+        degree_rank = {"博士": 4, "硕士": 3, "本科": 2, "大专": 1}
+        if candidate.get('degree') not in degree_rank:
+            return False
+        if degree_rank[candidate['degree']] < degree_rank.get(criteria.min_degree, 0):
+            return False
+
     # 学校白名单检查
-    school = candidate.get('school', '')
-    if not any(s in school for s in school_whitelist):
-        return False
-    
+    if criteria.school_whitelist:
+        school = candidate.get('school', '')
+        if not _match_school(school, criteria.school_whitelist):
+            return False
+
+    # ---- 预留扩展筛选维度 ----
+    # 年龄范围
+    # if criteria.age_range:
+    #     age = candidate.get('age')
+    #     if age is None or not (criteria.age_range[0] <= age <= criteria.age_range[1]):
+    #         return False
+    #
+    # 技术栈
+    # if criteria.tech_stack:
+    #     skills = candidate.get('skills', '')
+    #     if not any(tech.lower() in skills.lower() for tech in criteria.tech_stack):
+    #         return False
+
     return True
 
 

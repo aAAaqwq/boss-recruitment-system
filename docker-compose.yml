@@ -8,13 +8,17 @@ services:
       dockerfile: Dockerfile
     container_name: boss-recruitment-pro
     ports:
-      - "3101:3001"    # Web管理界面 (外部:内部)
-      - "5901:5901"    # VNC端口 (外部:内部) - 修正为一致
-      - "6901:6901"    # noVNC Web端口 (外部:内部) - 修正为一致
-      - "8001:8001"    # API端口 (外部:内部) - 修正为一致
+      - "8321:3000"    # Dashboard (VNC+控制面板) (外部:内部)
+      - "3101:3001"    # 总台/Hub管理界面 (外部:内部)
+      - "5901:5901"    # VNC端口 (外部:内部)
+      - "6901:6901"    # noVNC Web端口 (外部:内部)
+      - "8001:8001"    # API端口 (外部:内部)
     environment:
       - CUSTOMER_ID=${CUSTOMER_ID:-default}
       - VNC_PASSWORD=${VNC_PASSWORD:-boss123}
+      - API_SECRET_KEY=${API_SECRET_KEY:-boss-recruit-secret-key-min-32-chars-2026}
+      - API_PASSWORD=${API_PASSWORD:-boss-recruit-2026}
+      - API_USERNAME=${API_USERNAME:-admin}
       - DISPLAY=:1
     volumes:
       - ./data:/app/data
@@ -22,7 +26,7 @@ services:
       - ./config:/app/config
       - ./.env:/app/.env
       - ./app:/app/app
-      - ./run_chat_and_resume.py:/app/run_chat_and_resume.py  # 挂载主脚本
+      - ./boss.py:/app/boss.py  # 主脚本
     restart: unless-stopped
     privileged: true  # 需要权限来控制鼠标键盘
     shm_size: '2gb'   # Chrome需要共享内存

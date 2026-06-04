@@ -60,24 +60,136 @@ python3 main.py --limit 20 --headless
 
 ```
 boss-recruitment-system/
-├── main.py               # 🆕 v2.0 主程序（入口）
+├── main.py                  # 🆕 v2.0 主程序（入口）
 ├── app/
 │   ├── __init__.py
-│   ├── config.py         # 配置文件
-│   ├── vision.py         # OCR识别模块 (macOS Vision)
-│   ├── screen.py         # 屏幕控制模块
-│   ├── database.py       # 数据库模块
-│   ├── workflows.py      # 工作流模块
+│   ├── api.py               # FastAPI 后端
+│   ├── config.py            # 配置文件
+│   ├── vision.py            # OCR识别模块 (macOS Vision)
+│   ├── screen.py            # 屏幕控制模块
+│   ├── database.py          # 数据库模块
+│   ├── workflows.py         # 工作流模块
+│   ├── filter_criteria.py   # 🆕 筛选条件+名校白名单
 │   └── resume_collector.py  # 简历收集器（旧版坐标）
 ├── boss_rpa/
 │   ├── __init__.py
-│   ├── config.py         # 学校白名单/评分规则
-│   ├── browser.py        # Playwright自动化（旧版）
-│   └── utils.py          # 工具函数
-├── data/                 # 数据库
-├── tests/                # 测试
-└── tools/                # 工具
+│   ├── config.py            # 学校白名单/评分规则
+│   ├── browser.py           # Playwright自动化（旧版）
+│   └── utils.py             # 工具函数
+├── scripts/
+│   ├── init_filter_config.py  # 🆕 筛选配置初始化
+│   ├── deploy_agent.py
+│   └── ...
+├── data/                    # 数据库
+├── tests/                   # 测试
+└── tools/                   # 工具
 ```
+
+## 筛选系统
+
+### 筛选打招呼
+
+通过 `/api/filter/contact` 启动，自动扫描推荐牛人列表，匹配学校白名单后批量打招呼。
+
+```bash
+# 初始化筛选配置（写入数据库）
+python scripts/init_filter_config.py
+
+# 查看当前配置
+python scripts/init_filter_config.py --show
+
+# 重置为默认
+python scripts/init_filter_config.py --reset
+```
+
+### 学校白名单（132所）
+
+| 区域 | 数量 | 示例 |
+|------|------|------|
+| 国内名校 | 33 | 清华大学、北京大学、浙江大学、复旦大学... |
+| 美国名校 | 41 | Harvard, MIT, Stanford, UC Berkeley, CMU... |
+| 英国名校 | 17 | Oxford, Cambridge, Imperial, LSE, UCL... |
+| 其他地区 | 41 | ETH Zurich, NUS, Toronto, Tokyo, HKU, Melbourne... |
+
+完整名单见 `app/filter_criteria.py` 或 `scripts/init_filter_config.py`。
+
+### 可扩展筛选条件
+
+筛选条件通过 `FilterCriteria` 数据类定义，当前已启用：
+
+| 维度 | 字段 | 类型 | 说明 |
+|------|------|------|------|
+| 学校 | `school_whitelist` | multi_select | 中英文名校+缩写匹配 |
+| 学历 | `min_degree` | select | 博士 > 硕士 > 本科 > 大专 |
+| 年限 | `min_years` | number | 最低工作年限 |
+
+预留扩展（`enabled: false`，后续启用即可）：
+
+| 维度 | 字段 | 类型 |
+|------|------|------|
+| 年龄 | `age_range` | range |
+| 技术栈 | `tech_stack` | multi_select |
+| 行业 | `industry` | multi_select |
+| 职位 | `job_title_keywords` | multi_select |
+
+API `/api/filter/config` 返回 `available_filters` 列表，前端可按 `enabled` 状态动态渲染。
+
+### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/filter/config` | 获取筛选配置 |
+| PUT | `/api/filter/config` | 更新筛选配置 |
+| POST | `/api/filter/contact` | 启动筛选打招呼任务 |
+| GET | `/api/filter/status/{task_id}` | 查询任务进度 |
+
+### cua-driver 驱动（后台自动化）
+
+用 cua-driver 驱动 Chrome 完成打招呼闭环 — 无需 OCR，直接通过可访问性树 + JS 操作 DOM：
+
+```bash
+# 预览模式（只扫描候选人，不打招呼）
+python scripts/cua_greeting_loop.py --dry-run
+
+# 打招呼（上限 10 人，默认全部名校白名单）
+python scripts/cua_greeting_loop.py --limit 10
+
+# 自定义学校
+python scripts/cua_greeting_loop.py --schools "清华大学,北京大学,MIT,Stanford University"
+```
+
+**前置条件：**
+
+```bash
+# 1. 安装 cua-driver
+brew install cua-driver
+
+# 2. 授权可访问性 + 屏幕录制
+cua-driver check_permissions
+
+# 3. Chrome 开启 "Allow JavaScript from Apple Events"
+#    关闭 Chrome → 写入配置 → 重新打开
+python3 -c "
+import json, os
+prefs = os.path.expanduser('~/Library/Application Support/Google/Chrome/Default/Preferences')
+data = json.load(open(prefs))
+data.setdefault('browser', {})['allow_javascript_apple_events'] = True
+json.dump(data, open(prefs, 'w'))
+print('done')
+"
+```
+
+**对比：OCR vs cua-driver**
+
+| 维度 | OCR 方案 (workflows.py) | cua-driver 方案 |
+|------|------------------------|-----------------|
+| 定位方式 | 截图→OCR→坐标估算 | AX 树索引 + JS DOM |
+| 精度 | ±5-20px | 像素级 |
+| 后台运行 | 需要前台 Chrome | ✅ 完全后台 |
+| 受分辨率影响 | 是 | 否 |
+| 候选人信息提取 | OCR 文本解析 | JS `document.querySelectorAll` |
+| 学校匹配 | OCR 文本子串 | 结构化 JSON |
+| 环境要求 | macOS Vision / Tesseract | cua-driver + Chrome AX |
 
 ## 防检测机制
 

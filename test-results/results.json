@@ -1,0 +1,261 @@
+{
+  "config": {
+    "configFile": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/playwright.config.ts",
+    "rootDir": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/danielli/.openclaw/workspace/test-results",
+        "repeatEach": 1,
+        "retries": 1,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "html",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-results/results.json"
+        }
+      ],
+      [
+        "junit",
+        {
+          "outputFile": "test-results/results.xml"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.60.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "f2-vnc-acceptance.spec.ts",
+      "file": "f2-vnc-acceptance.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "F2 VNC connection final acceptance",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 29394,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('#vncStatusText')\nExpected substring: \u001b[32m\"\u001b[7m已\u001b[27m连接\"\u001b[39m\nReceived string:    \u001b[31m\"\u001b[7m未\u001b[27m连接\"\u001b[39m\nTimeout: 25000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 25000ms\u001b[22m\n\u001b[2m  - waiting for locator('#vncStatusText')\u001b[22m\n\u001b[2m    54 × locator resolved to <span id=\"vncStatusText\" class=\"status-text\">未连接</span>\u001b[22m\n\u001b[2m       - unexpected value \"未连接\"\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('#vncStatusText')\nExpected substring: \u001b[32m\"\u001b[7m已\u001b[27m连接\"\u001b[39m\nReceived string:    \u001b[31m\"\u001b[7m未\u001b[27m连接\"\u001b[39m\nTimeout: 25000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 25000ms\u001b[22m\n\u001b[2m  - waiting for locator('#vncStatusText')\u001b[22m\n\u001b[2m    54 × locator resolved to <span id=\"vncStatusText\" class=\"status-text\">未连接</span>\u001b[22m\n\u001b[2m       - unexpected value \"未连接\"\u001b[22m\n\n    at /Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts:46:28",
+                    "location": {
+                      "file": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts",
+                      "column": 28,
+                      "line": 46
+                    },
+                    "snippet": "  44 |   // Step 5: Wait for \"已连接\" to appear in the status text\n  45 |   const statusText = page.locator('#vncStatusText');\n> 46 |   await expect(statusText).toContainText('已连接', { timeout: 25000 });\n     |                            ^\n  47 |\n  48 |   // Step 6: Take connected screenshot\n  49 |   await page.screenshot({"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts",
+                        "column": 28,
+                        "line": 46
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('#vncStatusText')\nExpected substring: \u001b[32m\"\u001b[7m已\u001b[27m连接\"\u001b[39m\nReceived string:    \u001b[31m\"\u001b[7m未\u001b[27m连接\"\u001b[39m\nTimeout: 25000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 25000ms\u001b[22m\n\u001b[2m  - waiting for locator('#vncStatusText')\u001b[22m\n\u001b[2m    54 × locator resolved to <span id=\"vncStatusText\" class=\"status-text\">未连接</span>\u001b[22m\n\u001b[2m       - unexpected value \"未连接\"\u001b[22m\n\n\n  44 |   // Step 5: Wait for \"已连接\" to appear in the status text\n  45 |   const statusText = page.locator('#vncStatusText');\n> 46 |   await expect(statusText).toContainText('已连接', { timeout: 25000 });\n     |                            ^\n  47 |\n  48 |   // Step 6: Take connected screenshot\n  49 |   await page.screenshot({\n    at /Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts:46:28"
+                    }
+                  ],
+                  "stdout": [
+                    {
+                      "text": "[TEST] Initial screenshot saved\n"
+                    },
+                    {
+                      "text": "[TEST] Connect button found\n"
+                    },
+                    {
+                      "text": "[TEST] Console logs so far:\n"
+                    },
+                    {
+                      "text": "  [error] Failed to load resource: the server responded with a status of 404 (File not found)\n"
+                    },
+                    {
+                      "text": "[TEST] Page errors:\n"
+                    },
+                    {
+                      "text": "  Unexpected token ')'\n"
+                    },
+                    {
+                      "text": "  connectVNC is not defined\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-04T11:26:09.117Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/Users/danielli/.openclaw/workspace/test-results/f2-vnc-acceptance-F2-VNC-connection-final-acceptance-chromium/test-failed-1.png"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/danielli/.openclaw/workspace/test-results/f2-vnc-acceptance-F2-VNC-connection-final-acceptance-chromium/video.webm"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/Users/danielli/.openclaw/workspace/test-results/f2-vnc-acceptance-F2-VNC-connection-final-acceptance-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts",
+                    "column": 28,
+                    "line": 46
+                  }
+                },
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 29439,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('#vncStatusText')\nExpected substring: \u001b[32m\"\u001b[7m已\u001b[27m连接\"\u001b[39m\nReceived string:    \u001b[31m\"\u001b[7m未\u001b[27m连接\"\u001b[39m\nTimeout: 25000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 25000ms\u001b[22m\n\u001b[2m  - waiting for locator('#vncStatusText')\u001b[22m\n\u001b[2m    53 × locator resolved to <span id=\"vncStatusText\" class=\"status-text\">未连接</span>\u001b[22m\n\u001b[2m       - unexpected value \"未连接\"\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('#vncStatusText')\nExpected substring: \u001b[32m\"\u001b[7m已\u001b[27m连接\"\u001b[39m\nReceived string:    \u001b[31m\"\u001b[7m未\u001b[27m连接\"\u001b[39m\nTimeout: 25000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 25000ms\u001b[22m\n\u001b[2m  - waiting for locator('#vncStatusText')\u001b[22m\n\u001b[2m    53 × locator resolved to <span id=\"vncStatusText\" class=\"status-text\">未连接</span>\u001b[22m\n\u001b[2m       - unexpected value \"未连接\"\u001b[22m\n\n    at /Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts:46:28",
+                    "location": {
+                      "file": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts",
+                      "column": 28,
+                      "line": 46
+                    },
+                    "snippet": "  44 |   // Step 5: Wait for \"已连接\" to appear in the status text\n  45 |   const statusText = page.locator('#vncStatusText');\n> 46 |   await expect(statusText).toContainText('已连接', { timeout: 25000 });\n     |                            ^\n  47 |\n  48 |   // Step 6: Take connected screenshot\n  49 |   await page.screenshot({"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts",
+                        "column": 28,
+                        "line": 46
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('#vncStatusText')\nExpected substring: \u001b[32m\"\u001b[7m已\u001b[27m连接\"\u001b[39m\nReceived string:    \u001b[31m\"\u001b[7m未\u001b[27m连接\"\u001b[39m\nTimeout: 25000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 25000ms\u001b[22m\n\u001b[2m  - waiting for locator('#vncStatusText')\u001b[22m\n\u001b[2m    53 × locator resolved to <span id=\"vncStatusText\" class=\"status-text\">未连接</span>\u001b[22m\n\u001b[2m       - unexpected value \"未连接\"\u001b[22m\n\n\n  44 |   // Step 5: Wait for \"已连接\" to appear in the status text\n  45 |   const statusText = page.locator('#vncStatusText');\n> 46 |   await expect(statusText).toContainText('已连接', { timeout: 25000 });\n     |                            ^\n  47 |\n  48 |   // Step 6: Take connected screenshot\n  49 |   await page.screenshot({\n    at /Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts:46:28"
+                    }
+                  ],
+                  "stdout": [
+                    {
+                      "text": "[TEST] Initial screenshot saved\n"
+                    },
+                    {
+                      "text": "[TEST] Connect button found\n"
+                    },
+                    {
+                      "text": "[TEST] Console logs so far:\n"
+                    },
+                    {
+                      "text": "  [error] Failed to load resource: the server responded with a status of 404 (File not found)\n"
+                    },
+                    {
+                      "text": "[TEST] Page errors:\n"
+                    },
+                    {
+                      "text": "  Unexpected token ')'\n"
+                    },
+                    {
+                      "text": "  connectVNC is not defined\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "2026-06-04T11:26:40.810Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/Users/danielli/.openclaw/workspace/test-results/f2-vnc-acceptance-F2-VNC-connection-final-acceptance-chromium-retry1/test-failed-1.png"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/danielli/.openclaw/workspace/test-results/f2-vnc-acceptance-F2-VNC-connection-final-acceptance-chromium-retry1/video.webm"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/Users/danielli/.openclaw/workspace/test-results/f2-vnc-acceptance-F2-VNC-connection-final-acceptance-chromium-retry1/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/Users/danielli/.openclaw/workspace/test-results/f2-vnc-acceptance-F2-VNC-connection-final-acceptance-chromium-retry1/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/Users/danielli/.openclaw/workspace/projects/boss-recruitment-system/tests/f2-vnc-acceptance.spec.ts",
+                    "column": 28,
+                    "line": 46
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "822ce7660007cd9806a9-59335dd0952935e9a360",
+          "file": "f2-vnc-acceptance.spec.ts",
+          "line": 6,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-06-04T11:26:08.845Z",
+    "duration": 63008.165,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BOSS直聘自动化系统 - 控制台</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+        }
+
+        /* 左侧VNC区域 */
+        .vnc-panel {
+            flex: 1;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            border-right: 2px solid #333;
+        }
+        .vnc-header {
+            background: #16213e;
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #333;
+        }
+        .vnc-title {
+            color: #eee;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .vnc-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .status-dot.online { background: #4caf50; box-shadow: 0 0 8px #4caf50; }
+        .status-dot.offline { background: #f44336; }
+        .status-dot.busy { background: #ff9800; }
+        .status-text {
+            color: #888;
+            font-size: 12px;
+        }
+        .vnc-viewport {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0a0a0a;
+            position: relative;
+            overflow: hidden;
+        }
+        .vnc-viewport canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .vnc-placeholder {
+            text-align: center;
+            color: #555;
+        }
+        .vnc-placeholder svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        .vnc-toolbar {
+            background: #16213e;
+            padding: 8px 15px;
+            display: flex;
+            gap: 10px;
+            border-top: 1px solid #333;
+        }
+        .vnc-toolbar button {
+            background: #333;
+            border: none;
+            color: #ccc;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .vnc-toolbar button:hover {
+            background: #444;
+            color: white;
+        }
+
+        /* 右侧控制面板 */
+        .control-panel {
+            width: 380px;
+            background: #16213e;
+            display: flex;
+            flex-direction: column;
+        }
+        .panel-header {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+        }
+        .panel-header h1 {
+            color: #eee;
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+        .panel-header p {
+            color: #666;
+            font-size: 12px;
+        }
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .section-title {
+            color: #888;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .section-title button {
+            background: none;
+            border: none;
+            color: #667eea;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .section-title button:hover {
+            text-decoration: underline;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+        .btn-success { background: linear-gradient(135deg, #4caf50, #45a049); color: white; }
+        .btn-success:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4); }
+        .btn-info { background: linear-gradient(135deg, #2196f3, #1976d2); color: white; }
+        .btn-info:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4); }
+        .btn-warning { background: linear-gradient(135deg, #ff9800, #f57c00); color: white; }
+        .btn-warning:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4); }
+        .btn-danger { background: linear-gradient(135deg, #f44336, #d32f2f); color: white; }
+        .btn-danger:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4); }
+        .btn-secondary { background: #333; color: #ccc; }
+        .btn-secondary:hover:not(:disabled) { background: #444; color: white; }
+        .btn-sm {
+            padding: 8px 12px;
+            font-size: 13px;
+        }
+
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+        .btn.loading .spinner { display: block; }
+        .btn.loading .btn-text { display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 配置表单 */
+        .config-form {
+            background: #1a1a2e;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: #eee;
+            font-size: 13px;
+        }
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .form-group textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        .form-row {
+            display: flex;
+            gap: 10px;
+        }
+        .form-row .form-group {
+            flex: 1;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #0a0a0a;
+            padding: 6px 10px;
+            border-radius: 6px;
+        }
+        .checkbox-item input {
+            accent-color: #667eea;
+        }
+        .checkbox-item label {
+            color: #ccc;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .input-group input {
+            flex: 1;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #eee;
+            font-size: 13px;
+        }
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .log-panel {
+            background: #0a0a0a;
+            border-radius: 8px;
+            padding: 12px;
+            height: 120px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 11px;
+        }
+        .log-line {
+            margin: 3px 0;
+            line-height: 1.4;
+        }
+        .log-time {
+            color: #666;
+        }
+        .log-info { color: #4caf50; }
+        .log-error { color: #f44336; }
+        .log-warn { color: #ff9800; }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .stat-item {
+            background: #1a1a2e;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value {
+            color: #eee;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        /* 配置面板展开/收起 */
+        .config-content {
+            display: none;
+        }
+        .config-content.show {
+            display: block;
+        }
+
+        .template-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .template-item {
+            background: #0a0a0a;
+            border-radius: 6px;
+            padding: 10px;
+        }
+        .template-name {
+            color: #667eea;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        .template-text {
+            color: #888;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 左侧VNC面板 -->
+    <div class="vnc-panel">
+        <div class="vnc-header">
+            <div class="vnc-title">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 0a8 8 0 100 16A8 8 0 008 0zm0 14A6 6 0 118 2a6 6 0 018 12z"/>
+                    <path d="M8 4a4 4 0 100 8 4 4 0 000-8z"/>
+                </svg>
+                <span>虚拟桌面</span>
+            </div>
+            <div class="vnc-status">
+                <span class="status-dot" id="vncStatusDot"></span>
+                <span class="status-text" id="vncStatusText">未连接</span>
+            </div>
+        </div>
+        <div class="vnc-viewport" id="vncViewport">
+            <div class="vnc-placeholder" id="vncPlaceholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="2" y="3" width="20" height="14" rx="2"/>
+                    <path d="M8 21h8"/>
+                    <path d="M12 17v4"/>
+                </svg>
+                <p>点击"连接桌面"启动浏览器</p>
+            </div>
+            <iframe class="vnc-iframe" id="vncFrame" style="display:none;"></iframe>
+        </div>
+        <div class="vnc-toolbar">
+            <button onclick="refreshVNC()">🔄 刷新</button>
+            <button onclick="zoomIn()">🔍+ 放大</button>
+            <button onclick="zoomOut()">🔍- 缩小</button>
+            <button onclick="screenshot()">📷 截图</button>
+        </div>
+    </div>
+
+    <!-- 右侧控制面板 -->
+    <div class="control-panel">
+        <div class="panel-header">
+            <h1>🤖 BOSS直聘控制台</h1>
+            <p>自动化招聘助手</p>
+        </div>
+
+        <div class="panel-content">
+            <!-- 统计信息 -->
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="statProcessed">0</div>
+                    <div class="stat-label">已处理</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statResumes">0</div>
+                    <div class="stat-label">简历数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statReplied">0</div>
+                    <div class="stat-label">已回复</div>
+                </div>
+            </div>
+
+            <!-- 浏览器控制 -->
+            <div class="section">
+                <div class="section-title">浏览器控制</div>
+                <button class="btn btn-success" onclick="openBossZhipin()">
+                    <span class="spinner"></span>
+                    <span class="btn-text">🚀 打开BOSS直聘</span>
+                </button>
+                <button class="btn btn-primary" onclick="connectVNC()">
+                    <span class="spinner"></span>
+                    <span class="btn-text">🌐 连接桌面</span>
+                </button>
+                <button class="btn btn-info" onclick="checkLogin()">
+                    <span class="spinner"></span>
+                    <span class="btn-text">✅ 检查登录状态</span>
+                </button>
+            </div>
+
+            <!-- 批量操作 -->
+            <div class="section">
+                <div class="section-title">批量自动化操作</div>
+                <div class="input-group">
+                    <input type="number" id="batchLimit" value="20" placeholder="人数">
+                    <button class="btn btn-success" onclick="batchFilterAndHello()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">👋 筛选+打招呼</span>
+                    </button>
+                </div>
+                <div class="input-group">
+                    <input type="number" id="resumeLimit" value="10" placeholder="人数">
+                    <button class="btn btn-warning" onclick="batchGetResumes()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">📄 批量获取简历</span>
+                    </button>
+                </div>
+                <div class="input-group">
+                    <input type="number" id="replyLimit" value="15" placeholder="人数">
+                    <button class="btn btn-danger" onclick="batchReplyMessages()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">💬 批量回复未读</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 筛选配置 -->
+            <div class="section">
+                <div class="section-title">
+                    筛选条件配置
+                    <button onclick="toggleConfig('filterConfig')">展开/收起</button>
+                </div>
+                <div class="config-content show" id="filterConfig">
+                    <div class="config-form">
+                        <div class="form-group">
+                            <label>学历要求</label>
+                            <select id="degreeFilter">
+                                <option value="">不限</option>
+                                <option value="本科">本科</option>
+                                <option value="硕士">硕士</option>
+                                <option value="博士">博士</option>
+                                <option value="本科,硕士">本科及以上</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>工作年限</label>
+                            <div class="form-row">
+                                <select id="yearsMin">
+                                    <option value="0">不限</option>
+                                    <option value="1">1年+</option>
+                                    <option value="3">3年+</option>
+                                    <option value="5">5年+</option>
+                                    <option value="10">10年+</option>
+                                </select>
+                                <span style="color:#666;padding-top:10px;">至</span>
+                                <select id="yearsMax">
+                                    <option value="100">不限</option>
+                                    <option value="3">3年</option>
+                                    <option value="5">5年</option>
+                                    <option value="10">10年</option>
+                                    <option value="15">15年</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>学校白名单</label>
+                            <input type="text" id="schoolWhitelist" placeholder="清华大学,北京大学,浙江大学...">
+                        </div>
+                        <div class="form-group">
+                            <label>关键词包含（逗号分隔）</label>
+                            <input type="text" id="requireKeywords" placeholder="Python,Java,全栈...">
+                        </div>
+                        <div class="form-group">
+                            <label>关键词排除（逗号分隔）</label>
+                            <input type="text" id="excludeKeywords" placeholder="外包,实习,初级...">
+                        </div>
+                        <button class="btn btn-secondary btn-sm" onclick="saveFilterConfig()">
+                            保存筛选配置
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 话术配置 -->
+            <div class="section">
+                <div class="section-title">
+                    回复话术设置
+                    <button onclick="toggleConfig('templateConfig')">展开/收起</button>
+                </div>
+                <div class="config-content" id="templateConfig">
+                    <div class="config-form">
+                        <div class="form-group">
+                            <label>打招呼话术</label>
+                            <textarea id="helloTemplate" placeholder="您好，我对您的经历很感兴趣，希望能进一步了解...">您好，我对您的经历很感兴趣，希望能进一步了解您的背景，方便的话可以聊一聊吗？</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>求简历话术</label>
+                            <textarea id="resumeTemplate" placeholder="您好，我对您的背景很认可，方便发一份简历参考吗？">您好，看了您的资料非常匹配我们的需求，方便发一份简历参考吗？</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>后续跟进话术</label>
+                            <textarea id="followTemplate" placeholder="感谢回复，关于...">感谢回复，关于我们公司的情况，您想了解哪方面的信息呢？</textarea>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" onclick="saveTemplateConfig()">
+                            保存话术配置
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 岗位面试话术库 -->
+            <div class="section">
+                <div class="section-title">
+                    岗位面试话术库
+                    <button onclick="toggleConfig('positionTemplates')">展开/收起</button>
+                </div>
+                <div class="config-content" id="positionTemplates">
+                    <div class="config-form">
+                        <div class="form-group">
+                            <label>选择岗位</label>
+                            <select id="positionSelect" onchange="loadPositionTemplate()">
+                                <option value="">-- 添加新岗位 --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>岗位名称</label>
+                            <input type="text" id="positionName" placeholder="例如：后端工程师、前端开发...">
+                        </div>
+                        <div class="form-group">
+                            <label>面试问题（每行一个问题，支持 {候选人姓名} 占位符）</label>
+                            <textarea id="positionQuestions" placeholder="1. 能讲讲您最满意的项目经历吗？&#10;2. 工作地点：北京，工作时间：965，能接受吗？&#10;3. 本周三或周四下午方便面试吗？" rows="6"></textarea>
+                        </div>
+                        <div class="form-row">
+                            <button class="btn btn-secondary btn-sm" onclick="savePositionTemplate()">💾 保存岗位话术</button>
+                            <button class="btn btn-secondary btn-sm" onclick="deletePositionTemplate()">🗑️ 删除当前岗位</button>
+                        </div>
+                        <div class="template-list" id="positionList" style="margin-top: 15px;">
+                            <!-- 岗位列表将在这里动态生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快捷操作 -->
+            <div class="section">
+                <div class="section-title">快捷操作</div>
+                <button class="btn btn-secondary btn-sm" onclick="navigateToChat()">💬 打开聊天页</button>
+                <button class="btn btn-secondary btn-sm" onclick="navigateToList()">📋 打开候选人列表</button>
+            </div>
+
+            <!-- 日志 -->
+            <div class="section">
+                <div class="section-title">操作日志</div>
+                <div class="log-panel" id="logPanel">
+                    <div class="log-line"><span class="log-time">[系统]</span> 等待操作...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8001';
+        let vncConnected = false;
+        let config = {
+            filter: {
+                degree: '',
+                yearsMin: 0,
+                yearsMax: 100,
+                schoolWhitelist: '',
+                requireKeywords: '',
+                excludeKeywords: ''
+            },
+            templates: {
+                hello: '您好，我对您的经历很感兴趣，希望能进一步了解您的背景，方便的话可以聊一聊吗？',
+                resume: '您好，看了您的资料非常匹配我们的需求，方便发一份简历参考吗？',
+                follow: '感谢回复，关于我们公司的情况，您想了解哪方面的信息呢？'
+            },
+            positions: {} // 岗位面试话术库: { "岗位名": ["问题1", "问题2", ...] }
+        };
+
+        // 加载保存的配置
+        function loadConfig() {
+            const saved = localStorage.getItem('bossConfig');
+            if (saved) {
+                config = JSON.parse(saved);
+                // 填充表单
+                document.getElementById('degreeFilter').value = config.filter.degree || '';
+                document.getElementById('yearsMin').value = config.filter.yearsMin || 0;
+                document.getElementById('yearsMax').value = config.filter.yearsMax || 100;
+                document.getElementById('schoolWhitelist').value = config.filter.schoolWhitelist || '';
+                document.getElementById('requireKeywords').value = config.filter.requireKeywords || '';
+                document.getElementById('excludeKeywords').value = config.filter.excludeKeywords || '';
+                document.getElementById('helloTemplate').value = config.templates.hello || '';
+                document.getElementById('resumeTemplate').value = config.templates.resume || '';
+                document.getElementById('followTemplate').value = config.templates.follow || '';
+            }
+            // 初始化岗位列表
+            renderPositionList();
+        }
+
+        function saveConfig() {
+            localStorage.setItem('bossConfig', JSON.stringify(config));
+        }
+
+        function log(message, type = 'info') {
+            const panel = document.getElementById('logPanel');
+            const time = new Date().toLocaleTimeString();
+            const colorClass = type === 'error' ? 'log-error' : type === 'warn' ? 'log-warn' : 'log-info';
+            panel.innerHTML += `<div class="log-line"><span class="log-time">[${time}]</span> <span class="${colorClass}">${message}</span></div>`;
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        function setLoading(btn, loading) {
+            btn.classList.toggle('loading', loading);
+            btn.disabled = loading;
+        }
+
+        function updateStats(processed, resumes, replied) {
+            document.getElementById('statProcessed').textContent = processed;
+            document.getElementById('statResumes').textContent = resumes;
+            document.getElementById('statReplied').textContent = replied;
+        }
+
+        function toggleConfig(id) {
+            const el = document.getElementById(id);
+            el.classList.toggle('show');
+        }
+
+        function saveFilterConfig() {
+            config.filter.degree = document.getElementById('degreeFilter').value;
+            config.filter.yearsMin = parseInt(document.getElementById('yearsMin').value);
+            config.filter.yearsMax = parseInt(document.getElementById('yearsMax').value);
+            config.filter.schoolWhitelist = document.getElementById('schoolWhitelist').value;
+            config.filter.requireKeywords = document.getElementById('requireKeywords').value;
+            config.filter.excludeKeywords = document.getElementById('excludeKeywords').value;
+            saveConfig();
+            log('✅ 筛选配置已保存', 'info');
+        }
+
+        function saveTemplateConfig() {
+            config.templates.hello = document.getElementById('helloTemplate').value;
+            config.templates.resume = document.getElementById('resumeTemplate').value;
+            config.templates.follow = document.getElementById('followTemplate').value;
+            saveConfig();
+            log('✅ 话术配置已保存', 'info');
+        }
+
+        // 岗位面试话术库函数
+        function renderPositionList() {
+            const select = document.getElementById('positionSelect');
+            const list = document.getElementById('positionList');
+            const positions = Object.keys(config.positions || {});
+
+            // 保存当前选中的值
+            const currentValue = select.value;
+
+            // 重新生成下拉框
+            select.innerHTML = '<option value="">-- 添加新岗位 --</option>';
+            positions.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                select.appendChild(option);
+            });
+
+            // 恢复选中状态
+            if (currentValue && positions.includes(currentValue)) {
+                select.value = currentValue;
+            }
+
+            // 生成岗位列表
+            list.innerHTML = '';
+            positions.forEach(name => {
+                const questions = config.positions[name];
+                const item = document.createElement('div');
+                item.className = 'template-item';
+                item.innerHTML = `
+                    <div class="template-name">${name} <small style="color:#666">(${questions.length}个问题)</small></div>
+                    <div class="template-text">${questions.slice(0, 2).join('、')}${questions.length > 2 ? '...' : ''}</div>
+                `;
+                item.onclick = () => {
+                    document.getElementById('positionSelect').value = name;
+                    loadPositionTemplate();
+                };
+                list.appendChild(item);
+            });
+        }
+
+        function loadPositionTemplate() {
+            const select = document.getElementById('positionSelect');
+            const positionName = select.value;
+
+            if (positionName && config.positions[positionName]) {
+                document.getElementById('positionName').value = positionName;
+                document.getElementById('positionQuestions').value = config.positions[positionName].join('\n');
+                log(`已加载岗位: ${positionName}`, 'info');
+            } else {
+                document.getElementById('positionName').value = '';
+                document.getElementById('positionQuestions').value = '';
+            }
+        }
+
+        function savePositionTemplate() {
+            const positionName = document.getElementById('positionName').value.trim();
+            const questionsText = document.getElementById('positionQuestions').value.trim();
+
+            if (!positionName) {
+                log('❌ 请输入岗位名称', 'error');
+                return;
+            }
+
+            if (!questionsText) {
+                log('❌ 请输入面试问题', 'error');
+                return;
+            }
+
+            // 将问题按行分割，过滤空行
+            const questions = questionsText.split('\n')
+                .map(q => q.trim())
+                .filter(q => q.length > 0);
+
+            if (questions.length === 0) {
+                log('❌ 请至少输入一个问题', 'error');
+                return;
+            }
+
+            // 保存到配置
+            if (!config.positions) {
+                config.positions = {};
+            }
+            config.positions[positionName] = questions;
+            saveConfig();
+
+            // 更新界面
+            renderPositionList();
+            document.getElementById('positionSelect').value = positionName;
+
+            log(`✅ 岗位 "${positionName}" 已保存 (${questions.length}个问题)`, 'info');
+        }
+
+        function deletePositionTemplate() {
+            const positionName = document.getElementById('positionName').value.trim();
+
+            if (!positionName || !config.positions || !config.positions[positionName]) {
+                log('❌ 没有选中的岗位', 'error');
+                return;
+            }
+
+            if (confirm(`确定要删除岗位 "${positionName}" 吗？`)) {
+                delete config.positions[positionName];
+                saveConfig();
+
+                // 清空表单
+                document.getElementById('positionName').value = '';
+                document.getElementById('positionQuestions').value = '';
+
+                // 更新界面
+                renderPositionList();
+
+                log(`✅ 岗位 "${positionName}" 已删除`, 'info');
+            }
+        }
+
+        // 获取指定岗位的面试问题（供 Agent 使用）
+        function getPositionQuestions(positionName, candidateName = '') {
+            if (!config.positions || !config.positions[positionName]) {
+                return null;
+            }
+
+            // 替换占位符
+            return config.positions[positionName].map(q => {
+                return q.replace(/{候选人姓名}/g, candidateName).replace(/{name}/g, candidateName);
+            });
+        }
+
+        // VNC控制
+        // F3: 打开BOSS直聘 - 启动Chrome并导航到zhipin.com
+        async function openBossZhipin() {
+            const btn = event.target.closest('.btn');
+            setLoading(btn, true);
+            log('正在启动浏览器并打开BOSS直聘...', 'info');
+
+            try {
+                const data = await apiCall('/api/browser/open-boss');
+                setLoading(btn, false);
+
+                if (data && data.status === 'ok') {
+                    log('✅ Chrome已启动，BOSS直聘已打开', 'info');
+                    log('正在连接VNC桌面以查看浏览器...', 'info');
+                    // 自动连接VNC显示浏览器窗口
+                    await connectVNC(null);
+                } else if (data && data.status === 'error') {
+                    log(`❌ 启动失败: ${data.message}`, 'error');
+                } else {
+                    log(`❌ 启动异常: ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (e) {
+                setLoading(btn, false);
+                log(`浏览器启动异常: ${e.message || '网络错误'}`, 'error');
+            }
+        }
+
+        // noVNC RFB instance (replaces iframe approach)
+        // VNC 通过 noVNC iframe (port 6901) 连接
+
+        // connectVNC - iframe 方式加载 noVNC（6901），由 noVNC 内部处理密码和连接
+        async function connectVNC(btnEl) {
+            let btn = btnEl;
+            if (!btn) {
+                try { btn = event.target.closest('.btn'); } catch (e) {}
+            }
+            if (btn) setLoading(btn, true);
+            log('正在连接远程桌面...', 'info');
+
+            try {
+                const vncConfig = await apiCall('/api/vnc/config', null, 'GET');
+                if (btn) setLoading(btn, false);
+
+                if (!vncConfig) {
+                    log('获取VNC配置失败', 'error');
+                    return;
+                }
+
+                // 前端拼接 noVNC URL（密码不在服务端日志）
+                const novncUrl = `${vncConfig.novnc_url}&password=${encodeURIComponent(vncConfig.password)}`;
+
+                document.getElementById('vncPlaceholder').style.display = 'none';
+                const iframe = document.getElementById('vncFrame');
+                iframe.src = novncUrl;
+                iframe.style.display = 'block';
+
+                vncConnected = false;
+                document.getElementById('vncStatusDot').className = 'status-dot busy';
+                document.getElementById('vncStatusText').textContent = '连接中...';
+
+                iframe.onload = () => {
+                    vncConnected = true;
+                    document.getElementById('vncStatusDot').className = 'status-dot online';
+                    document.getElementById('vncStatusText').textContent = '已连接';
+                    log('✅ VNC远程桌面已连接', 'info');
+                };
+
+                setTimeout(() => {
+                    if (!vncConnected) {
+                        vncConnected = true;
+                        document.getElementById('vncStatusDot').className = 'status-dot online';
+                        document.getElementById('vncStatusText').textContent = '已连接';
+                        log('VNC桌面已加载', 'info');
+                    }
+                }, 8000);
+            } catch (e) {
+                if (btn) setLoading(btn, false);
+                log(`连接失败: ${e.message}`, 'error');
+            }
+        }
+
+        function disconnectVNC() {
+            vncConnected = false;
+            const iframe = document.getElementById('vncFrame');
+            iframe.src = '';
+            iframe.style.display = 'none';
+            document.getElementById('vncPlaceholder').style.display = '';
+            document.getElementById('vncStatusDot').className = 'status-dot offline';
+            document.getElementById('vncStatusText').textContent = '未连接';
+            log('已断开VNC连接', 'warn');
+        }
+
+        function refreshVNC() {
+            if (vncConnected) {
+                screenshot();
+                log('刷新桌面...', 'info');
+            } else {
+                log('请先连接浏览器', 'warn');
+            }
+        }
+
+        function zoomIn() {
+            log('放大视图 (暂未实现)', 'info');
+        }
+
+        function zoomOut() {
+            log('缩小视图 (暂未实现)', 'info');
+        }
+
+        function screenshot() {
+            if (!vncConnected) {
+                log('请先连接浏览器', 'warn');
+                return;
+            }
+
+            log('正在获取截图...', 'info');
+            apiCall('/api/browser/screenshot').then(data => {
+                if (data && data.status === 'success') {
+                    const imgData = `data:image/png;base64,${data.screenshot}`;
+                    log(`✅ 截图已获取: ${data.title || data.url || '浏览器截图'}`, 'info');
+
+                    // 尝试在新标签页中打开截图
+                    try {
+                        const win = window.open('', '_blank');
+                        if (win) {
+                            win.document.write(
+                                '<!DOCTYPE html><html><head><title>' + (data.title || '截图') + '</title>' +
+                                '<style>body{margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000;}' +
+                                'img{max-width:100%;max-height:100vh;object-fit:contain;}</style>' +
+                                '</head><body><img src="' + imgData + '" alt="截图"/></body></html>'
+                            );
+                        } else {
+                            log('⚠️ 截图弹窗被浏览器拦截', 'warn');
+                        }
+                    } catch (e) {
+                        log('截图已获取', 'info');
+                    }
+                } else {
+                    log(`截图失败: ${data?.message || '未知错误'}`, 'error');
+                }
+            });
+        }
+
+        // API调用
+        async function apiCall(endpoint, body = null, method = 'POST') {
+            try {
+                const options = {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' }
+                };
+                if (body && (method === 'POST' || method === 'PUT')) {
+                    options.body = JSON.stringify(body);
+                }
+                const response = await fetch(`${API_BASE}${endpoint}`, options);
+                return await response.json();
+            } catch (e) {
+                log(`请求失败: ${e.message}`, 'error');
+                return null;
+            }
+        }
+
+        function checkLogin() {
+            if (!vncConnected) {
+                log('请先连接浏览器', 'warn');
+                return;
+            }
+
+            const btn = event.target.closest('.btn');
+            setLoading(btn, true);
+            log('检查登录状态...');
+
+            apiCall('/api/browser/check-login').then(data => {
+                setLoading(btn, false);
+                if (data) {
+                    if (data.logged_in) {
+                        log(`✅ 已登录: ${data.username || '用户'}`, 'info');
+                    } else {
+                        log(`❌ ${data.message || '未登录'}`, 'warn');
+                    }
+                } else {
+                    log('❌ 未登录，请先扫码', 'warn');
+                }
+            });
+        }
+
+        function batchFilterAndHello() {
+            const btn = event.target.closest('.btn');
+            const limit = parseInt(document.getElementById('batchLimit').value) || 20;
+            setLoading(btn, true);
+            log(`👋 开始筛选+打招呼，上限 ${limit} 人...`);
+
+            apiCall('/api/workflow/filter-hello', {
+                limit,
+                filter: config.filter,
+                template: config.templates.hello
+            }).then(data => {
+                setLoading(btn, false);
+                if (data && data.status === 'started') {
+                    log(`✅ 任务已启动，预计处理 ${limit} 人`, 'info');
+                }
+            });
+        }
+
+        function batchGetResumes() {
+            const btn = event.target.closest('.btn');
+            const limit = parseInt(document.getElementById('resumeLimit').value) || 10;
+            setLoading(btn, true);
+            log(`📄 开始批量获取简历，上限 ${limit} 人...`);
+
+            apiCall('/api/resume/batch', {
+                limit: limit
+            }).then(data => {
+                setLoading(btn, false);
+                if (data && data.status === 'started') {
+                    log(`✅ 任务已启动，预计获取 ${limit} 份简历`, 'info');
+                    // 开始轮询任务状态
+                    pollResumeStatus();
+                } else if (data && data.status === 'error') {
+                    log(`❌ ${data.message}`, 'error');
+                }
+            });
+        }
+
+        // 轮询简历任务状态
+        function pollResumeStatus() {
+            const interval = setInterval(async () => {
+                try {
+                    const data = await apiCall('/api/resume/status', null, 'GET');
+
+                    if (!data) {
+                        clearInterval(interval);
+                        return;
+                    }
+
+                    if (data.status === 'completed') {
+                        log(`✅ 简历下载任务完成`, 'info');
+                        loadResumeList(); // 刷新简历列表
+                        clearInterval(interval);
+                    } else if (data.status === 'error') {
+                        log(`❌ 任务失败: ${data.message}`, 'error');
+                        clearInterval(interval);
+                    } else if (data.status === 'running') {
+                        log(`⏳ 任务进行中... (${data.processed || 0}/${data.total || 0})`, 'info');
+                    }
+                } catch (e) {
+                    console.error('轮询状态失败:', e);
+                }
+            }, 3000); // 每3秒轮询一次
+
+            // 5分钟后停止轮询
+            setTimeout(() => clearInterval(interval), 300000);
+        }
+
+        // 加载简历列表（可选功能）
+        function loadResumeList() {
+            apiCall('/api/resume/list', null, 'GET').then(data => {
+                if (data && Array.isArray(data)) {
+                    log(`📄 当前简历库: ${data.length} 份`, 'info');
+                    updateStats(0, data.length, 0);
+                }
+            });
+        }
+
+        function batchReplyMessages() {
+            const btn = event.target.closest('.btn');
+            const limit = parseInt(document.getElementById('replyLimit').value) || 15;
+            setLoading(btn, true);
+            log(`💬 开始批量回复未读消息，上限 ${limit} 人...`);
+
+            apiCall('/api/workflow/reply-messages', {
+                limit,
+                template: config.templates.follow
+            }).then(data => {
+                setLoading(btn, false);
+                if (data && data.status === 'started') {
+                    log(`✅ 任务已启动，预计回复 ${limit} 人`, 'info');
+                }
+            });
+        }
+
+        function navigateToChat() {
+            log('导航到聊天页...', 'info');
+            apiCall('/api/browser/navigate', { page: 'chat' });
+        }
+
+        function navigateToList() {
+            log('导航到候选人列表...', 'info');
+            apiCall('/api/browser/navigate', { page: 'list' });
+        }
+
+        // 页面加载时初始化
+        window.onload = function() {
+            loadConfig();
+            setTimeout(checkLogin, 500);
+        };
+    </script>
+</body>
+</html>

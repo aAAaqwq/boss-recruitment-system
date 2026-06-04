@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Logs & Data
+logs/
+data/
+*.log
+
+# Tests
+test-results/
+.pytest_cache/
+.cache/
+
+# Node
+node_modules/
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Project cruft
+*.spec
+*.bak
+*.ts
+package*.json
+playwright*
+
+# Swarm/Ruflo
+.swarm/
+.claude-flow/
+ruvector.db
+agentdb.rvf*
+
+# Env (only exclude host, container gets via docker-compose)
+.env
+.env.example
+
+# Large binaries
+*.whl
+*.tar.gz

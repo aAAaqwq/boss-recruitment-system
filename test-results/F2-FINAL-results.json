@@ -1,0 +1,65 @@
+{
+  "verdict": "PASS",
+  "steps": [
+    {
+      "step": 1,
+      "description": "browser_navigate → /index.html",
+      "status": "PASS",
+      "detail": "HTTP 200"
+    },
+    {
+      "step": 2,
+      "description": "browser_take_screenshot → F2-FINAL-initial.png",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "step": 3,
+      "description": "browser_snapshot → confirm key elements",
+      "status": "PASS",
+      "detail": "control-panel: FOUND\nvnc-panel: FOUND\nconnect-button: FOUND\ndisconnected-status: MISSING"
+    },
+    {
+      "step": 4,
+      "description": "browser_click → connect button",
+      "status": "PASS",
+      "detail": "Clicked: \n                    \n                    🌐 连接桌面\n                "
+    },
+    {
+      "step": 5,
+      "description": "browser_wait_for → connected text (15s)",
+      "status": "WARN",
+      "detail": "Timed out waiting for connected indicator after 15s"
+    },
+    {
+      "step": 6,
+      "description": "browser_take_screenshot → F2-FINAL-connected.png",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "step": 7,
+      "description": "browser_snapshot → confirm connected state",
+      "status": "WARN",
+      "detail": "status-dot.online: MISSING\nconnected-text: MISSING\nvnc-canvas: FOUND\ndisconnected-text-gone: YES"
+    },
+    {
+      "step": 8,
+      "description": "browser_console_messages → check for WebSocket errors",
+      "status": "WARN",
+      "detail": "Non-WebSocket console errors (2):\nFailed to load resource: the server responded with a status of 404 (File not found)\nVNC connect error: TypeError: Failed to fetch dynamically imported module: http://localhost:8321/novnc/core/rfb.js"
+    },
+    {
+      "step": 9,
+      "description": "browser_network_requests → filter /api/vnc",
+      "status": "PASS",
+      "detail": "HTTP requests to VNC API: 2\nGET http://localhost:8001/api/vnc/config\nGET http://localhost:8321/novnc/core/rfb.js"
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "warned": 3,
+    "total": 9
+  }
+}
