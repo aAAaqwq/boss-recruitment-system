@@ -13,31 +13,23 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 
 def cmd_filter(args):
-    """智能筛选 - 学校白名单+关键词过滤"""
-    from app.workflows import FilterWorkflow
-    workflow = FilterWorkflow(limit=args.limit, headless=args.headless)
-    workflow.run()
+    """智能筛选 - Phase 2 实现"""
+    print("⚠️  智能筛选功能将在 Phase 2 实现，请使用 Web API: POST /api/filter/contact")
 
 
 def cmd_resume(args):
-    """简历收集 - 自动下载简历+换微信"""
-    from app.workflows import ResumeWorkflow
-    workflow = ResumeWorkflow(limit=args.limit, headless=args.headless)
-    workflow.run()
+    """简历收集 - Phase 2 实现"""
+    print("⚠️  简历收集功能将在 Phase 2 实现，请使用 Web API: POST /api/resume/batch")
 
 
 def cmd_chat(args):
-    """AI对话 - 多轮智能沟通"""
-    from app.workflows import ChatWorkflow
-    workflow = ChatWorkflow(limit=args.limit, rounds=args.rounds)
-    workflow.run()
+    """AI对话 - Phase 2 实现"""
+    print("⚠️  AI对话功能将在 Phase 2 实现，请使用 Web API: POST /api/chat/batch")
 
 
 def cmd_all(args):
-    """完整流程 - 筛选→简历→对话"""
-    from app.workflows import FullWorkflow
-    workflow = FullWorkflow(limit=args.limit)
-    workflow.run()
+    """完整流程 - Phase 2 实现"""
+    print("⚠️  完整流程功能将在 Phase 2 实现，请使用 Web API: POST /api/automation/start")
 
 
 def cmd_api(args):
@@ -69,7 +61,7 @@ def cmd_doctor(args):
     # 关键依赖
     print("关键依赖:")
     modules = {
-        'playwright': '浏览器自动化',
+        'nodriver': '浏览器自动化',
         'fastapi': 'Web API',
         'pydantic': '数据验证',
         'dotenv': '环境变量',
@@ -86,13 +78,13 @@ def cmd_doctor(args):
 
     print()
 
-    # Playwright浏览器
-    print("Playwright浏览器:")
+    # nodriver浏览器
+    print("nodriver:")
     try:
-        from playwright.sync_api import sync_playwright
-        print("  ✅ Chromium已安装")
+        import nodriver
+        print("  ✅ nodriver 已安装")
     except ImportError:
-        print("  ❌ 请运行: python3 -m playwright install chromium")
+        print("  ❌ 请运行: pip install nodriver")
 
     print()
 

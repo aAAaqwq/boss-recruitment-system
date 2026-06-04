@@ -594,6 +594,7 @@
     <script>
         const API_BASE = 'http://localhost:8001';
         let vncConnected = false;
+        let authToken = localStorage.getItem('auth_token') || null;
         let config = {
             filter: {
                 degree: '',
@@ -652,6 +653,34 @@
             document.getElementById('statProcessed').textContent = processed;
             document.getElementById('statResumes').textContent = resumes;
             document.getElementById('statReplied').textContent = replied;
+        }
+
+        // JWT Auth - Login function
+        async function login() {
+            const username = document.getElementById('login-user')?.value || 'admin';
+            const password = document.getElementById('login-pass')?.value || '';
+
+            try {
+                const resp = await fetch(`${API_BASE}/api/auth/login`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+
+                if (resp.ok) {
+                    const data = await resp.json();
+                    authToken = data.access_token;
+                    localStorage.setItem('auth_token', authToken);
+                    log('✅ 登录成功', 'info');
+                    return true;
+                } else {
+                    log('❌ 登录失败', 'error');
+                    return false;
+                }
+            } catch (e) {
+                log(`登录异常: ${e.message}`, 'error');
+                return false;
+            }
         }
 
         function toggleConfig(id) {
@@ -956,6 +985,13 @@
                     method: method,
                     headers: { 'Content-Type': 'application/json' }
                 };
+
+                // Add JWT Authorization header
+                const token = localStorage.getItem('auth_token');
+                if (token) {
+                    options.headers = {...options.headers, 'Authorization': `Bearer ${token}`};
+                }
+
                 if (body && (method === 'POST' || method === 'PUT')) {
                     options.body = JSON.stringify(body);
                 }
@@ -997,7 +1033,7 @@
             setLoading(btn, true);
             log(`👋 开始筛选+打招呼，上限 ${limit} 人...`);
 
-            apiCall('/api/workflow/filter-hello', {
+            apiCall('/api/filter/contact', {
                 limit,
                 filter: config.filter,
                 template: config.templates.hello
@@ -1075,7 +1111,7 @@
             setLoading(btn, true);
             log(`💬 开始批量回复未读消息，上限 ${limit} 人...`);
 
-            apiCall('/api/workflow/reply-messages', {
+            apiCall('/api/chat/batch', {
                 limit,
                 template: config.templates.follow
             }).then(data => {
@@ -1088,12 +1124,12 @@
 
         function navigateToChat() {
             log('导航到聊天页...', 'info');
-            apiCall('/api/browser/navigate', { page: 'chat' });
+            apiCall('/api/browser/navigate', { url: 'https://www.zhipin.com/web/user/chat' });
         }
 
         function navigateToList() {
             log('导航到候选人列表...', 'info');
-            apiCall('/api/browser/navigate', { page: 'list' });
+            apiCall('/api/browser/navigate', { url: 'https://www.zhipin.com/web/geek/job' });
         }
 
         // 页面加载时初始化

@@ -24,8 +24,8 @@ load_dotenv()
 from app.auth import verify_token, create_access_token, verify_credentials
 # Import logging
 from app.logging_config import api_logger
-# Import browser manager
-from app.browser_manager import browser_manager
+# Import automation singleton
+from app.automation import automation
 # Import school whitelists for filter config (lightweight, no heavy deps)
 from app.filter_criteria import DOMESTIC_ELITE_SCHOOLS, US_ELITE_SCHOOLS, UK_ELITE_SCHOOLS, OTHER_ELITE_SCHOOLS
 
@@ -345,19 +345,19 @@ async def connect_browser(req: BrowserConnectRequest = None):
     """
     if req is None:
         req = BrowserConnectRequest()
-    return await browser_manager.connect(headless=req.headless)
+    return await automation.connect(headless=req.headless if req else False)
 
 
 @app.get("/api/browser/status")
 async def get_browser_status():
     """获取浏览器连接状态"""
-    return browser_manager.get_status()
+    return automation.get_status()
 
 
 @app.post("/api/browser/disconnect")
 async def disconnect_browser():
     """断开浏览器连接"""
-    return await browser_manager.disconnect()
+    return await automation.disconnect()
 
 
 # ---- VNC Config ----
@@ -392,7 +392,7 @@ async def browser_screenshot(req: ScreenshotRequest = None):
     """
     if req is None:
         req = ScreenshotRequest()
-    return await browser_manager.screenshot(full_page=req.full_page)
+    return await automation.screenshot(full_page=req.full_page)
 
 
 class NavigateRequest(BaseModel):
@@ -402,7 +402,7 @@ class NavigateRequest(BaseModel):
 @app.post("/api/browser/navigate")
 async def browser_navigate(req: NavigateRequest):
     """导航到指定URL"""
-    return await browser_manager.navigate(req.url)
+    return await automation.navigate(req.url)
 
 
 class ExecuteScriptRequest(BaseModel):
@@ -412,7 +412,7 @@ class ExecuteScriptRequest(BaseModel):
 @app.post("/api/browser/execute")
 async def browser_execute_script(req: ExecuteScriptRequest):
     """在页面中执行JavaScript"""
-    return await browser_manager.execute_script(req.script)
+    return await automation.execute_js(req.script)
 
 
 @app.post("/api/browser/open-boss")
@@ -447,9 +447,9 @@ async def open_boss_browser():
     except Exception:
         pass  # 没有旧进程，忽略
 
-    # 如果browser_manager已经连接到现有Chrome，先断开
-    if browser_manager._connected:
-        await browser_manager.disconnect()
+    # 如果automation已经连接到现有Chrome，先断开
+    if automation._connected:
+        await automation.disconnect()
 
     # 2. 启动Chrome在X11桌面中（VNC可见）
     display = os.environ.get("DISPLAY", ":1")
@@ -504,8 +504,8 @@ async def open_boss_browser():
             "message": "Chrome进程已启动但CDP调试端口未就绪（30秒超时），请检查VNC桌面",
         }
 
-    # 4. 通过CDP连接Playwright到已启动的Chrome
-    connect_result = await browser_manager.connect()
+    # 4. 通过CDP连接到已启动的Chrome
+    connect_result = await automation.connect()
 
     return {
         "status": "ok",
@@ -525,11 +525,17 @@ async def open_browser():
 
     请使用 POST /api/browser/connect 替代
     """
-    result = await browser_manager.connect(headless=False)
+    result = await automation.connect()
     # 如果成功连接，导航到BOSS直聘登录页
     if result.get("status") == "connected":
-        await browser_manager.navigate("https://www.zhipin.com/")
+        await automation.navigate("https://www.zhipin.com/")
     return result
+
+
+@app.get("/api/browser/check-login")
+async def check_browser_login():
+    """检测 BOSS直聘登录状态"""
+    return await automation.check_login()
 
 
 @app.post("/api/workflow/say-hello")
@@ -967,8 +973,15 @@ async def _execute_filter_contact(
         _filter_tasks[task_id]["status"] = "running"
         _filter_tasks[task_id]["progress"] = 10
 
-        # 导入workflow模块
-        from app.workflows import workflow_3_1_auto_contact
+        # 导入workflow模块 - Phase 1 使用 try/except 包装
+        try:
+            from app.workflows import workflow_3_1_auto_contact
+        except ImportError as e:
+            _filter_tasks[task_id]["status"] = "error"
+            _filter_tasks[task_id]["error"] = f"工作流模块未就绪: {e}"
+            _filter_tasks[task_id]["completed_at"] = datetime.now().isoformat()
+            api_logger.error(f"任务 {task_id} 失败: 工作流模块未就绪")
+            return
 
         api_logger.info(f"任务 {task_id} 开始执行筛选打招呼")
 

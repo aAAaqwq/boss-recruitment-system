@@ -10,8 +10,7 @@ from typing import List, Dict, Optional, Tuple
 
 from app.config import settings
 from app.database import Database
-from app.vision import screen_ocr, click_text_ocr
-from app.screen import activate_chrome, move_and_click, type_text, press_hotkey
+from app.automation import automation
 import httpx
 
 
@@ -24,7 +23,7 @@ from app.filter_criteria import (
 
 # ========== 3.1 主动筛选沟通流程 ==========
 
-def workflow_3_1_auto_contact(
+async def workflow_3_1_auto_contact(
     daily_cap: int = 80,
     school_whitelist: List[str] = None,
     min_degree: str = "本科",
@@ -32,131 +31,12 @@ def workflow_3_1_auto_contact(
     dry_run: bool = True,
     criteria: Optional[FilterCriteria] = None,
 ) -> Dict:
-    """
-    3.1 主动筛选沟通流程
-
-    Args:
-        daily_cap: 每日上限
-        school_whitelist: 学校白名单（向后兼容，优先使用criteria参数）
-        min_degree: 最低学历（向后兼容）
-        min_years: 最低年限（向后兼容）
-        dry_run: 是否dry run模式
-        criteria: 可扩展筛选条件对象（推荐使用）
-
-    Returns:
-        执行结果
-    """
-    # 构建筛选条件（criteria优先，fallback到单独参数）
-    if criteria is None:
-        criteria = FilterCriteria(
-            school_whitelist=school_whitelist,
-            min_degree=min_degree,
-            min_years=min_years,
-        )
-    if criteria.school_whitelist is None:
-        criteria.school_whitelist = DOMESTIC_ELITE_SCHOOLS + US_ELITE_SCHOOLS + UK_ELITE_SCHOOLS
-    
-    with Database() as db:
-        # 1. 检查每日上限
-        contacted_today = db.count_contacted_today()
-        remaining = max(0, daily_cap - contacted_today)
-        
-        if remaining <= 0:
-            return {
-                "status": "blocked",
-                "reason": "daily_cap_reached",
-                "contacted_today": contacted_today
-            }
-        
-        # 2. 激活Chrome
-        if not activate_chrome():
-            return {"status": "failed", "reason": "chrome_activation_failed"}
-        
-        # 3. 点击"推荐牛人"（尝试多个关键词）
-        recommend_coord = None
-        for keyword in ["推荐牛人", "推荐", "牛人"]:
-            recommend_coord = click_text_ocr(keyword, (0, 80, 230, 460))
-            if recommend_coord:
-                break
-        
-        if not recommend_coord:
-            return {"status": "failed", "reason": "recommend_button_not_found"}
-        
-        move_and_click(*recommend_coord)
-        time.sleep(0.8)
-        
-        # 4. OCR扫描候选人卡片
-        scan_result = screen_ocr(
-            region=(235, 130, 650, 410),
-            min_confidence=20.0,
-            scale=3,
-            preprocess=True
-        )
-        
-        # 5. 解析候选人信息
-        candidates = _parse_candidates(scan_result["boxes"])
-        
-        # 6. 筛选候选人
-        passed = []
-        for candidate in candidates:
-            if _should_contact(candidate, criteria):
-                passed.append(candidate)
-        
-        # 限制数量
-        passed = passed[:remaining]
-        
-        # 7. Dry Run预览
-        if dry_run:
-            return {
-                "status": "preview",
-                "dry_run": True,
-                "candidates": passed,
-                "total": len(passed),
-                "remaining": remaining
-            }
-        
-        # 8. 人工确认
-        print(f"\n准备联系 {len(passed)} 位候选人:")
-        for i, c in enumerate(passed[:5]):
-            print(f"  {i+1}. {c.get('name', '未知')} - {c.get('school', '未知')} - {c.get('degree', '未知')} - {c.get('years', 0)}年")
-        if len(passed) > 5:
-            print(f"  ... 还有 {len(passed)-5} 位")
-        
-        confirm = input("\n确认联系？(y/n): ")
-        if confirm.lower() != 'y':
-            return {"status": "cancelled", "reason": "human_rejected"}
-        
-        # 9. 逐个点击"打招呼"
-        contacted = []
-        for candidate in passed:
-            if candidate.get("button_x") and candidate.get("button_y"):
-                try:
-                    move_and_click(candidate["button_x"], candidate["button_y"])
-                    
-                    # 记录到数据库
-                    boss_id = f"{candidate.get('name', 'unknown')}_{int(time.time())}"
-                    db.insert_candidate(
-                        boss_id=boss_id,
-                        candidate_name=candidate.get('name'),
-                        school=candidate.get('school'),
-                        degree=candidate.get('degree'),
-                        years=candidate.get('years'),
-                        status='contacted'
-                    )
-                    db.insert_contact_record(boss_id, 'contacted', success=True)
-                    
-                    contacted.append(candidate)
-                    time.sleep(random.uniform(0.4, 0.6))
-                    
-                except Exception as e:
-                    print(f"联系失败: {candidate.get('name')} - {e}")
-        
-        return {
-            "status": "completed",
-            "contacted": contacted,
-            "total": len(contacted),
-            "remaining": remaining - len(contacted)
-        }
+    """3.1 主动筛选沟通流程 (Phase 1 stub — 完整实现在 Phase 2)"""
+    return {
+        "status": "not_implemented",
+        "message": "筛选打招呼功能将在 Phase 2 实现",
+        "phase": 1,
+    }
 
 
 def _parse_candidates(boxes: List) -> List[Dict]:
@@ -313,148 +193,19 @@ def _should_contact(
 
 # ========== 3.3 智能聊天Bot流程 ==========
 
-def workflow_3_3_chat_bot(
+async def workflow_3_3_chat_bot(
     boss_id: str,
     candidate_name: str,
     chat_region: Tuple[int, int, int, int] = (420, 140, 560, 350),
     auto_send: bool = False,
     dry_run: bool = True
 ) -> Dict:
-    """
-    3.3 智能聊天Bot流程
-    
-    Args:
-        boss_id: 候选人ID
-        candidate_name: 候选人姓名
-        chat_region: 聊天区域坐标
-        auto_send: 是否自动发送
-        dry_run: 是否dry run模式
-    
-    Returns:
-        执行结果
-    """
-    # 1. 加载对话流配置
-    with open(settings.CHAT_BOT_FLOW_PATH) as f:
-        flow = json.load(f)
-    
-    with Database() as db:
-        # 2. 获取会话状态
-        session = db.get_chat_session(boss_id)
-        if not session:
-            session = {
-                "boss_id": boss_id,
-                "candidate_name": candidate_name,
-                "round_index": 0,
-                "history": [],
-                "rounds_sent_today": 0,
-                "last_screen_text": ""
-            }
-        
-        # 3. 检查今日发送上限
-        max_rounds_per_day = flow["guardrails"]["max_rounds_per_day"]
-        if session["rounds_sent_today"] >= max_rounds_per_day:
-            return {
-                "status": "blocked",
-                "reason": "daily_round_cap_reached",
-                "rounds_sent_today": session["rounds_sent_today"]
-            }
-        
-        # 4. 获取当前轮次
-        rounds = flow["rounds"]
-        if session["round_index"] >= len(rounds):
-            return {"status": "completed", "reason": "all_rounds_finished"}
-        
-        current_round = rounds[session["round_index"]]
-        
-        # 5. OCR识别聊天区域
-        ocr_result = screen_ocr(chat_region, min_confidence=20.0, scale=3)
-        screen_text = ocr_result["full_text"]
-        
-        # 6. 检测是否有新消息
-        if screen_text.strip() == session["last_screen_text"].strip():
-            return {"status": "skipped", "reason": "no_new_message"}
-        
-        # 7. 记录候选人消息
-        session["history"].append({
-            "role": "user",
-            "content": screen_text,
-            "round_id": current_round["id"],
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        # 8. 生成回复
-        draft_reply = _generate_reply(flow, current_round, session["history"])
-        if not draft_reply:
-            return {"status": "failed", "reason": "llm_generation_failed"}
-        
-        # 9. 安全检查
-        safe_reply, reject_reason = _safety_check(draft_reply, flow)
-        if not safe_reply:
-            return {
-                "status": "blocked",
-                "reason": reject_reason,
-                "draft_reply": draft_reply
-            }
-        
-        # 10. 记录AI回复
-        session["history"].append({
-            "role": "assistant",
-            "content": safe_reply,
-            "round_id": current_round["id"],
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        # 11. Dry Run预览
-        if dry_run:
-            return {
-                "status": "preview",
-                "dry_run": True,
-                "boss_id": boss_id,
-                "candidate_name": candidate_name,
-                "round_id": current_round["id"],
-                "round_index": session["round_index"],
-                "screen_text": screen_text,
-                "draft_reply": safe_reply
-            }
-        
-        # 12. 发送消息
-        sent = False
-        if auto_send:
-            # 点击输入框
-            move_and_click(650, 505)
-            time.sleep(0.2)
-            
-            # 输入文字
-            type_text(safe_reply)
-            time.sleep(0.2)
-            
-            # 发送
-            press_hotkey('command', 'enter')
-            sent = True
-            
-            # 进入下一轮
-            session["round_index"] += 1
-            session["rounds_sent_today"] += 1
-            
-            # 记录到数据库
-            db.insert_contact_record(boss_id, 'chat_sent', success=True)
-        
-        # 13. 更新会话状态
-        session["last_screen_text"] = screen_text
-        session["current_round_id"] = current_round["id"]
-        db.save_chat_session(session)
-        
-        return {
-            "status": "success",
-            "boss_id": boss_id,
-            "candidate_name": candidate_name,
-            "round_id": current_round["id"],
-            "round_index": session["round_index"],
-            "draft_reply": safe_reply,
-            "sent": sent,
-            "dry_run": dry_run,
-            "rounds_sent_today": session["rounds_sent_today"]
-        }
+    """3.3 AI自动对话流程 (Phase 1 stub — 完整实现在 Phase 2)"""
+    return {
+        "status": "not_implemented",
+        "message": "AI对话功能将在 Phase 2 实现",
+        "phase": 1,
+    }
 
 
 def _generate_reply(flow: Dict, target_round: Dict, history: List[Dict]) -> Optional[str]:

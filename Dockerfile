@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
     fonts-wqy-zenhei fonts-wqy-microhei \
     chromium-browser chromium-codecs-ffmpeg-extra \
+    xdotool \
     && ln -sf /usr/bin/chromium-browser /usr/bin/chrome \
     && ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome \
     && ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome-stable \
@@ -31,10 +32,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ============================================================
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && \
-    python3 -m playwright install chromium && \
-    CHROMIUM=$(find /root/.cache/ms-playwright -name "chrome" -type f 2>/dev/null | head -1) && \
-    ln -sf "$CHROMIUM" /usr/bin/chromium-browser && \
-    ln -sf "$CHROMIUM" /usr/bin/google-chrome && \
     rm /tmp/requirements.txt
 
 # ============================================================
@@ -45,10 +42,10 @@ COPY app/ /app/app/
 COPY web/ /app/web/
 COPY templates/ /app/templates/
 COPY static/ /app/static/
-COPY boss.py main.py run.py start.sh stop.sh /app/
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY boss.py /app/
+COPY config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh /app/start.sh /app/stop.sh && \
+RUN chmod +x /entrypoint.sh && \
     mkdir -p ~/.vnc /var/log/supervisor
 
 EXPOSE 5901 6901 8001 3001 3000
