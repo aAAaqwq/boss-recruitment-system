@@ -463,26 +463,24 @@ class BrowserAutomation:
     # BOSS直聘登录页 URL（扫码登录）
     LOGIN_URL = "https://www.zhipin.com/web/user/?ka=header-login"
 
-    # 已登录选择器（2024-2025 版 BOSS直聘首页布局）
+    # 已登录选择器 — 只保留真正只在登录后出现的元素
+    # .user-nav 等通用 header 在未登录页面也存在（显示"登录/注册"），不能用！
     _LOGGED_IN_SELECTORS = [
-        # 顶部导航栏用户头像/昵称
-        '.user-nav', '.nav-figure', '.user-info',
-        '[class*="user-nav"]', '[class*="nav-figure"]',
-        '[class*="avatar"]', '.mini-user', '.user-box',
-        # 侧边栏用户信息
-        '.user-card', '[class*="user-card"]',
-        # 右上角用户区域
-        '.header-user', '[class*="header-user"]',
-        '.user-wrap', '[class*="user-wrap"]',
+        # 招聘者 Dashboard 侧边栏（只在登录后渲染）
+        '.menu-list', '[class*="menu-list"]',
+        # 候选人列表容器（登录后才能看到）
+        '.recommend-card', '[class*="recommend"]',
+        '.candidate-card', '[class*="candidate"]',
+        '.geek-list', '[class*="geek-list"]',
+        # 用户下拉菜单（登录后才有）
+        '.user-dropdown', '[class*="user-dropdown"]',
+        '.dropdown-user', '[class*="dropdown-user"]',
     ]
 
-    # 用户昵称选择器
+    # 用户昵称选择器 — 只在已登录元素内部查找
     _USERNAME_SELECTORS = [
-        '.user-info .name', '.nav-figure .name', '.user-name',
-        '[class*="user"] .name', '.mini-user .name',
-        '.user-nav .name', '.user-box .name',
-        '.header-user .name', '.user-wrap .name',
-        '[class*="user"] [class*="name"]',
+        '.user-dropdown .name', '[class*="dropdown-user"] [class*="name"]',
+        '.user-dropdown .nickname', '[class*="user-dropdown"] [class*="nick"]',
     ]
 
     # 登录按钮选择器
@@ -559,17 +557,44 @@ class BrowserAutomation:
                 await asyncio.sleep(3)
                 current_url = await self.page.evaluate("window.location.href") or ""
 
-            # --- Step 3: 通过 DOM 选择器判断已登录 ---
-            user_el = None
-            for sel in self._LOGGED_IN_SELECTORS:
+            # --- Step 2: 反向判断 — URL 或页面文案含"登录/注册" → 未登录 ---
+            is_login_page = (
+                "/web/user/" in current_url
+                or "login" in current_url.lower()
+                or "register" in current_url.lower()
+                or "passport" in current_url.lower()
+            )
+            if is_login_page:
+                logger.info(f"当前在登录/注册页面 ({current_url})，判定未登录")
+                # 不直接返回，继续走 cookie 恢复流程
+
+            # 快速反向检测：页面是否有可见的"登录/注册"按钮
+            has_login_btn = False
+            if not is_login_page:
                 try:
-                    # timeout=0.5s: 减少未登录时的总等待时间（原来2s×15个=30s）
-                    el = await self.page.select(sel, timeout=0.5)
-                    if el:
-                        user_el = el
-                        break
+                    login_btn_check = await self.page.evaluate(
+                        "!!document.querySelector('.btns a[href*=\"user\"],.btns .link-scan,"
+                        "a[href*=\"login\"],.tosign-login,.login-btn')"
+                        " && document.querySelector('.btns')?.innerText?.includes('登录')"
+                    )
+                    has_login_btn = bool(login_btn_check)
                 except Exception:
-                    continue
+                    pass
+
+            if has_login_btn:
+                logger.info("页面检测到'登录/注册'按钮，判定未登录")
+
+            # --- Step 3: 正向 DOM 检测（仅当不在登录页且无登录按钮时）---
+            user_el = None
+            if not is_login_page and not has_login_btn:
+                for sel in self._LOGGED_IN_SELECTORS:
+                    try:
+                        el = await self.page.select(sel, timeout=0.5)
+                        if el:
+                            user_el = el
+                            break
+                    except Exception:
+                        continue
 
             if user_el:
                 username = await self._extract_username()
