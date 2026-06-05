@@ -26,6 +26,7 @@ services:
       - ./config:/app/config
       - ./.env:/app/.env
       - ./app:/app/app
+      - ./templates:/app/templates
       - ./boss.py:/app/boss.py  # 主脚本
     restart: unless-stopped
     privileged: true  # 需要权限来控制鼠标键盘
