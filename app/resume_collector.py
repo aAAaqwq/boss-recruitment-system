@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.automation import automation
+from app.chat_nav import navigate_to_chat, get_contacts
 from app.database import Database
 from app.logging_config import logger
 
@@ -64,36 +65,6 @@ _JS_FIND_DOWNLOAD_BTN = """
 })()
 """
 
-_JS_FIND_CONTACT_LIST = """
-(function() {
-    // 提取左侧联系人列表
-    var items = document.querySelectorAll(
-        '[class*="contact"], [class*="chat-item"], [class*="conversation"], '
-        + '[class*="user-item"], [class*="dialog-item"], [class*="list-item"]'
-    );
-    var contacts = [];
-    for (var i = 0; i < items.length; i++) {
-        var r = items[i].getBoundingClientRect();
-        var t = (items[i].innerText || '').trim();
-        if (r.width > 100 && r.height > 40 && t.length > 0) {
-            contacts.push({text: t.split('\\n')[0], x: r.x + r.width/2, y: r.y + r.height/2});
-        }
-    }
-    if (contacts.length === 0) {
-        // Fallback: any clickable items on the left side
-        var all = document.querySelectorAll('[class*="item"], [class*="row"], [class*="entry"]');
-        for (var j = 0; j < all.length; j++) {
-            var ar = all[j].getBoundingClientRect();
-            var at = (all[j].innerText || '').trim();
-            if (ar.x < 450 && ar.width > 100 && ar.height > 40 && at.length > 0) {
-                contacts.push({text: at.split('\\n')[0], x: ar.x + ar.width/2, y: ar.y + ar.height/2});
-            }
-        }
-    }
-    return contacts;
-})()
-"""
-
 
 async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
     """收集简历主流程
@@ -111,27 +82,16 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
     if not await automation._ensure_session():
         return {"status": "error", "message": "浏览器未连接，请先打开BOSS直聘"}
 
-    # 先导航到 zhipin.com，导入 cookie，再导航到聊天页
+    # 使用 chat_nav 导航到聊天页（通过 SPA 点击"沟通"按钮）
+    # navigate_to_chat 内部处理 cookie 导入和页面导航
     await automation.navigate("https://www.zhipin.com/")
     await asyncio.sleep(3)
     cookie_result = await automation.import_cookies()
     logger.info(f"[F6] Cookie导入: {cookie_result.get('imported', 0)}/{cookie_result.get('total', 0)} 条")
     await asyncio.sleep(2)
 
-    for chat_url in [
-        "https://www.zhipin.com/web/geek/chat",
-        "https://www.zhipin.com/web/chat/recommend",
-        "https://www.zhipin.com/web/user/chat",
-    ]:
-        nav = await automation.navigate(chat_url)
-        await asyncio.sleep(4)
-        if nav.get("status") == "ok":
-            current = await automation.execute_js("window.location.href") or ""
-            logger.info(f"[F6] 导航结果: {current}")
-            if "login" not in current.lower() and "zhipin.com/web/chat" in current:
-                break
-        logger.info(f"[F6] 重试导航...")
-    else:
+    nav_result = await navigate_to_chat()
+    if nav_result.get("status") != "ok":
         return {"status": "error", "message": "无法访问聊天页，可能需登录"}
 
     # 初始化数据库
@@ -143,28 +103,22 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
     failed = 0
     details = []
 
-    # 获取联系人列表（try/except 保护每个JS调用）
-    contacts = []
-    try:
-        result = await automation.execute_js(_JS_FIND_CONTACT_LIST)
-        contacts = result if isinstance(result, list) else []
-    except Exception as e:
-        logger.warning(f"[F6] JS提取联系人失败: {e}")
+    # 获取联系人列表（使用 chat_nav 模块）
+    contacts = await get_contacts()
 
     if not contacts:
         logger.info("[F6] 未找到联系人，尝试备用导航...")
         try:
             await automation.navigate("https://www.zhipin.com/web/geek/chat")
             await asyncio.sleep(4)
-            result = await automation.execute_js(_JS_FIND_CONTACT_LIST)
-            contacts = result if isinstance(result, list) else []
+            contacts = await get_contacts()
         except Exception as e:
             logger.warning(f"[F6] 备用联系人提取失败: {e}")
 
     logger.info(f"[F6] 找到 {len(contacts)} 个联系人，上限 {max_count}")
 
     for i, contact in enumerate(contacts[:max_count]):
-        contact_name = (contact.get("text", "") or f"contact_{i}").strip()
+        contact_name = (contact.get("name", "") or contact.get("text", "") or f"contact_{i}").strip()
         logger.info(f"[F6] 处理 ({i+1}/{min(len(contacts), max_count)}): {contact_name}")
 
         # 检查去重

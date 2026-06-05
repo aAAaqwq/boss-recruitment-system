@@ -604,16 +604,112 @@ async def get_resumes(req: WorkflowRequest):
         return {"status": "error", "message": str(e)}
 
 
+# ============================================================
+# F7 批量AI回复任务状态
+# ============================================================
+_reply_task_status: Dict[str, Any] = {
+    "status": "idle", "replied": 0, "failed": 0, "skipped": 0,
+    "total": 0, "message": "", "results": [],
+}
+
+
 @app.post("/api/workflow/reply-messages")
 async def reply_messages(req: WorkflowRequest):
-    """批量回复未读消息"""
+    """批量回复未读消息 — 独立线程执行
+
+    在独立线程中运行 batch_reply_workflow，避免阻塞 FastAPI 事件循环。
+    通过 GET /api/workflow/reply-status 查询进度。
+    """
+    global _reply_task_status
+
+    if _reply_task_status.get("status") == "running":
+        return {"status": "error", "message": "已有任务正在运行"}
+
+    _reply_task_status = {
+        "status": "running",
+        "replied": 0,
+        "failed": 0,
+        "skipped": 0,
+        "total": req.limit,
+        "message": f"正在处理最多 {req.limit} 个联系人...",
+        "results": [],
+        "start_time": datetime.now().isoformat(),
+    }
+    api_logger.info(f"[F7] 启动批量回复任务，上限 {req.limit} 人")
+
+    import threading as _th
+    _th.Thread(
+        target=_run_reply_in_thread,
+        args=(req.limit,),
+        daemon=True,
+    ).start()
+
+    return {
+        "status": "started",
+        "message": f"批量回复任务已启动，上限 {req.limit} 人",
+    }
+
+
+def _run_reply_in_thread(max_count: int):
+    """在独立线程中运行批量回复工作流"""
+    global _reply_task_status
+    import asyncio as _asyncio
+
+    async def _thread_main():
+        try:
+            from app.chat_workflow import _batch_reply_impl
+        except ImportError as e:
+            _reply_task_status["status"] = "error"
+            _reply_task_status["message"] = f"回复工作流模块未就绪: {e}"
+            api_logger.error(f"[F7] 失败: 模块导入错误: {e}")
+            return
+
+        try:
+            # 在线程事件循环中重新连接浏览器
+            automation._connected = False
+            automation.browser = None
+            automation.page = None
+            conn = await automation.connect()
+            if conn.get("status") not in ("connected", "already_connected"):
+                _reply_task_status["status"] = "error"
+                _reply_task_status["message"] = "浏览器连接失败"
+                return
+
+            await automation.import_cookies()
+
+            result = await _batch_reply_impl(
+                max_count=max_count,
+                template=None,
+                dry_run=False,
+            )
+
+            _reply_task_status["status"] = result.get("status", "completed")
+            _reply_task_status["replied"] = result.get("replied", 0)
+            _reply_task_status["failed"] = result.get("failed", 0)
+            _reply_task_status["skipped"] = result.get("skipped", 0)
+            _reply_task_status["total"] = result.get("total_scanned", 0)
+            _reply_task_status["message"] = result.get("message", "")
+            _reply_task_status["results"] = result.get("results", [])
+            _reply_task_status["end_time"] = datetime.now().isoformat()
+            api_logger.info(f"[F7] 完成: {_reply_task_status['message']}")
+
+        except Exception as e:
+            _reply_task_status["status"] = "error"
+            _reply_task_status["message"] = str(e)
+            api_logger.error(f"[F7] 失败: {e}")
+
     try:
-        api_logger.info(f"启动消息回复任务，上限 {req.limit} 人")
-        # TODO: 实现实际的消息回复逻辑
-        return {"status": "started", "message": f"消息回复任务已启动，上限 {req.limit} 人"}
+        _asyncio.run(_thread_main())
     except Exception as e:
-        api_logger.error(f"消息回复任务失败: {e}")
-        return {"status": "error", "message": str(e)}
+        _reply_task_status["status"] = "error"
+        _reply_task_status["message"] = str(e)
+        api_logger.error(f"[F7] 线程失败: {e}")
+
+
+@app.get("/api/workflow/reply-status")
+async def get_reply_status():
+    """获取批量回复任务状态"""
+    return _reply_task_status
 
 
 # ============================================================

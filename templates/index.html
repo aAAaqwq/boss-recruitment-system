@@ -1291,17 +1291,50 @@
             const btn = event.target.closest('.btn');
             const limit = parseInt(document.getElementById('replyLimit').value) || 15;
             setLoading(btn, true);
-            log(`💬 开始批量回复未读消息，上限 ${limit} 人...`);
+            log(`💬 开始批量回复未读消息，上限 ${limit} 人...`, 'info');
 
             apiCall('/api/chat/batch', {
-                limit,
-                template: config.templates.follow
+                limit: limit,
+                dry_run: false,
+                custom_template: config.templates.follow
             }).then(data => {
                 setLoading(btn, false);
-                if (data && data.status === 'started') {
+                if (data && (data.status === 'started' || data.status === 'queued')) {
                     log(`✅ 任务已启动，预计回复 ${limit} 人`, 'info');
+                    // 开始轮询进度
+                    pollChatReplyStatus();
+                } else if (data && data.message) {
+                    log(`📋 ${data.message}`, 'info');
+                } else {
+                    log(`❌ 启动失败`, 'error');
                 }
+            }).catch(e => {
+                setLoading(btn, false);
+                log(`启动异常: ${e.message}`, 'error');
             });
+        }
+
+        let _chatReplyPollTimer = null;
+        function pollChatReplyStatus() {
+            if (_chatReplyPollTimer) clearInterval(_chatReplyPollTimer);
+            let count = 0;
+            _chatReplyPollTimer = setInterval(() => {
+                count++;
+                if (count > 200) { clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null; return; }
+                apiCall('/api/workflow/reply-status', null, 'GET').then(data => {
+                    if (!data) return;
+                    if (data.status === 'completed') {
+                        clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null;
+                        log(`✅ 回复完成! 成功:${data.success||0} 失败:${data.failed||0}`, 'info');
+                        updateStats(0, 0, (data.success||0));
+                    } else if (data.status === 'error' || data.status === 'failed') {
+                        clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null;
+                        log(`❌ 任务失败: ${data.message || '未知错误'}`, 'error');
+                    } else if (data.status === 'running') {
+                        if (count % 10 === 0) log(`⏳ 回复中... (${data.processed||0}/${data.total||0})`, 'info');
+                    }
+                });
+            }, 3000);
         }
 
         function navigateToChat() {
