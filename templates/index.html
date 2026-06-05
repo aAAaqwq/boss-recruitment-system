@@ -612,7 +612,7 @@
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8001';
+        const API_BASE = 'http://localhost:8002';  // 外部端口8002→容器8001(避免SSH隧道冲突)
         let vncConnected = false;
         let vncScale = 1;
         let authToken = localStorage.getItem('auth_token') || null;

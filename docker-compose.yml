@@ -12,7 +12,7 @@ services:
       - "3101:3001"    # 总台/Hub管理界面 (外部:内部)
       - "5901:5901"    # VNC端口 (外部:内部)
       - "6901:6901"    # noVNC Web端口 (外部:内部)
-      - "8001:8001"    # API端口 (外部:内部)
+      - "8002:8001"    # API端口 (外部8002→内部8001, 避免SSH隧道冲突)
     environment:
       - CUSTOMER_ID=${CUSTOMER_ID:-default}
       - VNC_PASSWORD=${VNC_PASSWORD:-boss123}
