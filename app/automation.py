@@ -390,12 +390,12 @@ class BrowserAutomation:
                             except (ValueError, TypeError):
                                 pass  # 无法匹配则留为 None
 
-                    # 转换 expires 为 float，跳过非法值
+                    # 转换 expires 为 int（CDP TimeSinceEpoch 要求整数）
                     expires = None
                     exp_val = ck.get("expires")
                     if exp_val is not None:
                         try:
-                            expires = float(exp_val)
+                            expires = int(float(exp_val))
                             if expires <= 0:
                                 expires = None
                         except (ValueError, TypeError):
