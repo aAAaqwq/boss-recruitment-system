@@ -20,12 +20,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor net-tools xclip \
     tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
     fonts-wqy-zenhei fonts-wqy-microhei \
-    chromium-browser chromium-codecs-ffmpeg-extra \
     xdotool \
-    && ln -sf /usr/bin/chromium-browser /usr/bin/chrome \
-    && ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome \
-    && ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
+
+# 安装 Chromium 浏览器（通过 Playwright，支持 ARM64 + AMD64）
+RUN pip3 install --no-cache-dir playwright && \
+    python3 -m playwright install chromium --with-deps && \
+    PLAYWRIGHT_CHROME=$(find /root/.cache/ms-playwright -name 'chrome' -o -name 'chromium' 2>/dev/null | head -1) && \
+    ln -sf "$PLAYWRIGHT_CHROME" /usr/bin/google-chrome && \
+    ln -sf "$PLAYWRIGHT_CHROME" /usr/bin/chrome && \
+    ln -sf "$PLAYWRIGHT_CHROME" /usr/bin/chromium-browser && \
+    echo "Chromium installed: $PLAYWRIGHT_CHROME"
 
 # ============================================================
 # Python 依赖 (先COPY requirements, 仅依赖变更时重建此层)
