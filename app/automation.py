@@ -463,25 +463,9 @@ class BrowserAutomation:
     # BOSS直聘登录页 URL（扫码登录）
     LOGIN_URL = "https://www.zhipin.com/web/user/?ka=header-login"
 
-    # 已登录选择器 — 只保留真正只在登录后出现的元素
-    # .user-nav 等通用 header 在未登录页面也存在（显示"登录/注册"），不能用！
-    _LOGGED_IN_SELECTORS = [
-        # 招聘者 Dashboard 侧边栏（只在登录后渲染）
-        '.menu-list', '[class*="menu-list"]',
-        # 候选人列表容器（登录后才能看到）
-        '.recommend-card', '[class*="recommend"]',
-        '.candidate-card', '[class*="candidate"]',
-        '.geek-list', '[class*="geek-list"]',
-        # 用户下拉菜单（登录后才有）
-        '.user-dropdown', '[class*="user-dropdown"]',
-        '.dropdown-user', '[class*="dropdown-user"]',
-    ]
-
-    # 用户昵称选择器 — 只在已登录元素内部查找
-    _USERNAME_SELECTORS = [
-        '.user-dropdown .name', '[class*="dropdown-user"] [class*="name"]',
-        '.user-dropdown .nickname', '[class*="user-dropdown"] [class*="nick"]',
-    ]
+    # 反向判断依赖的页面文案（不再用CSS选择器正向猜DOM）
+    # 已登录: 页面含"推荐牛人"/"沟通"等招聘者Dashboard文案
+    # 未登录: URL含登录路径 或 页面有"登录/注册"按钮
 
     # 登录按钮选择器
     _LOGIN_BTN_SELECTORS = [
@@ -519,13 +503,10 @@ class BrowserAutomation:
     async def check_login(self) -> Dict:
         """检测 BOSS直聘登录状态（F4 增强）
 
-        增强逻辑：
-        1. 导航到招聘者 Dashboard (/web/chat/recommend) — 右上角有用户信息
-           Chrome profile 中的 cookie 会被 Chrome 自然加载
-        2. 通过 DOM 元素 + CDP cookie 判断登录状态
-        3. 若未登录，尝试导入备份 cookie 恢复，刷新后重试
-        4. 仍失败则导航到登录页使 VNC 中可见扫码二维码
-        5. 检测二维码是否可见，返回 qr_visible 字段
+        核心逻辑：反向判断 — 页面显示"登录/注册"则未登录，否则已登录。
+        这比正向猜 DOM 选择器可靠得多：
+        - URL 含 /web/user/ 或 login/register → 登录页
+        - 页面 innerText 含"登录/注册"且无候选人内容 → 公开页面
 
         Returns:
             {logged_in, message, username?, qr_visible?}
@@ -533,133 +514,80 @@ class BrowserAutomation:
         if not await self._ensure_session(timeout=8):
             return {"logged_in": False, "message": "浏览器未连接或重连失败"}
         try:
-            # --- Step 0: 导航到招聘者 Dashboard（右上角有用户信息） ---
-            # Chrome profile 已持久化 cookie，导航时 Chrome 自动加载
-            # 只在登录失败时才尝试 CDP 导入（CDP set_cookie 有类型兼容问题，较慢）
+            # --- Step 0: 导航到招聘者 Dashboard ---
             try:
                 await asyncio.wait_for(
                     self.page.get("https://www.zhipin.com/web/chat/recommend"), timeout=10
                 )
                 await asyncio.sleep(3)
             except asyncio.TimeoutError:
-                pass  # 页面加载超时不影响后续检测
+                pass
 
-            # --- Step 1: 确保在 zhipin.com 域名下 ---
+            # --- Step 1: 读取页面状态 ---
             try:
                 current_url = await asyncio.wait_for(
-                    self.page.evaluate("window.location.href"), timeout=8
+                    self.page.evaluate("window.location.href"), timeout=5
                 ) or ""
             except asyncio.TimeoutError:
-                return {"logged_in": False, "message": "页面响应超时，请刷新后重试"}
-            if "zhipin.com" not in current_url:
-                logger.info(f"当前不在 zhipin.com ({current_url})，正在导航...")
-                await self.page.get("https://www.zhipin.com/web/chat/recommend")
-                await asyncio.sleep(3)
-                current_url = await self.page.evaluate("window.location.href") or ""
+                return {"logged_in": False, "message": "页面响应超时"}
 
-            # --- Step 2: 反向判断 — URL 或页面文案含"登录/注册" → 未登录 ---
-            is_login_page = (
+            # --- Step 2: 反向判断 — 在登录页或页面有"登录/注册" → 未登录 ---
+            page_text = ""
+            try:
+                page_text = await self.page.evaluate("document.body.innerText.substring(0,500)") or ""
+            except Exception:
+                pass
+
+            on_login_page = (
                 "/web/user/" in current_url
                 or "login" in current_url.lower()
                 or "register" in current_url.lower()
                 or "passport" in current_url.lower()
             )
-            if is_login_page:
-                logger.info(f"当前在登录/注册页面 ({current_url})，判定未登录")
-                # 不直接返回，继续走 cookie 恢复流程
+            has_public_header = (
+                "登录/注册" in page_text
+                or "我要招聘" in page_text  # BOSS 公开页 header
+            )
+            has_recruiter_content = (
+                "推荐牛人" in page_text
+                or "沟通" in page_text
+            )
 
-            # 快速反向检测：页面是否有可见的"登录/注册"按钮
-            has_login_btn = False
-            if not is_login_page:
-                try:
-                    login_btn_check = await self.page.evaluate(
-                        "!!document.querySelector('.btns a[href*=\"user\"],.btns .link-scan,"
-                        "a[href*=\"login\"],.tosign-login,.login-btn')"
-                        " && document.querySelector('.btns')?.innerText?.includes('登录')"
-                    )
-                    has_login_btn = bool(login_btn_check)
-                except Exception:
-                    pass
-
-            if has_login_btn:
-                logger.info("页面检测到'登录/注册'按钮，判定未登录")
-
-            # --- Step 3: 正向 DOM 检测（仅当不在登录页且无登录按钮时）---
-            user_el = None
-            if not is_login_page and not has_login_btn:
-                for sel in self._LOGGED_IN_SELECTORS:
-                    try:
-                        el = await self.page.select(sel, timeout=0.5)
-                        if el:
-                            user_el = el
-                            break
-                    except Exception:
-                        continue
-
-            if user_el:
-                username = await self._extract_username()
-                result = {"logged_in": True, "message": "已登录（DOM检测）"}
-                if username:
-                    result["username"] = username
-                # 登录成功后自动备份 cookie（不影响主逻辑）
-                try:
-                    await self.export_cookies()
-                except Exception as cookie_err:
-                    logger.warning(f"自动备份 cookie 失败: {cookie_err}")
-                return result
-
-            # --- Step 4: 通过 CDP 读取 cookie（包括 HttpOnly）辅助判断 ---
-            # document.cookie 无法读取 HttpOnly cookie（wt2/wbg/zp_at），
-            # 必须通过 CDP Network.getCookies 获取
-            try:
-                from nodriver.cdp import network as cdp_network
-                all_cookies = await self.page.send(cdp_network.get_all_cookies())
-                cookie_names = {c.name for c in (all_cookies or [])}
-                has_login_cookie = any(
-                    name in cookie_names
-                    for name in self._LOGIN_COOKIE_NAMES
-                )
-            except Exception:
-                # CDP 不可用时回退到 document.cookie（只能检测 bst）
-                cookie_str = await self.page.evaluate("document.cookie") or ""
-                has_login_cookie = "bst=" in cookie_str
-
-            if has_login_cookie:
+            # 有招聘者内容且不在登录页 → 已登录
+            if has_recruiter_content and not on_login_page:
+                logger.info("页面含招聘者Dashboard内容，判定已登录")
                 try:
                     await self.export_cookies()
                 except Exception:
                     pass
-                return {"logged_in": True, "message": "已登录（cookie 检测）"}
+                return {"logged_in": True, "message": "已登录（页面内容检测）"}
 
-            # --- Step 5: 未登录 — 尝试导入 cookie 恢复，刷新重试 ---
+            # 在登录页或有公开header → 未登录
+            if on_login_page or has_public_header:
+                logger.info(f"判定未登录 (url_login={on_login_page}, public_header={has_public_header})")
+
+            # --- Step 3: 未登录 → 尝试导入 cookie 恢复 ---
             if COOKIE_FILE.exists():
-                logger.info("DOM+CDP均未检测到登录态，尝试导入备份cookie恢复...")
+                logger.info("尝试导入备份cookie恢复登录态...")
                 try:
                     import_result = await self.import_cookies()
-                    logger.info(f"Cookie导入结果: {import_result.get('imported',0)}/{import_result.get('total',0)}")
+                    logger.info(f"导入: {import_result.get('imported',0)}/{import_result.get('total',0)}")
                     if import_result.get("imported", 0) > 0:
-                        # 刷新页面使导入的 cookie 生效
-                        try:
-                            await self.page.get("https://www.zhipin.com/web/chat/recommend")
-                            await asyncio.sleep(3)
-                        except Exception:
-                            pass
-                        # 重新检查登录状态
-                        for sel in self._LOGGED_IN_SELECTORS:
+                        # 刷新页面使 cookie 生效，重新做反向检测
+                        await self.page.get("https://www.zhipin.com/web/chat/recommend")
+                        await asyncio.sleep(3)
+                        retry_text = await self.page.evaluate("document.body.innerText.substring(0,500)") or ""
+                        if "推荐牛人" in retry_text or "沟通" in retry_text:
+                            logger.info("Cookie恢复成功，页面显示招聘者内容")
                             try:
-                                el = await self.page.select(sel, timeout=0.5)
-                                if el:
-                                    username = await self._extract_username()
-                                    result = {"logged_in": True, "message": "已登录（cookie恢复后DOM检测）"}
-                                    if username:
-                                        result["username"] = username
-                                    return result
+                                await self.export_cookies()
                             except Exception:
-                                continue
+                                pass
+                            return {"logged_in": True, "message": "已登录（cookie恢复）"}
                 except Exception as e:
                     logger.warning(f"Cookie恢复失败: {e}")
 
-            # --- Step 6: 仍失败 — 导航到登录页显示二维码 ---
+            # --- Step 4: 仍失败 → 导航到登录页显示二维码 ---
             logger.info("未检测到登录态，导航到登录页...")
             qr_visible = await self._navigate_to_login_page()
             return {
@@ -670,32 +598,6 @@ class BrowserAutomation:
         except Exception as e:
             logger.error(f"检测登录状态失败: {e}")
             return {"logged_in": False, "message": str(e)}
-
-    async def _extract_username(self) -> str:
-        """从页面中提取已登录用户昵称"""
-        for sel in self._USERNAME_SELECTORS:
-            try:
-                name_el = await self.page.select(sel, timeout=2)
-                if name_el:
-                    text = ""
-                    try:
-                        text = name_el.text_all
-                    except Exception:
-                        try:
-                            text = await name_el.get_text()
-                        except Exception:
-                            try:
-                                text = await self.page.evaluate(
-                                    "document.querySelector(arguments[0])?.textContent?.trim()",
-                                    sel,
-                                )
-                            except Exception:
-                                pass
-                    if text and text.strip():
-                        return text.strip()
-            except Exception:
-                continue
-        return ""
 
     async def _navigate_to_login_page(self) -> bool:
         """导航到登录页并检测二维码是否可见
