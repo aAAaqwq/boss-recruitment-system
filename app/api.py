@@ -27,7 +27,7 @@ from app.logging_config import api_logger
 # Import automation singleton
 from app.automation import automation
 # Import school whitelists for filter config (lightweight, no heavy deps)
-from app.filter_criteria import DOMESTIC_ELITE_SCHOOLS, US_ELITE_SCHOOLS, UK_ELITE_SCHOOLS, OTHER_ELITE_SCHOOLS
+from app.filter_criteria import DOMESTIC_ELITE_SCHOOLS, US_ELITE_SCHOOLS, UK_ELITE_SCHOOLS, OTHER_ELITE_SCHOOLS, FilterCriteria
 
 # ============================================================
 # 配置
@@ -333,25 +333,21 @@ class BrowserConnectRequest(BaseModel):
 
 @app.post("/api/browser/connect")
 async def connect_browser(req: BrowserConnectRequest = None):
-    """连接到本地浏览器或启动新的
+    """连接到 Chrome DevTools Protocol (CDP)
 
-    Chrome需要以调试模式启动（使用CDP）：
-    macOS:
-    /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
-    Linux:
-    google-chrome --remote-debugging-port=9222
-
-    如果没有检测到已打开的Chrome，将启动新的浏览器实例。
+    连接到已运行的 Chrome 浏览器实例（CDP 端口 9222）。
+    Chrome 可通过以下方式启动：
+    macOS: /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+    Linux: google-chrome --remote-debugging-port=9222
+    Docker: 容器内已自动启动 Chrome + CDP
     """
-    if req is None:
-        req = BrowserConnectRequest()
-    return await automation.connect(headless=req.headless if req else False)
+    return await automation.connect()
 
 
 @app.get("/api/browser/status")
 async def get_browser_status():
-    """获取浏览器连接状态"""
-    return automation.get_status()
+    """获取浏览器连接状态（含真实session探测）"""
+    return await automation.get_status()
 
 
 @app.post("/api/browser/disconnect")
@@ -509,11 +505,35 @@ async def open_boss_browser():
     # 4. 通过CDP连接到已启动的Chrome
     connect_result = await automation.connect()
 
+    # 5. 等待zhipin.com页面加载完成，再注入cookie
+    cookie_result = None
+    if connect_result.get("status") == "connected":
+        # 等待页面加载（Chrome启动时已带zhipin.com URL）
+        await asyncio.sleep(3)
+
+        # 导航确认在zhipin.com（如果不在则导航）
+        current_url = await automation.execute_js("window.location.href") or ""
+        if "zhipin.com" not in current_url:
+            api_logger.info(f"当前不在zhipin.com，正在导航... (当前: {current_url})")
+            await automation.navigate("https://www.zhipin.com/")
+            await asyncio.sleep(2)
+
+        # 注入已保存的cookie
+        cookie_result = await automation.import_cookies()
+        api_logger.info(f"Cookie注入结果: {cookie_result}")
+
+        # 注入后刷新页面使cookie生效
+        if cookie_result and cookie_result.get("imported", 0) > 0:
+            await asyncio.sleep(1)
+            await automation.execute_js("location.reload()")
+            await asyncio.sleep(2)
+
     return {
         "status": "ok",
         "message": "Chrome已启动并打开BOSS直聘，可在VNC桌面中查看",
         "cdp_ready": cdp_ready,
         "connect_result": connect_result,
+        "cookie_injection": cookie_result,
     }
 
 
@@ -538,6 +558,26 @@ async def open_browser():
 async def check_browser_login():
     """检测 BOSS直聘登录状态"""
     return await automation.check_login()
+
+
+@app.post("/api/browser/export-cookies")
+async def export_cookies():
+    """导出当前浏览器的所有 cookie 到 /app/data/cookies.json
+
+    用于持久化登录态：在浏览器已登录时调用，
+    将 cookie 导出为 JSON 文件保存到 Docker volume 中。
+    """
+    return await automation.export_cookies()
+
+
+@app.post("/api/browser/import-cookies")
+async def import_cookies():
+    """从 /app/data/cookies.json 恢复 cookie 到浏览器
+
+    用于恢复登录态：浏览器启动后调用，
+    将之前导出的 cookie 写入浏览器以恢复登录状态。
+    """
+    return await automation.import_cookies()
 
 
 @app.post("/api/workflow/say-hello")
@@ -943,14 +983,15 @@ async def start_filter_contact(
             "error": None
         }
 
-        # 添加后台任务
-        background_tasks.add_task(
-            _execute_filter_contact,
-            task_id,
-            req.daily_cap,
-            criteria,
-            req.dry_run
+        # 在独立线程中运行，避免阻塞 FastAPI 事件循环
+        # nodriver 对象绑定到事件循环，必须在独立线程中创建新的事件循环
+        import threading
+        thread = threading.Thread(
+            target=_run_filter_contact_in_thread,
+            args=(task_id, req.daily_cap, criteria, req.dry_run),
+            daemon=True
         )
+        thread.start()
 
         return FilterContactResponse(
             task_id=task_id,
@@ -963,21 +1004,48 @@ async def start_filter_contact(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _execute_filter_contact(
+def _run_filter_contact_in_thread(
     task_id: str,
     daily_cap: int,
     criteria: "FilterCriteria",
     dry_run: bool
 ):
-    """执行筛选打招呼任务（后台运行）"""
-    try:
-        # 更新状态为运行中
-        _filter_tasks[task_id]["status"] = "running"
-        _filter_tasks[task_id]["progress"] = 10
+    """在独立线程中运行筛选打招呼任务，避免阻塞 FastAPI 事件循环。
 
-        # 导入workflow模块 - Phase 1 使用 try/except 包装
+    nodriver 的 browser/page 对象绑定到创建时的事件循环。
+    在线程中通过 asyncio.run() 创建独立事件循环，并在其中重新连接浏览器。
+    """
+    import asyncio as _asyncio
+
+    async def _thread_main():
+        """线程主协程：连接浏览器 → 执行工作流"""
+        # 在线程的事件循环中重新连接浏览器
+        _filter_tasks[task_id]["progress"] = 5
+        conn_result = await automation.connect()
+        if conn_result.get("status") != "connected":
+            _filter_tasks[task_id]["status"] = "error"
+            _filter_tasks[task_id]["error"] = f"浏览器连接失败: {conn_result.get('message', '未知')}"
+            _filter_tasks[task_id]["completed_at"] = datetime.now().isoformat()
+            api_logger.error(f"任务 {task_id} 失败: 浏览器连接失败")
+            return
+
+        # 检查登录状态
+        login_status = await automation.check_login()
+        if not login_status.get("logged_in"):
+            _filter_tasks[task_id]["status"] = "error"
+            _filter_tasks[task_id]["error"] = "BOSS直聘未登录，请先在VNC中扫码登录"
+            _filter_tasks[task_id]["completed_at"] = datetime.now().isoformat()
+            api_logger.error(f"任务 {task_id} 失败: 未登录")
+            return
+
+        # 导入已保存的 cookie
+        await automation.import_cookies()
+
+        _filter_tasks[task_id]["progress"] = 20
+
+        # 导入并执行workflow core
         try:
-            from app.workflows import workflow_3_1_auto_contact
+            from app.workflows import _auto_contact_impl
         except ImportError as e:
             _filter_tasks[task_id]["status"] = "error"
             _filter_tasks[task_id]["error"] = f"工作流模块未就绪: {e}"
@@ -985,23 +1053,27 @@ async def _execute_filter_contact(
             api_logger.error(f"任务 {task_id} 失败: 工作流模块未就绪")
             return
 
-        api_logger.info(f"任务 {task_id} 开始执行筛选打招呼")
+        api_logger.info(f"任务 {task_id} 开始执行筛选打招呼 (独立线程, 已连接浏览器)")
 
-        # 执行workflow
-        result = workflow_3_1_auto_contact(
+        result = await _auto_contact_impl(
             daily_cap=daily_cap,
+            school_whitelist=criteria.school_whitelist,
+            min_degree=criteria.min_degree,
+            min_years=criteria.min_years,
+            dry_run=dry_run,
             criteria=criteria,
-            dry_run=dry_run
         )
 
-        # 更新任务状态
         _filter_tasks[task_id]["status"] = result.get("status", "unknown")
         _filter_tasks[task_id]["progress"] = 100
         _filter_tasks[task_id]["result"] = result
         _filter_tasks[task_id]["completed_at"] = datetime.now().isoformat()
-
         api_logger.info(f"任务 {task_id} 完成: {result.get('status')}")
 
+    try:
+        _filter_tasks[task_id]["status"] = "running"
+        _filter_tasks[task_id]["progress"] = 5
+        _asyncio.run(_thread_main())
     except Exception as e:
         api_logger.error(f"任务 {task_id} 执行失败: {e}")
         _filter_tasks[task_id]["status"] = "failed"

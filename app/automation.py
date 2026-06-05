@@ -275,17 +275,26 @@ class BrowserAutomation:
                 return {"status": "ok", "imported": 0, "message": "cookie 文件为空"}
 
             imported = 0
+            skipped_reasons = []
             for ck in cookies:
                 try:
-                    # 转换 same_site 为枚举
+                    ck_name = ck.get("name", "")
+                    # 跳过无效 cookie（name 或 value 为空、未序列化值等）
+                    if not ck_name or not isinstance(ck.get("value"), (str, type(None))):
+                        continue
+
+                    # 转换 same_site 为枚举，宽容处理非标准值
                     same_site = None
                     ss_val = ck.get("sameSite")
                     if ss_val:
                         ss_upper = str(ss_val).upper().replace("-", "_")
-                        if ss_upper in ("STRICT", "LAX", "NONE"):
-                            same_site = CookieSameSite(ss_upper)
+                        if ss_upper in ("STRICT", "LAX", "NONE", "UNSPECIFIED"):
+                            try:
+                                same_site = CookieSameSite(ss_upper)
+                            except (ValueError, TypeError):
+                                pass  # 无法匹配则留为 None
 
-                    # 转换 expires 为 float
+                    # 转换 expires 为 float，跳过非法值
                     expires = None
                     exp_val = ck.get("expires")
                     if exp_val is not None:
@@ -296,9 +305,19 @@ class BrowserAutomation:
                         except (ValueError, TypeError):
                             expires = None
 
+                    # 跳过值为空或不可序列化的 cookie
+                    ck_value = ck.get("value")
+                    if ck_value is None:
+                        continue
+                    try:
+                        ck_value = str(ck_value)
+                    except (ValueError, TypeError):
+                        skipped_reasons.append(f"跳过 cookie {ck_name}: 值无法转为字符串")
+                        continue
+
                     await self.page.send(cdp_network.set_cookie(
-                        name=ck.get("name", ""),
-                        value=ck.get("value", ""),
+                        name=ck_name,
+                        value=ck_value,
                         domain=ck.get("domain", ""),
                         path=ck.get("path", "/"),
                         secure=ck.get("secure") or None,

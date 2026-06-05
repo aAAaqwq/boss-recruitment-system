@@ -12,6 +12,10 @@ venv/
 # IDE
 .vscode/
 .idea/
+.claude/
+
+# OS
+.DS_Store
 
 # Logs & Data
 logs/
@@ -25,6 +29,10 @@ test-results/
 
 # Node
 node_modules/
+
+# Documentation
+*.md
+!requirements.txt
 
 # Docker
 Dockerfile*

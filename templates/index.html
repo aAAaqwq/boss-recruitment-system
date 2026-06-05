@@ -1158,22 +1158,73 @@
             });
         }
 
+        let _filterPollTimer = null;
+
         function batchFilterAndHello() {
             const btn = event.target.closest('.btn');
             const limit = parseInt(document.getElementById('batchLimit').value) || 20;
             setLoading(btn, true);
-            log(`👋 开始筛选+打招呼，上限 ${limit} 人...`);
+            log(`👋 开始筛选+打招呼，上限 ${limit} 人...`, 'info');
 
-            apiCall('/api/filter/contact', {
-                limit,
-                filter: config.filter,
-                template: config.templates.hello
-            }).then(data => {
-                setLoading(btn, false);
-                if (data && data.status === 'started') {
-                    log(`✅ 任务已启动，预计处理 ${limit} 人`, 'info');
+            // Stop any previous polling
+            if (_filterPollTimer) {
+                clearInterval(_filterPollTimer);
+                _filterPollTimer = null;
+            }
+
+            // Build request matching FilterContactRequest model
+            const schoolList = (config.filter.schoolWhitelist || '')
+                .split(',').map(s => s.trim()).filter(s => s.length > 0);
+            const requestBody = {
+                daily_cap: limit,
+                min_degree: config.filter.degree || '本科',
+                min_years: config.filter.yearsMin || 0,
+                school_whitelist: schoolList.length > 0 ? schoolList : undefined,
+                dry_run: false,
+            };
+
+            apiCall('/api/filter/contact', requestBody).then(data => {
+                if (data && (data.status === 'queued' || data.status === 'started')) {
+                    const taskId = data.task_id;
+                    log(`✅ 任务已加入队列 (ID: ${taskId})`, 'info');
+                    setLoading(btn, false);
+                    // Start polling for progress
+                    _pollFilterStatus(taskId, limit);
+                } else {
+                    setLoading(btn, false);
+                    log(`❌ 启动失败: ${(data && data.message) || '未知错误'}`, 'error');
                 }
             });
+        }
+
+        function _pollFilterStatus(taskId, limit) {
+            let pollCount = 0;
+            _filterPollTimer = setInterval(() => {
+                pollCount++;
+                if (pollCount > 200) { // 10 min max
+                    clearInterval(_filterPollTimer);
+                    _filterPollTimer = null;
+                    log('⏰ 任务轮询超时', 'warn');
+                    return;
+                }
+                apiCall(`/api/filter/status/${taskId}`, null, 'GET').then(data => {
+                    if (!data) return;
+                    if (data.status === 'running') {
+                        log(`⏳ 进行中... (${data.progress || 0}%)`, 'info');
+                    } else if (data.status === 'completed') {
+                        clearInterval(_filterPollTimer);
+                        _filterPollTimer = null;
+                        const r = data.result || {};
+                        log(`✅ 任务完成! 联系:${r.contacted||0} 跳过:${r.skipped||0} 失败:${r.failed||0} 扫描:${r.total_scanned||0}`, 'info');
+                        log(`📊 配额: ${r.cap_used || limit}`, 'info');
+                        updateStats(r.contacted || 0, 0, 0);
+                    } else if (data.status === 'failed' || data.status === 'error') {
+                        clearInterval(_filterPollTimer);
+                        _filterPollTimer = null;
+                        log(`❌ 任务失败: ${data.error || '未知错误'}`, 'error');
+                    }
+                });
+            }, 3000);
         }
 
         function batchGetResumes() {
