@@ -223,6 +223,32 @@ class Database:
         ))
         self.conn.commit()
     
+    # ========== 简历操作 ==========
+
+    def insert_resume_op(self, candidate_name: str, action: str, resume_downloaded: bool = False,
+                         wechat_exchanged: bool = False, detail: str = None):
+        """插入简历操作记录"""
+        self.cursor.execute(
+            """INSERT INTO resume_operations
+               (candidate_name, action, resume_downloaded, wechat_exchanged, detail)
+               VALUES (?, ?, ?, ?, ?)""",
+            (candidate_name, action, int(resume_downloaded), int(wechat_exchanged), detail)
+        )
+        self.conn.commit()
+
+    def get_resume_ops(self, candidate_name: str = None) -> List[Dict]:
+        """查询简历操作记录（按候选人去重）"""
+        if candidate_name:
+            self.cursor.execute(
+                "SELECT * FROM resume_operations WHERE candidate_name = ? ORDER BY created_at DESC",
+                (candidate_name,)
+            )
+        else:
+            self.cursor.execute(
+                "SELECT * FROM resume_operations ORDER BY created_at DESC LIMIT 100"
+            )
+        return [dict(row) for row in self.cursor.fetchall()]
+
     # ========== 统计查询 ==========
     
     def get_daily_stats(self, date: str = None) -> Dict:

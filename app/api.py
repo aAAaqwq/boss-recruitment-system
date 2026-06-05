@@ -624,6 +624,7 @@ class BatchResumeRequest(BaseModel):
     """批量获取简历请求"""
     limit: int = 10
     candidate_ids: Optional[List[str]] = None  # 指定候选人ID列表
+    dry_run: bool = False  # 干跑模式（只扫描不操作）
 
 
 class ResumeInfo(BaseModel):
@@ -644,13 +645,13 @@ resume_task_status = {"status": "idle", "processed": 0, "total": 0, "message": "
 @app.post("/api/resume/batch")
 async def batch_download_resumes(
     req: BatchResumeRequest,
-    background_tasks: BackgroundTasks,
     current_user: dict = Depends(verify_token)
 ):
     """
     批量获取简历
 
-    启动后台任务，批量下载候选人简历
+    在独立线程中运行，避免阻塞 FastAPI 事件循环。
+    遍历聊天联系人，检测简历按钮，下载或请求简历。
     """
     global resume_task_status
 
@@ -658,73 +659,80 @@ async def batch_download_resumes(
     if resume_task_status["status"] == "running":
         return {"status": "error", "message": "已有任务正在运行"}
 
+    resume_task_status = {
+        "status": "running",
+        "processed": 0,
+        "total": req.limit,
+        "message": f"正在处理 {req.limit} 个候选人...",
+        "start_time": datetime.now().isoformat()
+    }
+    api_logger.info(f"启动批量简历下载任务，上限 {req.limit} 人")
+
+    # 在独立线程中运行（nodriver 对象绑定到事件循环）
+    import threading as _th
+    _th.Thread(
+        target=_run_resume_in_thread,
+        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False),
+        daemon=True
+    ).start()
+
+    return {
+        "status": "started",
+        "message": f"批量简历下载任务已启动，上限 {req.limit} 人",
+    }
+
+
+def _run_resume_in_thread(max_count: int, dry_run: bool = False):
+    """在独立线程中运行简历收集"""
+    global resume_task_status
+    import asyncio as _asyncio
+
+    async def _thread_main():
+        try:
+            from app.resume_collector import collect_resumes
+        except ImportError as e:
+            resume_task_status["status"] = "error"
+            resume_task_status["message"] = f"简历收集模块未就绪: {e}"
+            api_logger.error(f"F6 失败: 模块导入错误: {e}")
+            return
+
+        try:
+            # 在线程事件循环中连接浏览器（collect_resumes内部处理导航/登录）
+            automation._connected = False
+            automation.browser = None
+            automation.page = None
+            conn = await automation.connect()
+            if conn.get("status") not in ("connected", "already_connected"):
+                resume_task_status["status"] = "error"
+                resume_task_status["message"] = "浏览器连接失败"
+                return
+
+            result = await collect_resumes(max_count=max_count, dry_run=dry_run)
+
+            resume_task_status["status"] = result.get("status", "completed")
+            resume_task_status["processed"] = result.get("downloaded", 0)
+            resume_task_status["total"] = max_count
+            resume_task_status["message"] = (
+                f"下载:{result.get('downloaded',0)} "
+                f"跳过:{result.get('skipped',0)} "
+                f"失败:{result.get('failed',0)} "
+                f"扫描:{result.get('total_scanned',0)}"
+            )
+            resume_task_status["result"] = result
+            resume_task_status["end_time"] = datetime.now().isoformat()
+            api_logger.info(f"F6 完成: {resume_task_status['message']}")
+
+        except Exception as e:
+            resume_task_status["status"] = "error"
+            resume_task_status["message"] = str(e)
+            api_logger.error(f"F6 失败: {e}")
+
     try:
-        # 启动后台任务
-        def run_resume_task():
-            global resume_task_status
-            try:
-                import subprocess
-                import sys
-
-                resume_task_status = {
-                    "status": "running",
-                    "processed": 0,
-                    "total": req.limit,
-                    "message": f"正在处理 {req.limit} 个候选人...",
-                    "start_time": datetime.now().isoformat()
-                }
-                api_logger.info(f"启动批量简历下载任务，上限 {req.limit} 人")
-
-                # 直接运行 resume_collector.py
-                script_path = BASE_DIR / "app" / "resume_collector.py"
-
-                if not script_path.exists():
-                    resume_task_status["status"] = "error"
-                    resume_task_status["message"] = f"脚本不存在: {script_path}"
-                    api_logger.error(f"简历收集脚本不存在: {script_path}")
-                    return
-
-                result = subprocess.run(
-                    [sys.executable, str(script_path), "--max", str(req.limit)],
-                    capture_output=True,
-                    text=True,
-                    timeout=1800,  # 30分钟超时
-                    cwd=str(BASE_DIR)
-                )
-
-                if result.returncode == 0:
-                    resume_task_status["status"] = "completed"
-                    resume_task_status["message"] = "任务完成"
-                    resume_task_status["end_time"] = datetime.now().isoformat()
-                    api_logger.info(f"简历下载任务完成")
-                else:
-                    resume_task_status["status"] = "error"
-                    resume_task_status["message"] = f"任务失败: {result.stderr[-200:]}"
-                    api_logger.error(f"简历下载任务失败: {result.stderr}")
-
-            except subprocess.TimeoutExpired:
-                resume_task_status["status"] = "error"
-                resume_task_status["message"] = "任务超时"
-                api_logger.error("简历下载任务超时")
-            except Exception as e:
-                resume_task_status["status"] = "error"
-                resume_task_status["message"] = str(e)
-                api_logger.error(f"简历下载任务失败: {e}")
-
-        # 在后台线程中运行
-        import threading
-        thread = threading.Thread(target=run_resume_task, daemon=True)
-        thread.start()
-
-        return {
-            "status": "started",
-            "message": f"批量简历下载任务已启动，上限 {req.limit} 人",
-            "task_id": "resume_batch_1"
-        }
-
+        _asyncio.run(_thread_main())
     except Exception as e:
-        api_logger.error(f"启动批量简历下载失败: {e}")
-        return {"status": "error", "message": str(e)}
+        resume_task_status["status"] = "error"
+        resume_task_status["message"] = str(e)
+        api_logger.error(f"F6 线程失败: {e}")
 
 
 @app.get("/api/resume/status")
@@ -1021,8 +1029,11 @@ def _run_filter_contact_in_thread(
         """线程主协程：连接浏览器 → 执行工作流"""
         # 在线程的事件循环中重新连接浏览器
         _filter_tasks[task_id]["progress"] = 5
+        automation._connected = False
+        automation.browser = None
+        automation.page = None
         conn_result = await automation.connect()
-        if conn_result.get("status") != "connected":
+        if conn_result.get("status") not in ("connected", "already_connected"):
             _filter_tasks[task_id]["status"] = "error"
             _filter_tasks[task_id]["error"] = f"浏览器连接失败: {conn_result.get('message', '未知')}"
             _filter_tasks[task_id]["completed_at"] = datetime.now().isoformat()

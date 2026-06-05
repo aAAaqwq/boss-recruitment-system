@@ -69,7 +69,10 @@ class BrowserAutomation:
     # ===== nodriver 层 =====
 
     async def connect(self, port: int = 9222) -> Dict:
-        """连接到已运行的 Chrome（通过 CDP 端口 9222）"""
+        """连接到 Chrome CDP（复用现有 Chrome 或启动新实例）
+
+        使用 user_data_dir 确保重用 Chrome profile 中的登录 cookie。
+        """
         async with self._lock:
             try:
                 if self._connected and self.browser:
@@ -78,12 +81,15 @@ class BrowserAutomation:
                 if uc is None:
                     return {"status": "error", "message": "nodriver 未安装"}
 
-                # sandbox=False: 容器以root运行时必须禁用
+                # 使用 user_data_dir 重用 Chrome profile（含登录 cookie）
+                user_data = "/app/data/chrome-profile"
                 self.browser = await uc.start(
+                    user_data_dir=user_data,
                     browser_args=[
-                        f'--remote-debugging-port={port}',
-                        '--no-sandbox',
-                        '--disable-dev-shm-usage',
+                        f"--remote-debugging-port={port}",
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-blink-features=AutomationControlled",
                     ],
                     sandbox=False,
                     host="127.0.0.1",
@@ -91,7 +97,7 @@ class BrowserAutomation:
                 )
                 self.page = self.browser.main_tab
                 self._connected = True
-                logger.info("已连接到 Chrome CDP")
+                logger.info(f"已连接到 Chrome CDP (profile: {user_data})")
                 return {"status": "connected"}
             except Exception as e:
                 logger.error(f"连接 Chrome 失败: {e}")
@@ -220,21 +226,30 @@ class BrowserAutomation:
             cookies = []
             for ck in cookie_objects:
                 ck_dict = {
-                    "name": ck.name,
-                    "value": ck.value,
-                    "domain": ck.domain,
-                    "path": ck.path,
+                    "name": str(ck.name) if ck.name else "",
+                    "value": str(ck.value) if ck.value is not None else "",
+                    "domain": str(ck.domain) if ck.domain else "",
+                    "path": str(ck.path) if ck.path else "/",
                 }
+                # expires: 只保留有效的正数（排除 NaN, Inf, None, 0, 负数）
                 if ck.expires is not None:
-                    ck_dict["expires"] = ck.expires
+                    try:
+                        exp_val = float(ck.expires)
+                        import math
+                        if math.isfinite(exp_val) and exp_val > 0:
+                            ck_dict["expires"] = exp_val
+                    except (ValueError, TypeError):
+                        pass
                 if ck.http_only:
                     ck_dict["httpOnly"] = True
                 if ck.secure:
                     ck_dict["secure"] = True
                 if ck.same_site:
-                    ck_dict["sameSite"] = str(ck.same_site.name
-                                               if hasattr(ck.same_site, "name")
-                                               else ck.same_site)
+                    try:
+                        val = ck.same_site.name if hasattr(ck.same_site, "name") else str(ck.same_site)
+                        ck_dict["sameSite"] = str(val)
+                    except (AttributeError, TypeError, ValueError):
+                        pass
                 cookies.append(ck_dict)
 
             # 确保目标目录存在
