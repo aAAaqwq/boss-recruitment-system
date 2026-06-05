@@ -408,6 +408,20 @@
         </div>
 
         <div class="panel-content">
+            <!-- API 认证登录 -->
+            <div class="section" id="authSection">
+                <div class="section-title">🔐 API 认证</div>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input type="text" id="login-user" value="admin" placeholder="用户名" style="flex:1;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:13px;background:var(--bg-input);color:var(--text-color);">
+                    <input type="password" id="login-pass" placeholder="密码" style="flex:1;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:13px;background:var(--bg-input);color:var(--text-color);">
+                    <button class="btn btn-primary btn-sm" onclick="doLogin()" style="white-space:nowrap;">
+                        <span class="spinner"></span>
+                        <span class="btn-text">登录</span>
+                    </button>
+                </div>
+                <div id="authStatus" style="font-size:12px;margin-top:4px;color:var(--text-muted);">未登录 — 部分功能不可用</div>
+            </div>
+
             <!-- 统计信息 -->
             <div class="stats">
                 <div class="stat-item">
@@ -692,15 +706,43 @@
                     const data = await resp.json();
                     authToken = data.access_token;
                     localStorage.setItem('auth_token', authToken);
-                    log('✅ 登录成功', 'info');
+                    updateAuthUI(true);
+                    log('✅ API 登录成功', 'info');
                     return true;
                 } else {
-                    log('❌ 登录失败', 'error');
+                    const err = await resp.json();
+                    updateAuthUI(false);
+                    log(`❌ 登录失败: ${err.detail || '用户名或密码错误'}`, 'error');
                     return false;
                 }
             } catch (e) {
+                updateAuthUI(false);
                 log(`登录异常: ${e.message}`, 'error');
                 return false;
+            }
+        }
+
+        // UI-facing login wrapper
+        async function doLogin() {
+            const btn = event.target.closest('.btn');
+            setLoading(btn, true);
+            const ok = await login();
+            setLoading(btn, false);
+        }
+
+        // Update the auth section UI
+        function updateAuthUI(isLoggedIn) {
+            const el = document.getElementById('authStatus');
+            const section = document.getElementById('authSection');
+            if (!el || !section) return;
+            if (isLoggedIn) {
+                el.innerHTML = '✅ 已认证 — 所有功能可用';
+                el.style.color = '#10b981';
+                section.style.opacity = '0.7';
+            } else {
+                el.innerHTML = '⚠️ 未登录 — 请输入密码后点击"登录"';
+                el.style.color = '#f59e0b';
+                section.style.opacity = '1';
             }
         }
 
@@ -1038,6 +1080,16 @@
                     options.body = JSON.stringify(body);
                 }
                 const response = await fetch(`${API_BASE}${endpoint}`, options);
+
+                // Handle 401 - token expired or missing
+                if (response.status === 401) {
+                    authToken = null;
+                    localStorage.removeItem('auth_token');
+                    updateAuthUI(false);
+                    log('⚠️ API 认证失败，请在左侧"API 认证"区域输入密码登录', 'warn');
+                    return null;
+                }
+
                 return await response.json();
             } catch (e) {
                 log(`请求失败: ${e.message}`, 'error');
@@ -1192,7 +1244,14 @@
                     _pollFilterStatus(taskId, limit);
                 } else {
                     setLoading(btn, false);
-                    log(`❌ 启动失败: ${(data && data.message) || '未知错误'}`, 'error');
+                    // 401/403 → data is null, show auth error
+                    if (!data) {
+                        log('❌ 启动失败: API 认证失败，请在左侧"API 认证"区域登录', 'error');
+                    } else if (data.detail) {
+                        log(`❌ 启动失败: ${data.detail}`, 'error');
+                    } else {
+                        log(`❌ 启动失败: ${(data && data.message) || '未知错误'}`, 'error');
+                    }
                 }
             });
         }
@@ -1350,9 +1409,15 @@
         // 页面加载时初始化
         window.onload = function() {
             loadConfig();
+            // 检查并显示 API 认证状态
+            const token = localStorage.getItem('auth_token');
+            updateAuthUI(!!token);
             // 加载时只检查浏览器状态，不自动触发登录检查
             // 用户需手动点击"检查登录状态"按钮
             log('📡 系统就绪，请依次操作：连接桌面 → 打开BOSS直聘 → 检查登录', 'info');
+            if (!token) {
+                log('⚠️ 请先在"API 认证"区域输入密码登录，否则批量操作不可用', 'warn');
+            }
         };
     </script>
 </body>
