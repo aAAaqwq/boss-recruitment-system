@@ -4,6 +4,7 @@ import json
 import random
 import subprocess
 import os
+import threading
 from typing import Optional, Dict, Tuple, List
 from pathlib import Path
 from datetime import datetime
@@ -31,12 +32,12 @@ class BrowserAutomation:
         self.browser = None
         self.page = None
         self._connected = False
-        self._lock = asyncio.Lock()
+        self._lock = threading.Lock()  # 仅保护状态切换，不保护长操作
         self._display = os.environ.get("DISPLAY", ":1")
 
     # ===== 会话健康检查 =====
 
-    async def _ensure_session(self) -> bool:
+    async def _ensure_session(self, timeout: int = 5) -> bool:
         """确保CDP session有效，失效则自动重连。
 
         Returns:
@@ -45,10 +46,10 @@ class BrowserAutomation:
         if not self._connected or not self.page:
             return False
         try:
-            # 轻量探测：执行一个无副作用的JS表达式
-            await self.page.evaluate("1")
+            # 轻量探测：带超时的JS执行
+            await asyncio.wait_for(self.page.evaluate("1"), timeout=timeout)
             return True
-        except Exception:
+        except (asyncio.TimeoutError, Exception):
             logger.warning("CDP session已失效，正在重连...")
             # 清除旧状态
             self._connected = False
@@ -73,7 +74,7 @@ class BrowserAutomation:
 
         使用 user_data_dir 确保重用 Chrome profile 中的登录 cookie。
         """
-        async with self._lock:
+        with self._lock:
             try:
                 if self._connected and self.browser:
                     return {"status": "already_connected"}
@@ -105,7 +106,7 @@ class BrowserAutomation:
 
     async def disconnect(self) -> Dict:
         """断开浏览器连接"""
-        async with self._lock:
+        with self._lock:
             if not self._connected:
                 return {"status": "already_disconnected"}
             try:
@@ -418,11 +419,25 @@ class BrowserAutomation:
         Returns:
             {logged_in, message, username?, qr_visible?}
         """
-        if not await self._ensure_session():
+        if not await self._ensure_session(timeout=8):
             return {"logged_in": False, "message": "浏览器未连接或重连失败"}
         try:
+            # --- Step 0: 先导航到首页（避免卡在加载中的页面） ---
+            try:
+                await asyncio.wait_for(
+                    self.page.get("https://www.zhipin.com/"), timeout=10
+                )
+                await asyncio.sleep(2)
+            except asyncio.TimeoutError:
+                pass  # 首页加载超时不影响后续检测
+
             # --- Step 1: 确保在 zhipin.com 域名下 ---
-            current_url = await self.page.evaluate("window.location.href") or ""
+            try:
+                current_url = await asyncio.wait_for(
+                    self.page.evaluate("window.location.href"), timeout=8
+                ) or ""
+            except asyncio.TimeoutError:
+                return {"logged_in": False, "message": "页面响应超时，请刷新后重试"}
             if "zhipin.com" not in current_url:
                 logger.info(f"当前不在 zhipin.com ({current_url})，正在导航...")
                 await self.page.get("https://www.zhipin.com/")
@@ -510,6 +525,9 @@ class BrowserAutomation:
         Returns:
             True 表示二维码已可见于页面
         """
+        if not self.page:
+            logger.warning("_navigate_to_login_page: page 为 None，跳过")
+            return False
         try:
             current_url = await self.page.evaluate("window.location.href") or ""
             # 如果已在登录页，不重复导航
