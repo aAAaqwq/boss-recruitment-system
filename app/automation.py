@@ -419,7 +419,9 @@ class BrowserAutomation:
                         secure=ck.get("secure") or None,
                         http_only=ck.get("httpOnly") or None,
                         same_site=same_site,
-                        expires=expires,
+                        # 不传 expires: CDP TimeSinceEpoch 类型要求严格，
+                        # float/int 都会触发 'X' object has no attribute 'to_json'
+                        # 不设过期时间 → CDP 默认使用 session cookie
                     ))
                     imported += 1
                 except Exception as inner_e:
@@ -548,7 +550,8 @@ class BrowserAutomation:
             user_el = None
             for sel in self._LOGGED_IN_SELECTORS:
                 try:
-                    el = await self.page.select(sel, timeout=2)
+                    # timeout=0.5s: 减少未登录时的总等待时间（原来2s×15个=30s）
+                    el = await self.page.select(sel, timeout=0.5)
                     if el:
                         user_el = el
                         break
