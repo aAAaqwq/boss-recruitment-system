@@ -37,11 +37,12 @@ _JS_EXTRACT_CARDS = """
             return r.width > 200 && r.height > 80 && r.width < 800 && r.height < 400;
         });
     }
-    return cards.map(function(c) {
+    // 返回 JSON 字符串避免 CDP RemoteObject 反序列化问题
+    return JSON.stringify(cards.map(function(c) {
         var r = c.getBoundingClientRect();
         return { text: c.innerText||'', x: r.x, y: r.y, w: r.width, h: r.height,
                  cx: r.x+r.width/2, cy: r.y+r.height/2 };
-    });
+    }));
 })()
 """
 
@@ -56,11 +57,11 @@ _JS_FIND_GREET_BTN = """
         if (t==='打招呼'||t==='立即沟通'||t==='沟通'||t==='开聊'||t==='继续沟通') {
             var r = btns[i].getBoundingClientRect();
             if (r.width > 0 && r.height > 0) {
-                return {found:true,x:r.x+r.width/2,y:r.y+r.height/2,text:t};
+                return JSON.stringify({found:true,x:r.x+r.width/2,y:r.y+r.height/2,text:t});
             }
         }
     }
-    return {found:false};
+    return JSON.stringify({found:false});
 })()
 """
 
@@ -136,9 +137,11 @@ async def _auto_contact_impl(
     logger.info(f"[F5] 今日已联系{already}人，剩余{remaining}")
 
     # 导航
-    nav = await automation.navigate("https://www.zhipin.com/web/geek/recommend")
+    # BOSS直聘已将候选人列表从父页面迁移到 iframe 内
+    # 直接导航到 iframe URL，否则 JS 提取无法跨 frame 访问卡片
+    nav = await automation.navigate("https://www.zhipin.com/web/frame/recommend/")
     if nav.get("status") == "error":
-        nav = await automation.navigate("https://www.zhipin.com/web/chat/recommend")
+        nav = await automation.navigate("https://www.zhipin.com/web/geek/recommend")
     if nav.get("status") == "error":
         return {"status": "error", "message": f"导航失败: {nav.get('message')}"}
     await asyncio.sleep(3)
@@ -151,7 +154,14 @@ async def _auto_contact_impl(
     while contacted < remaining:
         # 提取卡片
         try:
-            cards = await automation.execute_js(_JS_EXTRACT_CARDS)
+            raw = await automation.execute_js(_JS_EXTRACT_CARDS)
+            # execute_js 返回的可能是 JSON 字符串（绕过 CDP 反序列化问题）
+            if isinstance(raw, str):
+                cards = json.loads(raw)
+            elif isinstance(raw, list):
+                cards = raw
+            else:
+                cards = None
         except Exception as e:
             logger.warning(f"[F5] JS提取失败: {e}")
             cards = None
@@ -258,7 +268,8 @@ def _extract_name(text: str) -> Optional[str]:
 
 async def _click_greet(card: Dict) -> bool:
     """点击打招呼按钮"""
-    btn = await automation.execute_js(_JS_FIND_GREET_BTN)
+    raw = await automation.execute_js(_JS_FIND_GREET_BTN)
+    btn = json.loads(raw) if isinstance(raw, str) else raw
     if btn and btn.get("found"):
         try:
             await automation.click(int(btn["x"]), int(btn["y"]))

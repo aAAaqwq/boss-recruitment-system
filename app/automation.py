@@ -151,6 +151,15 @@ class BrowserAutomation:
 
                 # 使用 user_data_dir 重用 Chrome profile（含登录 cookie）
                 user_data = "/app/data/chrome-profile"
+
+                # 清理上一次异常退出残留的锁文件（容器重启后 Chrome 无法启动）
+                for lock_file in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
+                    lock_path = os.path.join(user_data, lock_file)
+                    if os.path.exists(lock_path):
+                        try:
+                            os.remove(lock_path)
+                        except OSError:
+                            pass
                 self.browser = await uc.start(
                     user_data_dir=user_data,
                     browser_args=[
