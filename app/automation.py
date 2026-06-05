@@ -294,7 +294,11 @@ class BrowserAutomation:
     # ===== Cookie 持久化 =====
 
     async def export_cookies(self) -> Dict:
-        """通过 CDP 导出所有 cookie 到 /app/data/cookies.json"""
+        """通过 CDP 导出所有 cookie 到 /app/data/cookies.json
+
+        只在检测到登录态 cookie (wt2/wbg/zp_at/bst) 时才覆盖备份文件，
+        防止在登录页等未认证页面导出时污染已保存的有效 cookie。
+        """
         if not await self._ensure_session():
             return {"status": "error", "message": "浏览器未连接或重连失败"}
         try:
@@ -341,15 +345,27 @@ class BrowserAutomation:
                 "exported_at": datetime.now().isoformat(),
                 "count": len(cookies),
             }
-            COOKIE_FILE.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            logger.info(f"已导出 {len(cookies)} 条 cookie 到 {COOKIE_FILE}")
+
+            # 验证：只在包含登录态 cookie 时才覆盖备份文件
+            cookie_names = {c["name"] for c in cookies}
+            auth_present = [n for n in self._LOGIN_COOKIE_NAMES if n in cookie_names]
+            if auth_present:
+                COOKIE_FILE.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                logger.info(f"已导出 {len(cookies)} 条 cookie (含认证: {auth_present}) 到 {COOKIE_FILE}")
+            else:
+                logger.warning(
+                    f"跳过导出: 当前页面无登录态 cookie ({len(cookies)} 条, "
+                    f"缺: {[n for n in self._LOGIN_COOKIE_NAMES if n not in cookie_names]})"
+                )
+
             return {
                 "status": "ok",
                 "count": len(cookies),
                 "path": str(COOKIE_FILE),
+                "saved": bool(auth_present),
             }
         except Exception as e:
             logger.error(f"导出 cookie 失败: {e}")
@@ -390,16 +406,18 @@ class BrowserAutomation:
                             except (ValueError, TypeError):
                                 pass  # 无法匹配则留为 None
 
-                    # 转换 expires 为 int（CDP TimeSinceEpoch 要求整数）
+                    # 转换 expires 为 CDP TimeSinceEpoch 类型
                     expires = None
                     exp_val = ck.get("expires")
                     if exp_val is not None:
                         try:
-                            expires = int(float(exp_val))
-                            if expires <= 0:
-                                expires = None
+                            exp_float = float(exp_val)
+                            import math
+                            if math.isfinite(exp_float) and exp_float > 0:
+                                # TimeSinceEpoch 是 nodriver CDP 类型（继承 float，有 to_json 方法）
+                                expires = cdp_network.TimeSinceEpoch(exp_float)
                         except (ValueError, TypeError):
-                            expires = None
+                            pass
 
                     # 跳过值为空或不可序列化的 cookie
                     ck_value = ck.get("value")
@@ -411,18 +429,19 @@ class BrowserAutomation:
                         skipped_reasons.append(f"跳过 cookie {ck_name}: 值无法转为字符串")
                         continue
 
-                    await self.page.send(cdp_network.set_cookie(
-                        name=ck_name,
-                        value=ck_value,
-                        domain=ck.get("domain", ""),
-                        path=ck.get("path", "/"),
-                        secure=ck.get("secure") or None,
-                        http_only=ck.get("httpOnly") or None,
-                        same_site=same_site,
-                        # 不传 expires: CDP TimeSinceEpoch 类型要求严格，
-                        # float/int 都会触发 'X' object has no attribute 'to_json'
-                        # 不设过期时间 → CDP 默认使用 session cookie
-                    ))
+                    set_args = {
+                        "name": ck_name,
+                        "value": ck_value,
+                        "domain": ck.get("domain", ""),
+                        "path": ck.get("path", "/"),
+                        "secure": ck.get("secure") or None,
+                        "http_only": ck.get("httpOnly") or None,
+                        "same_site": same_site,
+                    }
+                    if expires is not None:
+                        set_args["expires"] = expires
+
+                    await self.page.send(cdp_network.set_cookie(**set_args))
                     imported += 1
                 except Exception as inner_e:
                     logger.warning(f"跳过 cookie {ck.get('name')}: {inner_e}")
