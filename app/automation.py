@@ -481,17 +481,27 @@ class BrowserAutomation:
         'img[alt*="二维码"]', 'img[alt*="QR"]',
     ]
 
-    # 登录态 cookie 名称
+    # 登录态 cookie 名称（来自真实 BOSS 会话分析）
+    # HttpOnly cookie（CDP 可读，document.cookie 不可读）:
+    #   wt2   - BOSS 会话 token
+    #   wbg   - BOSS 认证 token
+    #   zp_at - 直聘 access token
+    # 普通 cookie:
+    #   bst   - BOSS security token
+    #   __c   - 会话标识
+    #   __a   - 用户标识
     _LOGIN_COOKIE_NAMES = [
-        "__zp_stoken__", "geek_zp_token", "token", "sid",
-        "bstoken", "Hm_lvt_*",
+        "wt2",          # BOSS 会话 token (HttpOnly)
+        "wbg",          # BOSS 认证 token (HttpOnly)
+        "zp_at",        # 直聘 access token (HttpOnly)
+        "bst",          # BOSS security token
     ]
 
     async def check_login(self) -> Dict:
         """检测 BOSS直聘登录状态（F4 增强）
 
         增强逻辑：
-        1. 确保在 zhipin.com 域名下
+        1. 导航到招聘者 Dashboard (/web/chat/recommend) — 右上角有用户信息
         2. 通过 DOM 元素 + document.cookie 判断登录状态
         3. 若未登录，导航到登录页使 VNC 中可见扫码二维码
         4. 检测二维码是否可见，返回 qr_visible 字段
@@ -502,14 +512,14 @@ class BrowserAutomation:
         if not await self._ensure_session(timeout=8):
             return {"logged_in": False, "message": "浏览器未连接或重连失败"}
         try:
-            # --- Step 0: 先导航到首页（避免卡在加载中的页面） ---
+            # --- Step 0: 导航到招聘者 Dashboard（右上角有用户信息，比首页更可靠） ---
             try:
                 await asyncio.wait_for(
-                    self.page.get("https://www.zhipin.com/"), timeout=10
+                    self.page.get("https://www.zhipin.com/web/chat/recommend"), timeout=10
                 )
-                await asyncio.sleep(2)
+                await asyncio.sleep(3)
             except asyncio.TimeoutError:
-                pass  # 首页加载超时不影响后续检测
+                pass  # 页面加载超时不影响后续检测
 
             # --- Step 1: 确保在 zhipin.com 域名下 ---
             try:
@@ -520,8 +530,8 @@ class BrowserAutomation:
                 return {"logged_in": False, "message": "页面响应超时，请刷新后重试"}
             if "zhipin.com" not in current_url:
                 logger.info(f"当前不在 zhipin.com ({current_url})，正在导航...")
-                await self.page.get("https://www.zhipin.com/")
-                await asyncio.sleep(2)
+                await self.page.get("https://www.zhipin.com/web/chat/recommend")
+                await asyncio.sleep(3)
                 current_url = await self.page.evaluate("window.location.href") or ""
 
             # --- Step 2: 通过 DOM 选择器判断已登录 ---
@@ -547,13 +557,22 @@ class BrowserAutomation:
                     logger.warning(f"自动备份 cookie 失败: {cookie_err}")
                 return result
 
-            # --- Step 3: 通过 document.cookie 辅助判断 ---
-            cookie_str = await self.page.evaluate("document.cookie") or ""
-            has_login_cookie = any(
-                f"{name.split('*')[0]}=" in cookie_str
-                for name in self._LOGIN_COOKIE_NAMES
-                if "*" not in name  # 跳过通配符
-            )
+            # --- Step 3: 通过 CDP 读取 cookie（包括 HttpOnly）辅助判断 ---
+            # document.cookie 无法读取 HttpOnly cookie（wt2/wbg/zp_at），
+            # 必须通过 CDP Network.getCookies 获取
+            try:
+                from nodriver.cdp import network as cdp_network
+                all_cookies = await self.page.send(cdp_network.get_all_cookies())
+                cookie_names = {c.name for c in (all_cookies or [])}
+                has_login_cookie = any(
+                    name in cookie_names
+                    for name in self._LOGIN_COOKIE_NAMES
+                )
+            except Exception:
+                # CDP 不可用时回退到 document.cookie（只能检测 bst）
+                cookie_str = await self.page.evaluate("document.cookie") or ""
+                has_login_cookie = "bst=" in cookie_str
+
             if has_login_cookie:
                 try:
                     await self.export_cookies()

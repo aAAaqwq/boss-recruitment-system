@@ -136,9 +136,10 @@ async def _auto_contact_impl(
                 "contacted": 0, "skipped": 0, "failed": 0, "total_scanned": 0}
     logger.info(f"[F5] 今日已联系{already}人，剩余{remaining}")
 
-    # 导航
-    # BOSS直聘已将候选人列表从父页面迁移到 iframe 内
-    # 直接导航到 iframe URL，否则 JS 提取无法跨 frame 访问卡片
+    # 导航到招聘者 Dashboard 的 iframe 候选列表页面
+    # /web/chat/recommend 父页面将候选人列表嵌入 iframe (/web/frame/recommend/)
+    # JS 无法跨 frame 访问 DOM，必须直接导航到 iframe URL
+    # 登录检测使用父页面 /web/chat/recommend（右上角用户头像更可靠）
     nav = await automation.navigate("https://www.zhipin.com/web/frame/recommend/")
     if nav.get("status") == "error":
         nav = await automation.navigate("https://www.zhipin.com/web/geek/recommend")
