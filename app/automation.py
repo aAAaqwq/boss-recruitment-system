@@ -5,7 +5,7 @@ import random
 import subprocess
 import os
 import threading
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict, Tuple, List, Any
 from pathlib import Path
 from datetime import datetime
 
@@ -17,6 +17,73 @@ try:
     import nodriver as uc
 except ImportError:
     uc = None  # 允许在非 Docker 环境导入
+
+
+# ========== CDP 返回值反序列化 ==========
+
+def _cdp_deserialize(obj: Any) -> Any:
+    """递归地将 CDP RemoteObject 格式转为 Python 原生类型。
+
+    CDP 序列化格式:
+      - 对象: [[key1, {'type': t1, 'value': v1}], [key2, {'type': t2, 'value': v2}], ...]
+      - 数组: [[{'type': t1, 'value': v1}], [{'type': t2, 'value': v2}], ...]
+      - 标量: {'type': 'string'|'number'|'boolean', 'value': v}
+
+    此函数将上述格式递归转为 Python dict/list/标量。
+    """
+    if obj is None:
+        return None
+
+    # 已经是 Python 原生类型，直接返回
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    if isinstance(obj, dict):
+        # 单个值描述符: {'type': '...', 'value': ...}
+        if 'type' in obj and 'value' in obj:
+            return obj.get('value')
+        # 普通字典，递归处理
+        return {k: _cdp_deserialize(v) for k, v in obj.items()}
+
+    if isinstance(obj, list):
+        if not obj:
+            return []
+
+        # 判断是对象 [[k, v_desc], [k, v_desc], ...] 还是数组 [v_desc, v_desc, ...]
+        first = obj[0]
+        if isinstance(first, list) and len(first) == 2:
+            key_candidate = first[0]
+            val_candidate = first[1]
+            # 格式1: [string_name, {type, value}] — CDP 值描述符格式
+            if isinstance(key_candidate, str) and isinstance(val_candidate, dict) and 'type' in val_candidate:
+                result = {}
+                for item in obj:
+                    if isinstance(item, list) and len(item) == 2:
+                        k, v = item
+                        if isinstance(k, str):
+                            result[k] = _cdp_deserialize(v)
+                return result
+            # 格式2: [string_name, already_deserialized_value] — nodriver 预反序列化后的格式
+            if isinstance(key_candidate, str):
+                result = {}
+                for item in obj:
+                    if isinstance(item, list) and len(item) == 2:
+                        k, v = item
+                        if isinstance(k, str):
+                            result[k] = _cdp_deserialize(v)
+                return result
+
+        # 可能是数组: 每个元素可能是值描述符或普通元素
+        result = []
+        for item in obj:
+            if isinstance(item, list) and len(item) == 1 and isinstance(item[0], dict):
+                # CDP 数组元素包裹: [[{type, value}], [{type, value}], ...]
+                result.append(_cdp_deserialize(item[0]))
+            else:
+                result.append(_cdp_deserialize(item))
+        return result
+
+    return obj
 
 
 class BrowserAutomation:
@@ -202,11 +269,15 @@ class BrowserAutomation:
             return {"status": "error", "message": str(e)}
 
     async def execute_js(self, script: str):
-        """执行 JavaScript"""
+        """执行 JavaScript，自动反序列化 CDP RemoteObject 格式"""
         if not await self._ensure_session():
             return None
         try:
-            return await self.page.evaluate(script)
+            result = await self.page.evaluate(script)
+            deserialized = _cdp_deserialize(result)
+            if deserialized is not None and not isinstance(deserialized, (dict, list, str, int, float, bool)):
+                logger.warning(f"[execute_js] 非预期返回类型: {type(deserialized).__name__} = {repr(deserialized)[:200]}")
+            return deserialized
         except Exception as e:
             logger.error(f"JS 执行失败: {e}")
             return None

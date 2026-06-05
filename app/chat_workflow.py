@@ -45,9 +45,11 @@ async def _batch_reply_impl(
 
     # 3. 获取联系人列表，筛选有未读消息的
     contacts = await get_contacts()
-    unread = [c for c in contacts if c.get("hasUnread")]
+    # 防御: 确保每个contact是dict
+    valid_contacts = [c for c in contacts if isinstance(c, dict)]
+    unread = [c for c in valid_contacts if c.get("hasUnread")]
     unread = unread[:max_count]
-    logger.info(f"[F7] 共{len(contacts)}个联系人，{len(unread)}个有未读消息")
+    logger.info(f"[F7] 共{len(valid_contacts)}个联系人，{len(unread)}个有未读消息")
 
     if not unread:
         return {

@@ -96,6 +96,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
 
     # 初始化数据库
     db = Database()
+    db.connect()
     db.init_tables()
 
     downloaded = 0

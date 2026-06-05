@@ -694,9 +694,10 @@ def _run_reply_in_thread(max_count: int):
             api_logger.info(f"[F7] 完成: {_reply_task_status['message']}")
 
         except Exception as e:
+            import traceback
             _reply_task_status["status"] = "error"
             _reply_task_status["message"] = str(e)
-            api_logger.error(f"[F7] 失败: {e}")
+            api_logger.error(f"[F7] 失败: {e}\n{traceback.format_exc()}")
 
     try:
         _asyncio.run(_thread_main())

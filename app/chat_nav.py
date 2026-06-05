@@ -171,11 +171,18 @@ async def navigate_to_chat() -> Dict:
 
     # 尝试点击"沟通"导航按钮
     clicked = await automation.execute_js(_JS_CLICK_CHAT_NAV)
+    # 防御: 确保返回值是 dict 而非 list
+    if not isinstance(clicked, dict):
+        logger.warning(f"[ChatNav] JS返回了非dict类型: {type(clicked).__name__} = {clicked!r}")
+        clicked = None
     if not clicked or not clicked.get("found"):
         # 备用: 导航到推荐的页面（可能自动跳转到聊天）
         await automation.navigate("https://www.zhipin.com/web/geek/chat")
         await asyncio.sleep(3)
         clicked = await automation.execute_js(_JS_CLICK_CHAT_NAV)
+        if not isinstance(clicked, dict):
+            logger.warning(f"[ChatNav] JS重试也返回了非dict类型: {type(clicked).__name__}")
+            clicked = None
 
     await asyncio.sleep(2)
 
