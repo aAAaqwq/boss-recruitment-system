@@ -464,7 +464,7 @@ class BrowserAutomation:
     LOGIN_URL = "https://www.zhipin.com/web/user/?ka=header-login"
 
     # 反向判断依赖的页面文案（不再用CSS选择器正向猜DOM）
-    # 已登录: 页面含"推荐牛人"/"沟通"等招聘者Dashboard文案
+    # 已登录: 页面含"推荐牛人"/"职位管理"等招聘者Dashboard专属文案
     # 未登录: URL含登录路径 或 页面有"登录/注册"按钮
 
     # 登录按钮选择器
@@ -550,7 +550,9 @@ class BrowserAutomation:
             )
             has_recruiter_content = (
                 "推荐牛人" in page_text
-                or "沟通" in page_text
+                or "职位管理" in page_text    # 招聘者侧边栏
+                or "牛人管理" in page_text    # 招聘者侧边栏
+                or "道具" in page_text        # 招聘者侧边栏
             )
 
             # 有招聘者内容且不在登录页 → 已登录
@@ -577,7 +579,7 @@ class BrowserAutomation:
                         await self.page.get("https://www.zhipin.com/web/chat/recommend")
                         await asyncio.sleep(3)
                         retry_text = await self.page.evaluate("document.body.innerText.substring(0,500)") or ""
-                        if "推荐牛人" in retry_text or "沟通" in retry_text:
+                        if "推荐牛人" in retry_text or "职位管理" in retry_text or "牛人管理" in retry_text:
                             logger.info("Cookie恢复成功，页面显示招聘者内容")
                             try:
                                 await self.export_cookies()
