@@ -363,7 +363,7 @@ async def disconnect_browser():
 # ---- VNC Config ----
 
 @app.get("/api/vnc/config")
-async def get_vnc_config():
+async def get_vnc_config(request: Request):
     """获取VNC连接配置（密码来自环境变量，不设硬编码默认值）"""
     vnc_password = os.environ.get("VNC_PASSWORD")
     if not vnc_password:
@@ -371,12 +371,14 @@ async def get_vnc_config():
             status_code=500,
             detail="VNC_PASSWORD 环境变量未设置。请在 .env 或 docker-compose.yml 中配置。"
         )
-    # 密码通过API返回给前端（注：不放在URL查询参数中，前端通过JS API设置）
+    # 动态获取 hostname，支持远程部署
+    host_header = request.headers.get("host", "localhost:8321")
+    hostname = host_header.split(":")[0]
     return {
-        "host": "localhost",
+        "host": hostname,
         "port": 5901,
         "password": vnc_password,
-        "novnc_url": f"http://localhost:6901/?autoconnect=true&reconnect=true&show_dot=true"
+        "novnc_url": f"http://{hostname}:6901/?autoconnect=true&reconnect=true&show_dot=true"
     }
 
 
@@ -468,7 +470,7 @@ async def open_boss_browser():
         "--window-position=0,0",
         "--no-first-run",
         "--no-default-browser-check",
-        "--user-data-dir=/tmp/chrome-debug-profile",
+        "--user-data-dir=/app/data/chrome-profile",
         "https://www.zhipin.com/",
     ]
 

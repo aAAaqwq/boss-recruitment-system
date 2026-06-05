@@ -58,8 +58,8 @@
         .vnc-viewport {
             flex: 1;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            align-items: stretch;
+            justify-content: stretch;
             background: #0a0a0a;
             position: relative;
             overflow: hidden;
@@ -78,6 +78,16 @@
             height: 80px;
             margin-bottom: 15px;
             opacity: 0.5;
+        }
+        .vnc-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
         }
         .vnc-toolbar {
             background: #16213e;
@@ -380,7 +390,7 @@
                 </svg>
                 <p>点击"连接桌面"启动浏览器</p>
             </div>
-            <iframe class="vnc-iframe" id="vncFrame" style="display:none;"></iframe>
+            <iframe class="vnc-iframe" id="vncFrame" style="display:none;" allow="clipboard-read; clipboard-write"></iframe>
         </div>
         <div class="vnc-toolbar">
             <button onclick="refreshVNC()">🔄 刷新</button>
@@ -594,6 +604,7 @@
     <script>
         const API_BASE = 'http://localhost:8001';
         let vncConnected = false;
+        let vncScale = 1;
         let authToken = localStorage.getItem('auth_token') || null;
         let config = {
             filter: {
@@ -884,7 +895,9 @@
                 }
 
                 // 前端拼接 noVNC URL（密码不在服务端日志）
-                const novncUrl = `${vncConfig.novnc_url}&password=${encodeURIComponent(vncConfig.password)}`;
+                // resize=scale: 自动缩放桌面到 iframe 大小
+                // password: 自动传递 VNC 密码认证
+                const novncUrl = `${vncConfig.novnc_url}&password=${encodeURIComponent(vncConfig.password)}&resize=scale`;
 
                 document.getElementById('vncPlaceholder').style.display = 'none';
                 const iframe = document.getElementById('vncFrame');
@@ -937,11 +950,30 @@
         }
 
         function zoomIn() {
-            log('放大视图 (暂未实现)', 'info');
+            if (!vncConnected) { log('请先连接桌面', 'warn'); return; }
+            vncScale = Math.min(vncScale + 0.25, 3);
+            applyVncScale();
+            log(`🔍 放大至 ${Math.round(vncScale * 100)}%`, 'info');
         }
 
         function zoomOut() {
-            log('缩小视图 (暂未实现)', 'info');
+            if (!vncConnected) { log('请先连接桌面', 'warn'); return; }
+            vncScale = Math.max(vncScale - 0.25, 0.25);
+            applyVncScale();
+            log(`🔍 缩小至 ${Math.round(vncScale * 100)}%`, 'info');
+        }
+
+        function applyVncScale() {
+            const iframe = document.getElementById('vncFrame');
+            if (vncScale === 1) {
+                iframe.style.transform = '';
+            } else {
+                iframe.style.transform = `scale(${vncScale})`;
+                iframe.style.transformOrigin = '0 0';
+                // 补偿缩放后的尺寸，避免裁切
+                iframe.style.width = `${100 / vncScale}%`;
+                iframe.style.height = `${100 / vncScale}%`;
+            }
         }
 
         function screenshot() {
