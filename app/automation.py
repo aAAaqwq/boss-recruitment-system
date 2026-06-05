@@ -501,10 +501,11 @@ class BrowserAutomation:
         """检测 BOSS直聘登录状态（F4 增强）
 
         增强逻辑：
-        1. 导航到招聘者 Dashboard (/web/chat/recommend) — 右上角有用户信息
-        2. 通过 DOM 元素 + document.cookie 判断登录状态
-        3. 若未登录，导航到登录页使 VNC 中可见扫码二维码
-        4. 检测二维码是否可见，返回 qr_visible 字段
+        1. 先导入已保存的 cookie，恢复登录态
+        2. 导航到招聘者 Dashboard (/web/chat/recommend) — 右上角有用户信息
+        3. 通过 DOM 元素 + CDP cookie 判断登录状态
+        4. 若未登录，导航到登录页使 VNC 中可见扫码二维码
+        5. 检测二维码是否可见，返回 qr_visible 字段
 
         Returns:
             {logged_in, message, username?, qr_visible?}
@@ -512,7 +513,16 @@ class BrowserAutomation:
         if not await self._ensure_session(timeout=8):
             return {"logged_in": False, "message": "浏览器未连接或重连失败"}
         try:
-            # --- Step 0: 导航到招聘者 Dashboard（右上角有用户信息，比首页更可靠） ---
+            # --- Step 0: 先导入已保存的 cookie，恢复登录态 ---
+            # Chrome 重启后 profile 中的 cookie 可能未即时加载，
+            # 先导入备份的 cookie 避免导航时被重定向到登录页
+            if COOKIE_FILE.exists():
+                try:
+                    await self.import_cookies()
+                except Exception:
+                    pass  # cookie 导入失败不影响后续检测
+
+            # --- Step 1: 导航到招聘者 Dashboard（右上角有用户信息，比首页更可靠） ---
             try:
                 await asyncio.wait_for(
                     self.page.get("https://www.zhipin.com/web/chat/recommend"), timeout=10
@@ -521,7 +531,7 @@ class BrowserAutomation:
             except asyncio.TimeoutError:
                 pass  # 页面加载超时不影响后续检测
 
-            # --- Step 1: 确保在 zhipin.com 域名下 ---
+            # --- Step 2: 确保在 zhipin.com 域名下 ---
             try:
                 current_url = await asyncio.wait_for(
                     self.page.evaluate("window.location.href"), timeout=8
@@ -534,7 +544,7 @@ class BrowserAutomation:
                 await asyncio.sleep(3)
                 current_url = await self.page.evaluate("window.location.href") or ""
 
-            # --- Step 2: 通过 DOM 选择器判断已登录 ---
+            # --- Step 3: 通过 DOM 选择器判断已登录 ---
             user_el = None
             for sel in self._LOGGED_IN_SELECTORS:
                 try:
@@ -557,7 +567,7 @@ class BrowserAutomation:
                     logger.warning(f"自动备份 cookie 失败: {cookie_err}")
                 return result
 
-            # --- Step 3: 通过 CDP 读取 cookie（包括 HttpOnly）辅助判断 ---
+            # --- Step 4: 通过 CDP 读取 cookie（包括 HttpOnly）辅助判断 ---
             # document.cookie 无法读取 HttpOnly cookie（wt2/wbg/zp_at），
             # 必须通过 CDP Network.getCookies 获取
             try:
@@ -580,7 +590,7 @@ class BrowserAutomation:
                     pass
                 return {"logged_in": True, "message": "已登录（cookie 检测）"}
 
-            # --- Step 4: 未登录 — 导航到登录页显示二维码 ---
+            # --- Step 5: 未登录 — 导航到登录页显示二维码 ---
             logger.info("未检测到登录态，导航到登录页...")
             qr_visible = await self._navigate_to_login_page()
             return {
