@@ -439,6 +439,16 @@
                     <span class="spinner"></span>
                     <span class="btn-text">✅ 检查登录状态</span>
                 </button>
+                <div style="display:flex;gap:8px;margin-bottom:8px;">
+                    <button class="btn btn-secondary btn-sm" style="flex:1" onclick="exportCookies()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">💾 导出Cookie</span>
+                    </button>
+                    <button class="btn btn-secondary btn-sm" style="flex:1" onclick="importCookies()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">📂 导入Cookie</span>
+                    </button>
+                </div>
             </div>
 
             <!-- 批量操作 -->
@@ -1035,26 +1045,115 @@
             }
         }
 
+        let _loginPollTimer = null;
+        let _loginBtnEl = null;
+
         function checkLogin() {
-            if (!vncConnected) {
-                log('请先连接浏览器', 'warn');
-                return;
+            const btn = event.target.closest('.btn');
+            _loginBtnEl = btn;
+            setLoading(btn, true);
+            log('🔍 正在检查BOSS直聘登录状态...', 'info');
+
+            // 停止之前的轮询
+            if (_loginPollTimer) {
+                clearInterval(_loginPollTimer);
+                _loginPollTimer = null;
             }
 
+            _doCheckLogin();
+        }
+
+        function _doCheckLogin() {
+            apiCall('/api/browser/check-login', null, 'GET').then(data => {
+                if (!data) {
+                    if (_loginBtnEl) setLoading(_loginBtnEl, false);
+                    log('❌ 登录检查请求失败', 'error');
+                    return;
+                }
+
+                if (data.logged_in) {
+                    // 登录成功
+                    if (_loginBtnEl) setLoading(_loginBtnEl, false);
+                    document.getElementById('vncStatusDot').className = 'status-dot online';
+                    document.getElementById('vncStatusText').textContent = '已登录';
+                    const userInfo = data.username ? ` (${data.username})` : '';
+                    log('✅ 已登录' + userInfo, 'info');
+
+                    // 自动导出Cookie（保存登录态到文件）
+                    apiCall('/api/browser/export-cookies').then(ck => {
+                        if (ck && ck.status === 'ok') {
+                            log('💾 Cookie已自动备份 (' + ck.count + '条)', 'info');
+                        }
+                    });
+
+                    // 停止轮询
+                    if (_loginPollTimer) {
+                        clearInterval(_loginPollTimer);
+                        _loginPollTimer = null;
+                    }
+                    _loginBtnEl = null;
+                } else {
+                    // 未登录
+                    if (data.qr_visible) {
+                        if (_loginBtnEl) setLoading(_loginBtnEl, false);
+                        log('📱 登录二维码已显示在VNC桌面中，请用手机BOSS直聘APP扫码', 'warn');
+                    } else {
+                        log('📱 未登录，请在VNC中查看登录页面并扫码', 'warn');
+                    }
+
+                    // 开始轮询（每5秒检查一次，最多120次=10分钟）
+                    if (!_loginPollTimer) {
+                        log('⏳ 每5秒自动检查登录状态，请扫码后等待...', 'info');
+                        let pollCount = 0;
+                        _loginPollTimer = setInterval(() => {
+                            pollCount++;
+                            if (pollCount > 120) {
+                                clearInterval(_loginPollTimer);
+                                _loginPollTimer = null;
+                                log('⏰ 登录轮询超时（10分钟），请重新点击"检查登录状态"', 'warn');
+                                _loginBtnEl = null;
+                                return;
+                            }
+                            _doCheckLogin();
+                        }, 5000);
+                    }
+                }
+            });
+        }
+
+        function exportCookies() {
             const btn = event.target.closest('.btn');
             setLoading(btn, true);
-            log('检查登录状态...');
-
-            apiCall('/api/browser/check-login').then(data => {
+            log('正在导出Cookie备份...');
+            apiCall('/api/browser/export-cookies').then(data => {
                 setLoading(btn, false);
-                if (data) {
-                    if (data.logged_in) {
-                        log(`✅ 已登录: ${data.username || '用户'}`, 'info');
-                    } else {
-                        log(`❌ ${data.message || '未登录'}`, 'warn');
-                    }
+                if (data && data.status === 'ok') {
+                    log('✅ Cookie已导出 (' + data.count + '条)', 'info');
                 } else {
-                    log('❌ 未登录，请先扫码', 'warn');
+                    log('❌ 导出失败: ' + (data?.message || '未知错误'), 'error');
+                }
+            });
+        }
+
+        function importCookies() {
+            const btn = event.target.closest('.btn');
+            setLoading(btn, true);
+            log('📂 正在恢复Cookie...');
+            apiCall('/api/browser/import-cookies').then(data => {
+                setLoading(btn, false);
+                if (data && data.status === 'ok') {
+                    log('✅ Cookie已恢复 (' + data.imported + '/' + data.total + '条)', 'info');
+                    // 导入后刷新页面使cookie生效
+                    log('🔄 正在刷新页面使Cookie生效...', 'info');
+                    apiCall('/api/browser/execute', { script: 'location.reload()' }).then(() => {
+                        // 刷新后延迟检查登录状态
+                        setTimeout(() => {
+                            log('🔍 正在验证登录状态...', 'info');
+                            _doCheckLogin();
+                        }, 3000);
+                    });
+                } else {
+                    log('❌ 恢复失败: ' + (data?.message || '未知错误'), 'error');
                 }
             });
         }
@@ -1167,7 +1266,9 @@
         // 页面加载时初始化
         window.onload = function() {
             loadConfig();
-            setTimeout(checkLogin, 500);
+            // 加载时只检查浏览器状态，不自动触发登录检查
+            // 用户需手动点击"检查登录状态"按钮
+            log('📡 系统就绪，请依次操作：连接桌面 → 打开BOSS直聘 → 检查登录', 'info');
         };
     </script>
 </body>
