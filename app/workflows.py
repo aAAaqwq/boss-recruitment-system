@@ -19,22 +19,32 @@ from app.filter_criteria import (
 
 # ========== 3.1 主动筛选沟通流程 ==========
 
-# JS: 提取候选人卡片（多种选择器fallback）
+# JS: 提取候选人卡片（基于实际BOSS DOM结构优化）
+# 当前BOSS DOM结构: UL.card-list > LI.card-item > DIV.card-inner.common-wrap
+# 优先使用.card-inner作为选择器（包含完整候选人信息），fallback到通用card匹配
 _JS_EXTRACT_CARDS = """
 (function() {
-    var sels = ['.card-inner','.recommend-card','.geek-card','.card-wrap',
-        '[class*="card-inner"]','[class*="recommend-card"]','[class*="geek-card"]',
-        '.rec-card-inner','.candidate-card','.recommend-list .card',
-        '[class*="rec-card"]','[class*="boss-card"]','[class*="talent-card"]'];
+    // 优先选择器：基于实际BOSS DOM结构
+    var sels = [
+        '.card-inner',           // 主选择器：.card-item > .card-inner.common-wrap
+        '.candidate-card-wrap',  // 备用：外层容器
+        '[class*="card-inner"]', // 属性模糊匹配
+        '.recommend-card',       // 通用推荐卡片
+        '[class*="recommend-card"]'
+    ];
     var cards = [];
+    // 尝试每个选择器
     for (var i = 0; i < sels.length; i++) {
         var f = document.querySelectorAll(sels[i]);
         if (f.length > 0) { cards = Array.from(f); break; }
     }
+    // Fallback: 通过尺寸和类名过滤通用card元素
     if (cards.length === 0) {
         cards = Array.from(document.querySelectorAll('[class*="card"]')).filter(function(el) {
             var r = el.getBoundingClientRect();
-            return r.width > 200 && r.height > 80 && r.width < 800 && r.height < 400;
+            var text = (el.innerText||'').trim();
+            // 过滤：有实际内容 + 合理尺寸（排除顶部导航/侧边栏等）
+            return r.width > 200 && r.height > 80 && r.width < 800 && r.height < 400 && text.length > 20;
         });
     }
     // 返回 JSON 字符串避免 CDP RemoteObject 反序列化问题
@@ -46,16 +56,28 @@ _JS_EXTRACT_CARDS = """
 })()
 """
 
-# JS: 查找打招呼按钮
+# JS: 查找打招呼按钮（基于实际BOSS DOM结构优化）
+# 当前BOSS DOM: <button class="btn btn-greet">打招呼</button>
+#          或 <span class="btn-doc">打招呼</span>（嵌套在button内）
 _JS_FIND_GREET_BTN = """
 (function() {
-    var btns = document.querySelectorAll(
-        'button,[class*="btn"],[class*="greet"],[class*="hello"],a,[class*="chat"]'
-    );
-    for (var i = 0; i < btns.length; i++) {
-        var t = (btns[i].innerText||'').trim();
-        if (t==='打招呼'||t==='立即沟通'||t==='沟通'||t==='开聊'||t==='继续沟通') {
-            var r = btns[i].getBoundingClientRect();
+    // 优先查找主按钮：button.btn-greet
+    var greetBtns = document.querySelectorAll('button.btn-greet, button[class*="greet"]');
+    for (var i = 0; i < greetBtns.length; i++) {
+        var t = (greetBtns[i].innerText||'').trim();
+        if (t==='打招呼'||t==='立即沟通'||t==='开聊'||t==='继续沟通'||t==='沟通') {
+            var r = greetBtns[i].getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+                return JSON.stringify({found:true,x:r.x+r.width/2,y:r.y+r.height/2,text:t});
+            }
+        }
+    }
+    // Fallback: 通用按钮/链接搜索
+    var allBtns = document.querySelectorAll('button, a, [class*="btn"], [class*="greet"], [role="button"]');
+    for (var i = 0; i < allBtns.length; i++) {
+        var t = (allBtns[i].innerText||'').trim();
+        if (t==='打招呼'||t==='立即沟通'||t==='开聊'||t==='继续沟通'||t==='沟通') {
+            var r = allBtns[i].getBoundingClientRect();
             if (r.width > 0 && r.height > 0) {
                 return JSON.stringify({found:true,x:r.x+r.width/2,y:r.y+r.height/2,text:t});
             }

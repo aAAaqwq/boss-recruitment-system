@@ -96,7 +96,24 @@ class Database:
         """)
         
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_boss_id_chat ON chat_sessions(boss_id)")
-        
+
+        # resume_operations表（简历操作记录 — F6去重依据）
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS resume_operations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                candidate_name TEXT,
+                action TEXT,
+                resume_downloaded INTEGER DEFAULT 0,
+                wechat_exchanged INTEGER DEFAULT 0,
+                detail TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_resume_candidate ON resume_operations(candidate_name)"
+        )
+
         self.conn.commit()
     
     # ========== 候选人操作 ==========

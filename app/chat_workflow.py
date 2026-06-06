@@ -1,4 +1,9 @@
-"""F7 批量AI聊天回复工作流"""
+"""F7 批量AI聊天回复工作流
+
+修复:
+- AI失败时自动降级到模板回复
+- 生成方式标记 (ai / template_fallback)
+"""
 import asyncio
 import random
 from datetime import datetime
@@ -12,6 +17,13 @@ from app.chat_nav import (
 from app.chat_service import chat_service
 from app.database import Database
 from app.logging_config import logger
+
+# 默认兜底模板（AI失败时使用）
+_DEFAULT_FALLBACK_TEMPLATES = [
+    "您好，感谢您的关注！我正在查看您的消息，稍后会给您详细回复。",
+    "您好，感谢您对职位的关注。我会尽快了解您的情况并回复您。",
+    "感谢您的来信！我会仔细查看并尽快给您回复。祝好！",
+]
 
 
 async def _batch_reply_impl(
@@ -98,21 +110,22 @@ async def _batch_reply_impl(
 
         logger.info(f"[F7] {name} 的最新消息: {candidate_msg[:60]}...")
 
-        # c. 生成AI回复
+        # c. 生成AI回复（失败时自动降级到模板）
         reply, error = await chat_service.generate_reply(
             candidate_name=name,
             candidate_message=candidate_msg,
             history=None,
             template=template,
         )
+        generation_method = "ai"
 
         if not reply:
-            logger.warning(f"[F7] AI回复生成失败: {error}")
-            failed += 1
-            results.append({"name": name, "success": False, "error": error, "candidate_msg": candidate_msg})
-            continue
+            # PRD要求: AI生成为主，话术模板作为兜底
+            logger.warning(f"[F7] AI回复生成失败: {error}，降级到模板回复")
+            reply = random.choice(_DEFAULT_FALLBACK_TEMPLATES)
+            generation_method = "template_fallback"
 
-        logger.info(f"[F7] AI回复: {reply[:60]}...")
+        logger.info(f"[F7] 回复({generation_method}): {reply[:60]}...")
 
         # d. 发送消息（dry_run 模式跳过实际发送）
         if dry_run:
@@ -153,6 +166,7 @@ async def _batch_reply_impl(
         results.append({
             "name": name, "success": True, "reply": reply,
             "candidate_msg": candidate_msg[:100],
+            "generation_method": generation_method,
         })
 
         # 间隔休息，模拟人类操作

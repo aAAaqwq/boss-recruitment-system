@@ -182,6 +182,12 @@ class AutomationManager:
 manager = AutomationManager()
 
 # ============================================================
+# 浏览器任务互斥锁 — 同一时刻只有一个F5/F6/F7任务占用浏览器
+# ============================================================
+_browser_task_lock = threading.Lock()
+_active_task_type: Optional[str] = None
+
+# ============================================================
 # 数据库
 # ============================================================
 def get_db():
@@ -537,23 +543,6 @@ async def open_boss_browser():
     }
 
 
-# ============================================================
-# 兼容旧端点（已弃用）
-# ============================================================
-
-@app.post("/api/browser/open")
-async def open_browser():
-    """[已弃用] 打开浏览器进行登录
-
-    请使用 POST /api/browser/connect 替代
-    """
-    result = await automation.connect()
-    # 如果成功连接，导航到BOSS直聘登录页
-    if result.get("status") == "connected":
-        await automation.navigate("https://www.zhipin.com/")
-    return result
-
-
 @app.get("/api/browser/check-login")
 async def check_browser_login():
     """检测 BOSS直聘登录状态"""
@@ -580,30 +569,6 @@ async def import_cookies():
     return await automation.import_cookies()
 
 
-@app.post("/api/workflow/say-hello")
-async def say_hello(req: WorkflowRequest):
-    """主动打招呼"""
-    try:
-        api_logger.info(f"启动打招呼任务，上限 {req.limit} 人")
-        # TODO: 实现实际的打招呼逻辑
-        return {"status": "started", "message": f"打招呼任务已启动，上限 {req.limit} 人"}
-    except Exception as e:
-        api_logger.error(f"打招呼任务失败: {e}")
-        return {"status": "error", "message": str(e)}
-
-
-@app.post("/api/workflow/get-resumes")
-async def get_resumes(req: WorkflowRequest):
-    """批量获取简历"""
-    try:
-        api_logger.info(f"启动简历获取任务，上限 {req.limit} 人")
-        # TODO: 实现实际的简历获取逻辑
-        return {"status": "started", "message": f"简历获取任务已启动，上限 {req.limit} 人"}
-    except Exception as e:
-        api_logger.error(f"简历获取任务失败: {e}")
-        return {"status": "error", "message": str(e)}
-
-
 # ============================================================
 # F7 批量AI回复任务状态
 # ============================================================
@@ -614,17 +579,22 @@ _reply_task_status: Dict[str, Any] = {
 
 
 @app.post("/api/workflow/reply-messages")
-async def reply_messages(req: WorkflowRequest):
+async def reply_messages(req: WorkflowRequest, current_user: dict = Depends(verify_token)):
     """批量回复未读消息 — 独立线程执行
 
     在独立线程中运行 batch_reply_workflow，避免阻塞 FastAPI 事件循环。
     通过 GET /api/workflow/reply-status 查询进度。
     """
-    global _reply_task_status
+    global _reply_task_status, _active_task_type
+
+    if not _browser_task_lock.acquire(blocking=False):
+        return {"status": "error", "message": f"浏览器正被 {_active_task_type} 任务占用，请稍后重试"}
 
     if _reply_task_status.get("status") == "running":
-        return {"status": "error", "message": "已有任务正在运行"}
+        _browser_task_lock.release()
+        return {"status": "error", "message": "已有回复任务正在运行"}
 
+    _active_task_type = "F7-reply"
     _reply_task_status = {
         "status": "running",
         "replied": 0,
@@ -652,7 +622,7 @@ async def reply_messages(req: WorkflowRequest):
 
 def _run_reply_in_thread(max_count: int):
     """在独立线程中运行批量回复工作流"""
-    global _reply_task_status
+    global _reply_task_status, _active_task_type
     import asyncio as _asyncio
 
     async def _thread_main():
@@ -665,10 +635,8 @@ def _run_reply_in_thread(max_count: int):
             return
 
         try:
-            # 在线程事件循环中重新连接浏览器
-            automation._connected = False
-            automation.browser = None
-            automation.page = None
+            # 线程安全地重置浏览器状态，在新事件循环中重新连接
+            automation.reset_for_thread()
             conn = await automation.connect()
             if conn.get("status") not in ("connected", "already_connected"):
                 _reply_task_status["status"] = "error"
@@ -705,6 +673,9 @@ def _run_reply_in_thread(max_count: int):
         _reply_task_status["status"] = "error"
         _reply_task_status["message"] = str(e)
         api_logger.error(f"[F7] 线程失败: {e}")
+    finally:
+        _active_task_type = None
+        _browser_task_lock.release()
 
 
 @app.get("/api/workflow/reply-status")
@@ -750,12 +721,16 @@ async def batch_download_resumes(
     在独立线程中运行，避免阻塞 FastAPI 事件循环。
     遍历聊天联系人，检测简历按钮，下载或请求简历。
     """
-    global resume_task_status
+    global resume_task_status, _active_task_type
 
-    # 检查是否有正在运行的任务
+    if not _browser_task_lock.acquire(blocking=False):
+        return {"status": "error", "message": f"浏览器正被 {_active_task_type} 任务占用，请稍后重试"}
+
     if resume_task_status["status"] == "running":
-        return {"status": "error", "message": "已有任务正在运行"}
+        _browser_task_lock.release()
+        return {"status": "error", "message": "已有简历任务正在运行"}
 
+    _active_task_type = "F6-resume"
     resume_task_status = {
         "status": "running",
         "processed": 0,
@@ -781,7 +756,7 @@ async def batch_download_resumes(
 
 def _run_resume_in_thread(max_count: int, dry_run: bool = False):
     """在独立线程中运行简历收集"""
-    global resume_task_status
+    global resume_task_status, _active_task_type
     import asyncio as _asyncio
 
     async def _thread_main():
@@ -794,14 +769,19 @@ def _run_resume_in_thread(max_count: int, dry_run: bool = False):
             return
 
         try:
-            # 在线程事件循环中连接浏览器（collect_resumes内部处理导航/登录）
-            automation._connected = False
-            automation.browser = None
-            automation.page = None
+            # 线程安全地重置浏览器状态
+            automation.reset_for_thread()
             conn = await automation.connect()
             if conn.get("status") not in ("connected", "already_connected"):
                 resume_task_status["status"] = "error"
                 resume_task_status["message"] = "浏览器连接失败"
+                return
+
+            # F6: 检查登录状态（与F7保持一致）
+            login_status = await automation.check_login()
+            if not login_status.get("logged_in"):
+                resume_task_status["status"] = "error"
+                resume_task_status["message"] = "BOSS直聘未登录，请先在VNC中扫码登录"
                 return
 
             result = await collect_resumes(max_count=max_count, dry_run=dry_run)
@@ -830,6 +810,9 @@ def _run_resume_in_thread(max_count: int, dry_run: bool = False):
         resume_task_status["status"] = "error"
         resume_task_status["message"] = str(e)
         api_logger.error(f"F6 线程失败: {e}")
+    finally:
+        _active_task_type = None
+        _browser_task_lock.release()
 
 
 @app.get("/api/resume/status")
@@ -1096,6 +1079,13 @@ async def start_filter_contact(
             args=(task_id, req.daily_cap, criteria, req.dry_run),
             daemon=True
         )
+
+        # 获取浏览器任务锁（非阻塞）
+        if not _browser_task_lock.acquire(blocking=False):
+            del _filter_tasks[task_id]
+            raise HTTPException(status_code=409, detail=f"浏览器正被 {_active_task_type} 任务占用，请稍后重试")
+        _active_task_type = "F5-filter"
+
         thread.start()
 
         return FilterContactResponse(
@@ -1124,11 +1114,9 @@ def _run_filter_contact_in_thread(
 
     async def _thread_main():
         """线程主协程：连接浏览器 → 执行工作流"""
-        # 在线程的事件循环中重新连接浏览器
+        # 在线程的事件循环中重新连接浏览器（线程安全）
         _filter_tasks[task_id]["progress"] = 5
-        automation._connected = False
-        automation.browser = None
-        automation.page = None
+        automation.reset_for_thread()
         conn_result = await automation.connect()
         if conn_result.get("status") not in ("connected", "already_connected"):
             _filter_tasks[task_id]["status"] = "error"
@@ -1137,17 +1125,37 @@ def _run_filter_contact_in_thread(
             api_logger.error(f"任务 {task_id} 失败: 浏览器连接失败")
             return
 
-        # 检查登录状态
-        login_status = await automation.check_login()
-        if not login_status.get("logged_in"):
+        # === F5 线程隔离修复：先导入 cookie，再检查登录 ===
+        # 问题：新创建的浏览器实例没有 cookie，check_login 会失败
+        # 解决：connect → import_cookies → navigate → wait → check_login → retry
+
+        # Step 1: 立即导入已保存的 cookie
+        await automation.import_cookies()
+        api_logger.info(f"任务 {task_id} 已导入 cookie（连接后立即）")
+
+        # Step 2: 显式导航到推荐页并等待 cookie 生效
+        await automation.navigate("https://www.zhipin.com/web/chat/recommend")
+        import asyncio as _asyncio_thread
+        await _asyncio_thread.sleep(5)  # 等待页面加载 + cookie 应用
+
+        # Step 3: 检查登录状态（带重试）
+        login_checked = False
+        for attempt in range(3):  # 最多 3 次尝试
+            login_status = await automation.check_login()
+            if login_status.get("logged_in"):
+                login_checked = True
+                api_logger.info(f"任务 {task_id} 登录检测成功 (尝试 {attempt + 1}/3)")
+                break
+            if attempt < 2:  # 不是最后一次尝试
+                api_logger.warning(f"任务 {task_id} 登录检测失败，5秒后重试 ({attempt + 1}/3)")
+                await _asyncio_thread.sleep(5)
+
+        if not login_checked:
             _filter_tasks[task_id]["status"] = "error"
             _filter_tasks[task_id]["error"] = "BOSS直聘未登录，请先在VNC中扫码登录"
             _filter_tasks[task_id]["completed_at"] = datetime.now().isoformat()
-            api_logger.error(f"任务 {task_id} 失败: 未登录")
+            api_logger.error(f"任务 {task_id} 失败: 未登录（3次重试后）")
             return
-
-        # 导入已保存的 cookie
-        await automation.import_cookies()
 
         _filter_tasks[task_id]["progress"] = 20
 
@@ -1187,6 +1195,9 @@ def _run_filter_contact_in_thread(
         _filter_tasks[task_id]["status"] = "failed"
         _filter_tasks[task_id]["error"] = str(e)
         _filter_tasks[task_id]["completed_at"] = datetime.now().isoformat()
+    finally:
+        _active_task_type = None
+        _browser_task_lock.release()
 
 
 @app.get("/api/filter/status/{task_id}")
@@ -1327,110 +1338,19 @@ class BatchReplyResponse(BaseModel):
     message: str
 
 
-@app.post("/api/chat/batch", response_model=BatchReplyResponse)
+@app.post("/api/chat/batch")
 async def batch_reply_messages(
     req: BatchReplyRequest,
     current_user: dict = Depends(verify_token)
 ):
-    """批量AI回复消息"""
-    from app.chat_service import chat_service
+    """批量AI回复消息 — 委托到浏览器自动化工作流
 
-    try:
-        candidates = chat_service.get_unread_messages()
-
-        if req.candidate_ids:
-            candidates = [c for c in candidates if c.get("boss_id") in req.candidate_ids]
-
-        candidates = candidates[:req.limit]
-
-        if not candidates:
-            return BatchReplyResponse(
-                total=0, success_count=0, failed_count=0,
-                results=[], message="没有待回复的消息"
-            )
-
-        # 获取模板
-        template_content = None
-        if req.template_id:
-            templates = chat_service.get_templates()
-            template = next((t for t in templates if t["id"] == req.template_id), None)
-            if template:
-                template_content = template["content"]
-        elif req.custom_template:
-            template_content = req.custom_template
-
-        results = []
-        success_count = 0
-        failed_count = 0
-
-        for candidate in candidates:
-            boss_id = candidate.get("boss_id", "")
-            candidate_name = candidate.get("candidate_name") or candidate.get("name", "未知")
-
-            history = chat_service.get_conversation_history(candidate_name, limit=10)
-            formatted_history = []
-            for h in reversed(history):
-                if h.get("candidate_message"):
-                    formatted_history.append({"role": "user", "content": h["candidate_message"]})
-                if h.get("ai_message"):
-                    formatted_history.append({"role": "assistant", "content": h["ai_message"]})
-
-            last_candidate_msg = "你好，我对这个职位很感兴趣，想了解更多详情。"
-
-            reply_content, error = await chat_service.generate_reply(
-                candidate_name=candidate_name,
-                candidate_message=last_candidate_msg,
-                history=formatted_history,
-                template=template_content
-            )
-
-            if not reply_content:
-                failed_count += 1
-                results.append(ReplyResult(
-                    boss_id=boss_id, candidate_name=candidate_name,
-                    success=False, reply_content=None, error_message=error
-                ))
-                continue
-
-            send_success = True
-            send_error = None
-            if not req.dry_run:
-                send_success, send_error = await chat_service.send_to_boss(boss_id, reply_content)
-
-            if send_success:
-                chat_service.save_conversation(
-                    boss_id=boss_id, candidate_name=candidate_name,
-                    candidate_message=last_candidate_msg,
-                    ai_message=reply_content, action="auto_reply"
-                )
-
-            if send_success:
-                success_count += 1
-                results.append(ReplyResult(
-                    boss_id=boss_id, candidate_name=candidate_name,
-                    success=True, reply_content=reply_content, error_message=None
-                ))
-            else:
-                failed_count += 1
-                results.append(ReplyResult(
-                    boss_id=boss_id, candidate_name=candidate_name,
-                    success=False, reply_content=reply_content, error_message=send_error
-                ))
-
-        return BatchReplyResponse(
-            total=len(candidates),
-            success_count=success_count,
-            failed_count=failed_count,
-            results=results,
-            message=f"批量回复完成，成功{success_count}条，失败{failed_count}条"
-        )
-
-    except Exception as e:
-        api_logger.error(f"批量回复失败: {e}")
-        return BatchReplyResponse(
-            total=0, success_count=0, failed_count=0,
-            results=[], message=f"批量回复失败: {str(e)}"
-        )
+    此端点已统一到 /api/workflow/reply-messages 的线程执行机制。
+    保留此路由以兼容前端调用，返回任务启动状态。
+    """
+    # 直接委托到线程执行的 F7 工作流
+    workflow_req = WorkflowRequest(limit=req.limit)
+    return await reply_messages(workflow_req, current_user=current_user)
 
 
 @app.get("/api/chat/history")
@@ -1473,19 +1393,6 @@ async def save_template(
 @app.get("/api/chat/templates")
 async def get_templates(current_user: dict = Depends(verify_token)):
     """获取所有回复模板"""
-    from app.chat_service import chat_service
-
-    try:
-        templates = chat_service.get_templates(user_id=current_user.get("sub", "default"))
-        return {"templates": templates}
-    except Exception as e:
-        api_logger.error(f"获取模板失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/template/list")
-async def get_template_list(current_user: dict = Depends(verify_token)):
-    """获取所有回复模板（兼容端点）"""
     from app.chat_service import chat_service
 
     try:

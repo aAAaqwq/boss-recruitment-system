@@ -100,9 +100,23 @@ _JS_HAS_UNREAD = """
 })()
 """
 
-# JS: 获取当前聊天消息
+# JS: 获取当前聊天消息（改进版：相对定位判断发送方）
 _JS_GET_MESSAGES = """
 (function() {
+    // 找到聊天消息容器以确定面板宽度
+    var containers = document.querySelectorAll(
+        '[class*="chat-content"], [class*="message-list"], [class*="msg-list"], '
+        + '[class*="dialog-body"], [class*="chat-body"]'
+    );
+    var panelWidth = 1000; // 默认宽度
+    for (var c = 0; c < containers.length; c++) {
+        var cr = containers[c].getBoundingClientRect();
+        if (cr.width > 300) {
+            panelWidth = cr.width;
+            break;
+        }
+    }
+
     var msgs = document.querySelectorAll(
         '[class*="message"], [class*="msg"], [class*="bubble"], [class*="chat-content"]'
     );
@@ -111,7 +125,13 @@ _JS_GET_MESSAGES = """
         var t = (msgs[i].innerText || '').trim();
         var r = msgs[i].getBoundingClientRect();
         if (t.length > 3 && r.width > 50) {
-            var isMe = r.x > 500; // 右侧是自己的消息
+            // 相对定位: 如果消息气泡在面板右半部分 → 是"我"发的
+            // 同时检查 CSS class 中是否有 "self"/"mine"/"right" 等标识
+            var cls = (msgs[i].className || '').toLowerCase();
+            var isMeByClass = cls.indexOf('self') >= 0 || cls.indexOf('mine') >= 0
+                || cls.indexOf('right') >= 0 || cls.indexOf('send') >= 0;
+            var isMeByPos = r.x > panelWidth * 0.5;
+            var isMe = isMeByClass || isMeByPos;
             result.push({text: t, isMe: isMe, x: r.x, y: r.y});
         }
     }

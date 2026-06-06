@@ -118,10 +118,11 @@ class BrowserAutomation:
             return True
         except (asyncio.TimeoutError, Exception):
             logger.warning("CDP session已失效，正在重连...")
-            # 清除旧状态
-            self._connected = False
-            self.browser = None
-            self.page = None
+            # 清除旧状态（线程安全）
+            with self._lock:
+                self._connected = False
+                self.browser = None
+                self.page = None
             try:
                 result = await self.connect()
                 reconnected = result.get("status") == "connected"
@@ -577,7 +578,8 @@ class BrowserAutomation:
                     if import_result.get("imported", 0) > 0:
                         # 刷新页面使 cookie 生效，重新做反向检测
                         await self.page.get("https://www.zhipin.com/web/chat/recommend")
-                        await asyncio.sleep(3)
+                        # F5 修复：增加等待时间从 3s → 5s，确保 cookie 完全应用
+                        await asyncio.sleep(5)
                         retry_text = await self.page.evaluate("document.body.innerText.substring(0,500)") or ""
                         if "推荐牛人" in retry_text or "职位管理" in retry_text or "牛人管理" in retry_text:
                             logger.info("Cookie恢复成功，页面显示招聘者内容")
@@ -806,6 +808,55 @@ class BrowserAutomation:
             timeout=10
         )
         await asyncio.sleep(random.uniform(0.3, 0.8))
+
+    # ===== 线程安全重置 =====
+
+    def reset_for_thread(self):
+        """线程安全地重置浏览器状态，供后台线程重新连接。
+
+        必须在创建新事件循环前调用，确保主循环不会引用已释放的对象。
+        """
+        with self._lock:
+            self._connected = False
+            self.browser = None
+            self.page = None
+
+    # ===== CDP 下载控制 =====
+
+    async def enable_download_interception(self, download_dir: str) -> Dict:
+        """启用 CDP 下载拦截，将浏览器下载保存到指定目录。
+
+        通过 Page.setDownloadBehavior 让 Chrome 自动保存文件到 download_dir，
+        无需处理保存对话框。
+
+        Args:
+            download_dir: 下载目标目录绝对路径
+
+        Returns:
+            {status, download_dir}
+        """
+        if not await self._ensure_session():
+            return {"status": "error", "message": "浏览器未连接"}
+        try:
+            from nodriver.cdp import page as cdp_page
+
+            # 确保目录存在
+            Path(download_dir).mkdir(parents=True, exist_ok=True)
+
+            # 设置下载行为：自动保存到指定目录，不弹对话框
+            await self.page.send(
+                cdp_page.set_download_behavior(
+                    behavior="allow",
+                    download_path=download_dir,
+                    events_enabled=True,
+                )
+            )
+            logger.info(f"[CDP] 下载拦截已启用，目标目录: {download_dir}")
+            return {"status": "ok", "download_dir": download_dir}
+        except Exception as e:
+            logger.warning(f"[CDP] 设置下载行为失败（降级模式）: {e}")
+            # 降级：不拦截下载，依赖Chrome默认行为
+            return {"status": "fallback", "message": str(e)}
 
     # ===== 复合操作 =====
 
