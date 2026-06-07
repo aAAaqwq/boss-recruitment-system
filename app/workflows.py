@@ -22,18 +22,22 @@ from app.filter_criteria import (
 # JS: 在 iframe 内提取候选人卡片 + 打招呼按钮坐标
 # /web/chat/recommend 页面结构: 主页面 > .frame-box > iframe(src=/web/frame/recommend/)
 # 候选人卡片和打招呼按钮都在 iframe 内部
+#
+# 关键修复: 只返回"打招呼按钮在可视区域内"的卡片。
+# 之前返回所有卡片(含已滚出视口的)，导致 greet_y 为负数，
+# cdp_click_viewport 点击负坐标 → 点击失败。
 _JS_EXTRACT_CARDS = """
 (function() {
     var greets = ['打招呼','立即沟通','开聊','继续沟通'];
     var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
     var doc = iframe && iframe.contentDocument ? iframe.contentDocument : document;
-    // iframe 元素偏移: getBoundingClientRect 在 iframe.contentDocument 元素上返回
-    // iframe 视口坐标, 需要加上 iframe 元素在主视口中的偏移量才是 CDP viewport 坐标
     var ox = 0, oy = 0;
     if (iframe) {
         var ir = iframe.getBoundingClientRect();
         ox = ir.x; oy = ir.y;
     }
+    // 主视口尺寸（CDP 坐标边界）
+    var vx = window.innerWidth, vy = window.innerHeight;
     var cards = Array.from(doc.querySelectorAll('.card-inner'));
     if (cards.length === 0) {
         cards = Array.from(doc.querySelectorAll('.candidate-card-wrap'));
@@ -41,7 +45,9 @@ _JS_EXTRACT_CARDS = """
     if (cards.length === 0) {
         cards = Array.from(doc.querySelectorAll('[class*="card-inner"]'));
     }
-    return JSON.stringify(cards.map(function(c) {
+    var result = [];
+    for (var i = 0; i < cards.length; i++) {
+        var c = cards[i];
         var r = c.getBoundingClientRect();
         var container = c;
         for (var p = c.parentElement; p; p = p.parentElement) {
@@ -63,12 +69,17 @@ _JS_EXTRACT_CARDS = """
                 break;
             }
         }
-        return {
-            text: c.innerText||'', x: r.x + ox, y: r.y + oy, w: r.width, h: r.height,
-            cx: r.x+r.width/2+ox, cy: r.y+r.height/2+oy,
-            greet_x: gx, greet_y: gy, greet_text: gt
-        };
-    }));
+        // 只返回打招呼按钮在视口内的卡片
+        // 按钮 y 在 [oy, vy) 范围内才可被 CDP 点击
+        if (gx !== null && gy !== null && gy >= oy && gy < vy && gx >= ox && gx < vx) {
+            result.push({
+                text: c.innerText||'', x: r.x + ox, y: r.y + oy, w: r.width, h: r.height,
+                cx: r.x+r.width/2+ox, cy: r.y+r.height/2+oy,
+                greet_x: gx, greet_y: gy, greet_text: gt
+            });
+        }
+    }
+    return JSON.stringify(result);
 })()
 """
 
@@ -79,6 +90,17 @@ _JS_SCROLL_IFRAME = """
     var doc = iframe && iframe.contentDocument ? iframe.contentDocument : document;
     var scrollable = doc.querySelector('.list-wrap') || doc.querySelector('.candidate-body') || doc.querySelector('.recommend-list-wrap') || doc.documentElement;
     scrollable.scrollTop += 400;
+    return scrollable.scrollTop;
+})()
+"""
+
+# JS: 将 iframe 内候选列表滚回顶部（重新开始扫描）
+_JS_SCROLL_TOP = """
+(function() {
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    var doc = iframe && iframe.contentDocument ? iframe.contentDocument : document;
+    var scrollable = doc.querySelector('.list-wrap') || doc.querySelector('.candidate-body') || doc.querySelector('.recommend-list-wrap') || doc.documentElement;
+    scrollable.scrollTop = 0;
     return scrollable.scrollTop;
 })()
 """
@@ -139,13 +161,15 @@ async def _auto_contact_impl(
     logger.info(f"[F5] 今日已联系{already}人, 剩余{remaining}")
 
     # 导航到招聘者推荐牛人页面
-    # /web/chat/recommend 包含候选人推荐列表 + 聊天窗口
-    # 点击打招呼后聊天输入框就在当前页面, 不需要跨 frame
     nav = await automation.navigate("https://www.zhipin.com/web/chat/recommend")
     if nav.get("status") == "error":
         return {"status": "error", "message": f"导航失败: {nav.get('message')}"}
-    # 等待页面动态加载 iframe(/web/frame/recommend/), 3秒不够
+    # 等待页面动态加载 iframe(/web/frame/recommend/)
     await asyncio.sleep(8)
+
+    # 将列表滚回顶部，确保从第一个候选人开始
+    await automation.execute_js(_JS_SCROLL_TOP)
+    await asyncio.sleep(2)
 
     # 主循环
     contacted = skipped = failed = 0
@@ -162,10 +186,9 @@ async def _auto_contact_impl(
             logger.warning(f"[F5] 超时退出 ({TIMEOUT_SECONDS}s)")
             break
 
-        # 提取卡片
+        # 提取可见卡片（JS 已过滤：只返回按钮在视口内的卡片）
         try:
             raw = await automation.execute_js(_JS_EXTRACT_CARDS)
-            # execute_js 返回的可能是 JSON 字符串(绕过 CDP 反序列化问题)
             if isinstance(raw, str):
                 cards = json.loads(raw)
             elif isinstance(raw, list):
@@ -179,8 +202,7 @@ async def _auto_contact_impl(
         if not cards:
             js_fail += 1
             if js_fail >= 3:
-                logger.warning("[F5] JS连续3次失败, 尝试重新检测iframe...")
-                # 尝试检测iframe是否还在
+                logger.warning("[F5] JS连续3次无可见卡片, 尝试重新检测iframe...")
                 iframe_ok = await automation.execute_js(
                     "!!(document.querySelector('.frame-box iframe') || document.querySelector('iframe'))"
                 )
@@ -188,13 +210,14 @@ async def _auto_contact_impl(
                     logger.error("[F5] iframe 不存在, 退出")
                     break
             if js_fail >= 10:
-                logger.error("[F5] JS连续10次失败, 退出")
+                logger.error("[F5] 连续10次无可见卡片, 退出")
                 break
+            # 没有可见卡片 → 滚动加载更多
             await automation.execute_js(_JS_SCROLL_IFRAME)
             await asyncio.sleep(2)
             continue
 
-        # 卡片提取成功, 重置 JS 失败计数
+        # 卡片提取成功, 重置失败计数
         js_fail = 0
 
         # 去重
@@ -212,7 +235,7 @@ async def _auto_contact_impl(
             await asyncio.sleep(2)
             continue
         no_new = 0
-        logger.info(f"[F5] 发现{len(new_cards)}个新卡片")
+        logger.info(f"[F5] 发现{len(new_cards)}个可见卡片 (按钮在视口内)")
 
         for card in new_cards:
             if contacted >= remaining:
@@ -222,7 +245,6 @@ async def _auto_contact_impl(
                 "name": _extract_name(txt), "years": _extract_years(txt),
                 "degree": _extract_degree(txt), "school": _extract_school(txt),
             }
-            # boss_id: 优先姓名, 否则用卡片文本指纹hash (跨次稳定)
             fingerprint = card.get("text", "")[:50].strip()
             boss_id = cand["name"] or f"unk_{hash(fingerprint) & 0xFFFFFF}"
 
@@ -230,8 +252,9 @@ async def _auto_contact_impl(
                 skipped += 1
                 continue
 
-            # 卡片上没有可见的打招呼按钮 → 跳过
-            if card.get("greet_x") is None or card.get("greet_y") is None:
+            # 按钮 JS 已确保在视口内，此检查仅做安全兜底
+            gx, gy = card.get("greet_x"), card.get("greet_y")
+            if gx is None or gy is None:
                 logger.debug(f"[F5] 跳过无按钮卡片: {cand['name']}")
                 skipped += 1
                 continue
@@ -241,15 +264,14 @@ async def _auto_contact_impl(
             if dry_run:
                 contacted += 1
                 contacted_ids.add(boss_id)
+                logger.info(f"[F5] dry_run 模拟点击: ({gx:.0f},{gy:.0f}) btn={card.get('greet_text')}")
                 continue
 
-            # CDP 点击打招呼按钮(坐标在 iframe 内, CDP viewport 点击可穿透 iframe)
-            gx, gy = card["greet_x"], card["greet_y"]
+            # CDP 点击打招呼按钮
             logger.info(f"[F5] 点击打招呼: ({gx:.0f},{gy:.0f}) text={card.get('greet_text')}")
             if await automation.cdp_click_viewport(float(gx), float(gy)):
                 contacted += 1
                 contacted_ids.add(boss_id)
-                # 写 DB 记录, 保证每日上限计数准确
                 try:
                     with Database() as db:
                         db.init_tables()
@@ -264,6 +286,10 @@ async def _auto_contact_impl(
                 logger.warning(f"[F5] 点击失败: {boss_id[:1]}**")
 
             await asyncio.sleep(random.uniform(2, 4))
+
+        # 每处理完一批可见卡片 → 滚动加载下一批
+        await automation.execute_js(_JS_SCROLL_IFRAME)
+        await asyncio.sleep(random.uniform(1.5, 3))
 
         # 每5个新增截图
         total = contacted + skipped + failed
