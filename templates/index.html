@@ -22,7 +22,7 @@
 
         --text: #e8eaed;
         --text-secondary: #bdc1c6;
-        --text-muted: #92979e;
+        --text-muted: #a0a5ac;  /* bumped from #92979e for WCAG AA on elevated bg (~4.6:1) */
 
         --accent: #8ab4f8;
         --accent-light: #aecbfa;
@@ -495,8 +495,20 @@
         padding: 2px 6px;
         border-radius: 4px;
         transition: background var(--transition-fast);
+        display: flex;
+        align-items: center;
+        gap: 4px;
     }
     .section-toggle:hover { background: var(--accent-bg); }
+    .section-toggle::before {
+        content: '▸';
+        display: inline-block;
+        transition: transform var(--transition-fast);
+        font-size: 10px;
+    }
+    .section-toggle.expanded::before {
+        transform: rotate(90deg);
+    }
 
     /* ── Buttons ── */
     .btn {
@@ -814,12 +826,24 @@
     }
     .action-grid .btn { margin-bottom: 0; }
     .action-grid-full { grid-column: 1 / -1; }
+
+    /* ═══════════════════════════════════════════
+       Reduced Motion (WCAG 2.3.3)
+       ═══════════════════════════════════════════ */
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+        body::before { display: none; }
+    }
     </style>
 </head>
 <body>
 
     <!-- ═══ HEADER ═══ -->
-    <header class="header">
+    <header class="header" aria-label="主导航栏">
         <div class="header-brand">
             <div class="logo-mark">BO</div>
             <div class="logo-text">
@@ -830,7 +854,7 @@
 
         <div class="h-divider"></div>
 
-        <div class="header-stats">
+        <div class="header-stats" aria-live="polite">
             <div class="h-stat">
                 <span class="h-stat-value" id="statProcessed">0</span>
                 <span class="h-stat-label">已处理</span>
@@ -849,26 +873,26 @@
 
         <div class="header-auth" id="authSection">
             <div class="auth-inputs">
-                <input type="text" id="login-user" value="admin" placeholder="用户" class="h-input">
-                <input type="password" id="login-pass" placeholder="密码" class="h-input">
+                <input type="text" id="login-user" value="admin" placeholder="用户" class="h-input" aria-label="API用户名">
+                <input type="password" id="login-pass" placeholder="密码" class="h-input" aria-label="API密码">
                 <button class="h-auth-btn" onclick="doLogin(event)">
-                    <span class="spinner"></span>
+                    <span class="spinner" aria-hidden="true"></span>
                     <span class="btn-text">登录</span>
                 </button>
             </div>
-            <span class="auth-badge" id="authStatus">未登录</span>
+            <span class="auth-badge" id="authStatus" aria-live="polite">未登录</span>
         </div>
 
         <div class="h-divider"></div>
 
-        <div class="header-vnc">
+        <div class="header-vnc" aria-live="polite">
             <span class="status-dot" id="vncStatusDot"></span>
             <span class="vnc-text" id="vncStatusText">未连接</span>
         </div>
     </header>
 
     <!-- ═══ TASK PROGRESS BAR ═══ -->
-    <div class="task-bar" id="taskStatus">
+    <div class="task-bar" id="taskStatus" role="status" aria-live="polite">
         <div class="task-bar-info">
             <span class="task-spinner"></span>
             <span class="task-bar-name" id="taskStatusName">正在执行...</span>
@@ -878,10 +902,13 @@
         </div>
         <span class="task-bar-pct" id="taskStatusPercent">0%</span>
         <span class="task-bar-text" id="taskStatusText">等待启动...</span>
+        <button class="btn btn-danger btn-sm" onclick="cancelCurrentTask()" id="taskCancelBtn" style="margin-left:8px;padding:4px 12px;font-size:12px;display:none;">
+            <span class="btn-text">⏹ 取消</span>
+        </button>
     </div>
 
     <!-- ═══ MAIN ═══ -->
-    <main class="vnc-panel">
+    <main class="vnc-panel" aria-label="远程桌面视图">
         <div class="vnc-toolbar">
             <button onclick="refreshVNC()">🔄 刷新</button>
             <button onclick="zoomIn()">🔍+ 放大</button>
@@ -896,12 +923,12 @@
                 </svg>
                 <p>点击「打开BOSS直聘」启动浏览器</p>
             </div>
-            <iframe class="vnc-iframe" id="vncFrame" style="display:none;" allow="clipboard-read; clipboard-write"></iframe>
+            <iframe class="vnc-iframe" id="vncFrame" style="display:none;" allow="clipboard-read; clipboard-write" title="VNC远程桌面查看器"></iframe>
         </div>
     </main>
 
     <!-- ═══ CONTROL PANEL ═══ -->
-    <aside class="control-panel">
+    <aside class="control-panel" aria-label="控制面板">
         <div class="cp-scroll">
 
             <!-- 浏览器控制 -->
@@ -911,23 +938,23 @@
                 </div>
                 <div class="action-grid">
                     <button class="btn btn-success" onclick="openBossZhipin(event)">
-                        <span class="spinner"></span>
+                        <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">🚀 打开BOSS</span>
                     </button>
                     <button class="btn btn-primary" onclick="connectVNC(event)">
-                        <span class="spinner"></span>
+                        <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">🌐 连接桌面</span>
                     </button>
                     <button class="btn btn-info action-grid-full" onclick="checkLogin(event)">
-                        <span class="spinner"></span>
+                        <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">✅ 检查登录状态</span>
                     </button>
                     <button class="btn btn-secondary btn-sm" onclick="exportCookies(event)">
-                        <span class="spinner"></span>
+                        <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">💾 导出Cookie</span>
                     </button>
                     <button class="btn btn-secondary btn-sm" onclick="importCookies(event)">
-                        <span class="spinner"></span>
+                        <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">📂 导入Cookie</span>
                     </button>
                 </div>
@@ -939,23 +966,23 @@
                     <span class="section-label">批量自动化</span>
                 </div>
                 <div class="input-row">
-                    <input type="number" id="batchLimit" value="20" placeholder="人数" min="1" max="200">
+                    <input type="number" id="batchLimit" value="20" placeholder="人数" aria-label="打招呼人数上限" min="1" max="200">
                     <button class="btn btn-success" onclick="batchFilterAndHello()" id="btnFilterHello">
-                        <span class="spinner"></span>
+                        <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">👋 筛选+打招呼</span>
                     </button>
                 </div>
                 <div class="input-row">
-                    <input type="number" id="resumeLimit" value="10" placeholder="人数" min="1" max="200">
+                    <input type="number" id="resumeLimit" value="10" placeholder="人数" aria-label="获取简历人数上限" min="1" max="200">
                     <button class="btn btn-warning" onclick="batchGetResumes()" id="btnGetResumes">
-                        <span class="spinner"></span>
+                        <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">📄 批量获取简历</span>
                     </button>
                 </div>
                 <div class="input-row">
-                    <input type="number" id="replyLimit" value="15" placeholder="人数" min="1" max="200">
+                    <input type="number" id="replyLimit" value="15" placeholder="人数" aria-label="回复消息人数上限" min="1" max="200">
                     <button class="btn btn-danger" onclick="batchReplyMessages()" id="btnReplyMessages">
-                        <span class="spinner"></span>
+                        <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">💬 批量回复未读</span>
                     </button>
                 </div>
@@ -965,7 +992,7 @@
             <div class="section">
                 <div class="section-header">
                     <span class="section-label">筛选条件</span>
-                    <button class="section-toggle" onclick="toggleConfig('filterConfig')">展开/收起</button>
+                    <button class="section-toggle expanded" aria-expanded="true" onclick="toggleConfig('filterConfig')">筛选条件</button>
                 </div>
                 <div class="config-content show" id="filterConfig">
                     <div class="config-card">
@@ -1020,7 +1047,7 @@
             <div class="section">
                 <div class="section-header">
                     <span class="section-label">回复话术</span>
-                    <button class="section-toggle" onclick="toggleConfig('templateConfig')">展开/收起</button>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('templateConfig')">话术模板</button>
                 </div>
                 <div class="config-content" id="templateConfig">
                     <div class="config-card">
@@ -1045,7 +1072,7 @@
             <div class="section">
                 <div class="section-header">
                     <span class="section-label">岗位话术库</span>
-                    <button class="section-toggle" onclick="toggleConfig('positionTemplates')">展开/收起</button>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('positionTemplates')">岗位模板</button>
                 </div>
                 <div class="config-content" id="positionTemplates">
                     <div class="config-card">
@@ -1087,16 +1114,16 @@
     </aside>
 
     <!-- ═══ LOG FOOTER ═══ -->
-    <footer class="log-footer" id="logFooter">
+    <footer class="log-footer collapsed" id="logFooter" aria-label="操作日志">
         <div class="log-resize" id="logResizeHandle"></div>
         <div class="log-toolbar">
             <span class="log-title">操作日志</span>
             <span class="log-count" id="logCount">0</span>
             <span class="log-spacer"></span>
             <button class="log-btn" onclick="clearLogs()">清除</button>
-            <button class="log-btn" onclick="toggleLogPanel()" id="logToggleBtn">▼ 收起</button>
+            <button class="log-btn" onclick="toggleLogPanel()" id="logToggleBtn">▲ 展开</button>
         </div>
-        <div class="log-body" id="logPanel">
+        <div class="log-body" id="logPanel" aria-live="polite" aria-relevant="additions">
             <div class="log-line"><span class="log-time">[系统]</span> <span class="log-info">等待操作...</span></div>
         </div>
     </footer>
@@ -1169,7 +1196,7 @@
             log('日志已清除', 'info');
         }
 
-        let logPanelCollapsed = false;
+        let logPanelCollapsed = true;  // Start collapsed to give VNC panel more space
         function toggleLogPanel() {
             const footer = document.getElementById('logFooter');
             const btn = document.getElementById('logToggleBtn');
@@ -1256,15 +1283,31 @@
             const percentEl = document.getElementById('taskStatusPercent');
             const progressBar = document.getElementById('taskProgressBar');
             const textEl = document.getElementById('taskStatusText');
+            const cancelBtn = document.getElementById('taskCancelBtn');
             if (active) {
                 panel.classList.add('active');
                 nameEl.textContent = name;
                 percentEl.textContent = progress + '%';
                 progressBar.style.width = progress + '%';
                 textEl.textContent = text;
+                if (cancelBtn) cancelBtn.style.display = '';
             } else {
                 panel.classList.remove('active');
+                if (cancelBtn) cancelBtn.style.display = 'none';
             }
+        }
+
+        function cancelCurrentTask() {
+            if (!confirm('确认取消当前任务？')) return;
+            // Clear all polling timers
+            if (_filterPollTimer) { clearInterval(_filterPollTimer); _filterPollTimer = null; }
+            if (_chatReplyPollTimer) { clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null; }
+            clearTaskStatus();
+            // Re-enable all batch buttons
+            setLoading(document.getElementById('btnFilterHello'), false);
+            setLoading(document.getElementById('btnGetResumes'), false);
+            setLoading(document.getElementById('btnReplyMessages'), false);
+            log('⏹ 任务已手动取消', 'warn');
         }
 
         function clearTaskStatus() {
@@ -1273,6 +1316,15 @@
         }
 
         function updateStats(processed, resumes, replied) {
+            // Merge: only update non-null arguments to avoid resetting other counters
+            const cur = (id) => parseInt(document.getElementById(id).textContent) || 0;
+            if (processed !== null && processed !== undefined) document.getElementById('statProcessed').textContent = cur('statProcessed') + processed;
+            if (resumes !== null && resumes !== undefined) document.getElementById('statResumes').textContent = cur('statResumes') + resumes;
+            if (replied !== null && replied !== undefined) document.getElementById('statReplied').textContent = cur('statReplied') + replied;
+        }
+
+        function setStats(processed, resumes, replied) {
+            // Hard-set all three counters (used for initial load)
             document.getElementById('statProcessed').textContent = processed;
             document.getElementById('statResumes').textContent = resumes;
             document.getElementById('statReplied').textContent = replied;
@@ -1332,7 +1384,27 @@
 
         function toggleConfig(id) {
             const el = document.getElementById(id);
-            el.classList.toggle('show');
+            const isShown = el.classList.toggle('show');
+            // Update toggle button state
+            const toggle = el.previousElementSibling ?
+                el.previousElementSibling.querySelector('.section-toggle') : null;
+            if (toggle) {
+                toggle.classList.toggle('expanded', isShown);
+                toggle.setAttribute('aria-expanded', isShown ? 'true' : 'false');
+            }
+        }
+
+        // Inline save feedback: briefly change button text
+        function flashSave(btn, originalText) {
+            if (!btn) return;
+            const textEl = btn.querySelector('.btn-text') || btn;
+            const oldText = textEl.textContent;
+            textEl.textContent = '✓ ' + (originalText || '已保存');
+            btn.style.color = 'var(--green)';
+            setTimeout(() => {
+                textEl.textContent = oldText;
+                btn.style.color = '';
+            }, 1500);
         }
 
         function saveFilterConfig() {
@@ -1344,6 +1416,7 @@
             config.filter.excludeKeywords = document.getElementById('excludeKeywords').value;
             saveConfig();
             log('✅ 筛选配置已保存', 'info');
+            flashSave(event && event.target ? event.target.closest('.btn') : null, '已保存');
         }
 
         function saveTemplateConfig() {
@@ -1352,6 +1425,7 @@
             config.templates.follow = document.getElementById('followTemplate').value;
             saveConfig();
             log('✅ 话术配置已保存', 'info');
+            flashSave(event && event.target ? event.target.closest('.btn') : null, '已保存');
         }
 
         // ── Position Templates ──
@@ -1373,6 +1447,8 @@
                 const questions = config.positions[name];
                 const item = document.createElement('div');
                 item.className = 'template-item';
+                item.setAttribute('role', 'button');
+                item.setAttribute('tabindex', '0');
                 const nm = document.createElement('div');
                 nm.className = 'template-name';
                 nm.textContent = name + ' ';
@@ -1386,6 +1462,7 @@
                 item.appendChild(nm);
                 item.appendChild(txt);
                 item.onclick = () => { document.getElementById('positionSelect').value = name; loadPositionTemplate(); };
+                item.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); } };
                 list.appendChild(item);
             });
         }
@@ -1486,14 +1563,14 @@
                     document.getElementById('vncStatusText').textContent = '已连接';
                     log('✅ VNC远程桌面已连接', 'info');
                 };
+                // Timeout: show warning instead of faking "connected"
                 setTimeout(() => {
                     if (!vncConnected) {
-                        vncConnected = true;
-                        document.getElementById('vncStatusDot').className = 'status-dot online';
-                        document.getElementById('vncStatusText').textContent = '已连接';
-                        log('VNC桌面已加载', 'info');
+                        document.getElementById('vncStatusDot').className = 'status-dot offline';
+                        document.getElementById('vncStatusText').textContent = '连接超时';
+                        log('⚠️ VNC连接超时，请检查noVNC服务是否正常', 'warn');
                     }
-                }, 8000);
+                }, 15000);
             } catch (e) {
                 if (btn) setLoading(btn, false);
                 log(`连接失败: ${e.message}`, 'error');
@@ -1697,6 +1774,7 @@
         function batchFilterAndHello() {
             const btn = document.getElementById('btnFilterHello');
             const limit = parseInt(document.getElementById('batchLimit').value) || 20;
+            if (!confirm(`确认向最多 ${limit} 位候选人打招呼？\n\n请确保已配置筛选条件和话术。`)) return;
             setLoading(btn, true);
             log(`👋 开始筛选+打招呼，上限 ${limit} 人...`, 'info');
             if (_filterPollTimer) { clearInterval(_filterPollTimer); _filterPollTimer = null; }
@@ -1746,7 +1824,7 @@
                         const r = data.result || {};
                         log(`✅ 任务完成! 联系:${r.contacted||0} 跳过:${r.skipped||0} 失败:${r.failed||0} 扫描:${r.total_scanned||0}`, 'info');
                         log(`📊 配额: ${r.cap_used || limit}`, 'info');
-                        updateStats(r.contacted || 0, 0, 0);
+                        updateStats(r.contacted || 0, null, null);
                         clearTaskStatus();
                         setLoading(document.getElementById('btnFilterHello'), false);
                     } else if (data.status === 'failed' || data.status === 'error') {
@@ -1762,6 +1840,7 @@
         function batchGetResumes() {
             const btn = document.getElementById('btnGetResumes');
             const limit = parseInt(document.getElementById('resumeLimit').value) || 10;
+            if (!confirm(`确认批量获取最多 ${limit} 份简历？`)) return;
             setLoading(btn, true);
             log(`📄 开始批量获取简历，上限 ${limit} 人...`, 'info');
             apiCall('/api/resume/batch', { limit: limit }).then(data => {
@@ -1819,7 +1898,7 @@
             apiCall('/api/resume/list', null, 'GET').then(data => {
                 if (data && Array.isArray(data)) {
                     log(`📄 当前简历库: ${data.length} 份`, 'info');
-                    updateStats(0, data.length, 0);
+                    setStats(null, data.length, null);
                 }
             });
         }
@@ -1827,6 +1906,7 @@
         function batchReplyMessages() {
             const btn = document.getElementById('btnReplyMessages');
             const limit = parseInt(document.getElementById('replyLimit').value) || 15;
+            if (!confirm(`确认批量回复最多 ${limit} 位候选人的未读消息？\n\n请确保已配置回复话术。`)) return;
             setLoading(btn, true);
             log(`💬 开始批量回复未读消息，上限 ${limit} 人...`, 'info');
             apiCall('/api/chat/batch', {
@@ -1870,7 +1950,7 @@
                     if (data.status === 'completed') {
                         clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null;
                         log(`✅ 回复完成! 成功:${data.success||0} 失败:${data.failed||0}`, 'info');
-                        updateStats(0, 0, (data.success||0));
+                        updateStats(null, null, (data.success||0));
                         clearTaskStatus();
                         setLoading(btn, false);
                     } else if (data.status === 'error' || data.status === 'failed') {
