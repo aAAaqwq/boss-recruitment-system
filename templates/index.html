@@ -3,561 +3,921 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BOSS直聘自动化系统 - 控制台</title>
+    <title>BOSS招聘驾驶舱</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #1a1a2e;
-            height: 100vh;
-            overflow: hidden;
-            display: flex;
-        }
+    /* ═══════════════════════════════════════════
+       Design System — Premium Dark Cockpit
+       ═══════════════════════════════════════════ */
+    :root {
+        --bg-base: #080c15;
+        --bg-surface: #0f1520;
+        --bg-elevated: #182030;
+        --bg-hover: #1e2a3e;
+        --bg-active: #253448;
 
-        /* 左侧VNC区域 */
-        .vnc-panel {
-            flex: 1;
-            background: #000;
-            display: flex;
-            flex-direction: column;
-            border-right: 2px solid #333;
-        }
-        .vnc-header {
-            background: #16213e;
-            padding: 10px 15px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid #333;
-        }
-        .vnc-title {
-            color: #eee;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .vnc-status {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #666;
-        }
-        .status-dot.online { background: #4caf50; box-shadow: 0 0 8px #4caf50; }
-        .status-dot.offline { background: #f44336; }
-        .status-dot.busy { background: #ff9800; }
-        .status-text {
-            color: #888;
-            font-size: 12px;
-        }
-        .vnc-viewport {
-            flex: 1;
-            display: flex;
-            align-items: stretch;
-            justify-content: stretch;
-            background: #0a0a0a;
-            position: relative;
-            overflow: hidden;
-        }
-        .vnc-viewport canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
-        .vnc-placeholder {
-            text-align: center;
-            color: #555;
-        }
-        .vnc-placeholder svg {
-            width: 80px;
-            height: 80px;
-            margin-bottom: 15px;
-            opacity: 0.5;
-        }
-        .vnc-iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-        }
-        .vnc-toolbar {
-            background: #16213e;
-            padding: 8px 15px;
-            display: flex;
-            gap: 10px;
-            border-top: 1px solid #333;
-        }
-        .vnc-toolbar button {
-            background: #333;
-            border: none;
-            color: #ccc;
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-        .vnc-toolbar button:hover {
-            background: #444;
-            color: white;
-        }
+        --border: rgba(148,163,184,.08);
+        --border-default: rgba(148,163,184,.13);
+        --border-hover: rgba(148,163,184,.22);
+        --border-accent: rgba(99,102,241,.45);
 
-        /* 右侧控制面板 */
-        .control-panel {
-            width: 380px;
-            background: #16213e;
-            display: flex;
-            flex-direction: column;
-        }
-        .panel-header {
-            padding: 20px;
-            border-bottom: 1px solid #333;
-        }
-        .panel-header h1 {
-            color: #eee;
-            font-size: 18px;
-            margin-bottom: 5px;
-        }
-        .panel-header p {
-            color: #666;
-            font-size: 12px;
-        }
-        .panel-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 15px;
-            padding-bottom: 10px;
-        }
-        .panel-footer {
-            border-top: 1px solid #333;
-            background: #16213e;
-            flex-shrink: 0;
-        }
-        .section {
-            margin-bottom: 20px;
-        }
-        .section-title {
-            color: #888;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        .section-title button {
-            background: none;
-            border: none;
-            color: #667eea;
-            cursor: pointer;
-            font-size: 11px;
-        }
-        .section-title button:hover {
-            text-decoration: underline;
-        }
+        --text: #e2e8f0;
+        --text-secondary: #94a3b8;
+        --text-muted: #546380;
 
-        .btn {
-            width: 100%;
-            padding: 12px 15px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
-        .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
-        .btn-success { background: linear-gradient(135deg, #4caf50, #45a049); color: white; }
-        .btn-success:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4); }
-        .btn-info { background: linear-gradient(135deg, #2196f3, #1976d2); color: white; }
-        .btn-info:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4); }
-        .btn-warning { background: linear-gradient(135deg, #ff9800, #f57c00); color: white; }
-        .btn-warning:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4); }
-        .btn-danger { background: linear-gradient(135deg, #f44336, #d32f2f); color: white; }
-        .btn-danger:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4); }
-        .btn-secondary { background: #333; color: #ccc; }
-        .btn-secondary:hover:not(:disabled) { background: #444; color: white; }
-        .btn-sm {
-            padding: 8px 12px;
-            font-size: 13px;
-        }
+        --accent: #6366f1;
+        --accent-light: #818cf8;
+        --accent-bg: rgba(99,102,241,.1);
+        --accent-glow: rgba(99,102,241,.25);
 
-        .spinner {
-            width: 14px;
-            height: 14px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            display: none;
-        }
-        .btn.loading .spinner { display: block; }
-        .btn.loading .btn-text { display: none; }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        --green: #10b981;
+        --green-bg: rgba(16,185,129,.1);
+        --orange: #f59e0b;
+        --orange-bg: rgba(245,158,11,.1);
+        --red: #ef4444;
+        --red-bg: rgba(239,68,68,.1);
+        --blue: #3b82f6;
+        --blue-bg: rgba(59,130,246,.1);
 
-        /* 配置表单 */
-        .config-form {
-            background: #1a1a2e;
-            border-radius: 8px;
-            padding: 15px;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        .form-group label {
-            display: block;
-            color: #888;
-            font-size: 12px;
-            margin-bottom: 6px;
-        }
-        .form-group input,
-        .form-group select,
-        .form-group textarea {
-            width: 100%;
-            background: #0a0a0a;
-            border: 1px solid #333;
-            border-radius: 6px;
-            padding: 10px 12px;
-            color: #eee;
-            font-size: 13px;
-        }
-        .form-group input:focus,
-        .form-group select:focus,
-        .form-group textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .form-group textarea {
-            min-height: 80px;
-            resize: vertical;
-        }
-        .form-row {
-            display: flex;
-            gap: 10px;
-        }
-        .form-row .form-group {
-            flex: 1;
-        }
+        --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+        --font-mono: "SF Mono", "Monaco", "Menlo", "Cascadia Code", monospace;
 
-        .checkbox-group {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-        .checkbox-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: #0a0a0a;
-            padding: 6px 10px;
-            border-radius: 6px;
-        }
-        .checkbox-item input {
-            accent-color: #667eea;
-        }
-        .checkbox-item label {
-            color: #ccc;
-            font-size: 12px;
-            cursor: pointer;
-        }
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
 
-        .input-group {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-        .input-group input {
-            flex: 1;
-            background: #1a1a2e;
-            border: 1px solid #333;
-            border-radius: 6px;
-            padding: 8px 12px;
-            color: #eee;
-            font-size: 13px;
-        }
-        .input-group input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
+        --shadow-sm: 0 1px 3px rgba(0,0,0,.35);
+        --shadow-md: 0 4px 14px rgba(0,0,0,.45);
+        --shadow-glow: 0 0 20px var(--accent-glow);
 
-        .log-panel {
-            background: #0a0a0a;
-            border-radius: 8px;
-            padding: 12px;
-            height: 180px;
-            overflow-y: auto;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 11px;
-        }
-        .log-line {
-            margin: 3px 0;
-            line-height: 1.4;
-        }
-        .log-time {
-            color: #666;
-        }
-        .log-info { color: #4caf50; }
-        .log-error { color: #f44336; }
-        .log-warn { color: #ff9800; }
+        --ease-out: cubic-bezier(.16,1,.3,1);
+        --transition-fast: 120ms var(--ease-out);
+        --transition-normal: 220ms var(--ease-out);
+        --transition-slow: 350ms var(--ease-out);
+    }
 
-        /* 任务状态区域 */
-        .task-status {
-            background: #1a1a2e;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 12px;
-            min-height: 60px;
-            display: none;
-        }
-        .task-status.active {
-            display: block;
-        }
-        .task-status-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        .task-status-title {
-            color: #888;
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .task-status-spinner {
-            width: 12px;
-            height: 12px;
-            border: 2px solid rgba(255,255,255,0.2);
-            border-top-color: #667eea;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        .task-progress {
-            background: #0a0a0a;
-            border-radius: 4px;
-            height: 6px;
-            overflow: hidden;
-            margin-top: 6px;
-        }
-        .task-progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            border-radius: 4px;
-            transition: width 0.3s ease;
-            width: 0%;
-        }
-        .task-status-text {
-            color: #ccc;
-            font-size: 11px;
-            margin-top: 6px;
-        }
+    /* ── Reset ── */
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-        .stat-item {
-            background: #1a1a2e;
-            padding: 12px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .stat-value {
-            color: #eee;
-            font-size: 20px;
-            font-weight: bold;
-        }
-        .stat-label {
-            color: #666;
-            font-size: 11px;
-            margin-top: 4px;
-        }
+    /* ── Layout Grid ── */
+    body {
+        display: grid;
+        grid-template-rows: 54px auto 1fr auto;
+        grid-template-columns: 1fr 400px;
+        height: 100vh;
+        overflow: hidden;
+        background: var(--bg-base);
+        color: var(--text);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+    }
 
-        /* 配置面板展开/收起 */
-        .config-content {
-            display: none;
-        }
-        .config-content.show {
-            display: block;
-        }
+    /* ═══════════════════════════════════════════
+       HEADER
+       ═══════════════════════════════════════════ */
+    .header {
+        grid-column: 1 / -1;
+        grid-row: 1;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border-default);
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        gap: 6px;
+        z-index: 20;
+        position: relative;
+    }
+    .header::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 0; right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+        pointer-events: none;
+    }
 
-        .template-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .template-item {
-            background: #0a0a0a;
-            border-radius: 6px;
-            padding: 10px;
-        }
-        .template-name {
-            color: #667eea;
-            font-size: 12px;
-            margin-bottom: 4px;
-        }
-        .template-text {
-            color: #888;
-            font-size: 11px;
-        }
+    /* Brand */
+    .header-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-right: 8px;
+        flex-shrink: 0;
+    }
+    .logo-mark {
+        width: 30px; height: 30px;
+        background: linear-gradient(135deg, var(--accent), #8b5cf6);
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 11px;
+        color: #fff;
+        letter-spacing: -.5px;
+        flex-shrink: 0;
+    }
+    .logo-text {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.15;
+    }
+    .logo-title {
+        font-weight: 700;
+        font-size: 13px;
+        color: var(--text);
+    }
+    .logo-sub {
+        font-size: 10px;
+        color: var(--text-muted);
+        letter-spacing: .3px;
+    }
+
+    /* Divider */
+    .h-divider {
+        width: 1px;
+        height: 28px;
+        background: var(--border-default);
+        flex-shrink: 0;
+    }
+
+    /* Stats */
+    .header-stats {
+        display: flex;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    .h-stat {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 4px 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .h-stat-value {
+        font-weight: 700;
+        font-size: 14px;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+    }
+    .h-stat-label {
+        font-size: 10px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: .5px;
+    }
+
+    .header-spacer { flex: 1; }
+
+    /* Auth */
+    .header-auth {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+    .auth-inputs {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .h-input {
+        width: 80px;
+        padding: 5px 8px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 12px;
+        font-family: var(--font-sans);
+        outline: none;
+        transition: border-color var(--transition-fast);
+    }
+    .h-input:focus { border-color: var(--accent); }
+    .h-input::placeholder { color: var(--text-muted); }
+    input[type="password"].h-input { width: 72px; }
+
+    .h-auth-btn {
+        padding: 5px 12px;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .h-auth-btn:hover { background: var(--accent-light); }
+    .h-auth-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .h-auth-btn.loading .spinner { display: block; }
+    .h-auth-btn.loading .btn-text { display: none; }
+    .h-auth-btn.loading { pointer-events: none; opacity: .7; }
+
+    .auth-badge {
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        white-space: nowrap;
+        display: none;
+    }
+    #authSection.auth-done .auth-inputs { display: none; }
+    #authSection.auth-done .auth-badge { display: flex; align-items: center; gap: 4px; }
+
+    /* VNC Status */
+    .header-vnc {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-left: 6px;
+        flex-shrink: 0;
+    }
+    .status-dot {
+        width: 7px; height: 7px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        flex-shrink: 0;
+        transition: all var(--transition-normal);
+    }
+    .status-dot.online {
+        background: var(--green);
+        box-shadow: 0 0 0 0 rgba(16,185,129,.4);
+        animation: pulse-dot 2.5s ease-in-out infinite;
+    }
+    .status-dot.offline { background: var(--red); }
+    .status-dot.busy { background: var(--orange); animation: pulse-dot 1.5s ease-in-out infinite; }
+    @keyframes pulse-dot {
+        0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,.35); }
+        50% { box-shadow: 0 0 0 5px rgba(16,185,129,0); }
+    }
+    .vnc-text {
+        font-size: 11px;
+        color: var(--text-muted);
+        white-space: nowrap;
+    }
+
+    /* ═══════════════════════════════════════════
+       TASK PROGRESS BAR (full width)
+       ═══════════════════════════════════════════ */
+    .task-bar {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        background: var(--accent-bg);
+        border-bottom: 1px solid var(--border-accent);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 16px;
+        overflow: hidden;
+        max-height: 0;
+        opacity: 0;
+        transition: all var(--transition-slow);
+    }
+    .task-bar.active {
+        max-height: 44px;
+        opacity: 1;
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+    .task-bar-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+    }
+    .task-spinner {
+        width: 12px; height: 12px;
+        border: 2px solid rgba(99,102,241,.25);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .task-bar-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--accent-light);
+    }
+    .task-bar-track {
+        flex: 1;
+        height: 5px;
+        background: rgba(99,102,241,.15);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+    .task-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent), var(--accent-light));
+        border-radius: 3px;
+        transition: width .4s var(--ease-out);
+        width: 0%;
+        position: relative;
+    }
+    .task-bar-fill::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,.2), transparent);
+        background-size: 200% 100%;
+        animation: shimmer 1.8s ease-in-out infinite;
+    }
+    @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+    .task-bar-pct {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--accent-light);
+        font-variant-numeric: tabular-nums;
+        min-width: 36px;
+        text-align: right;
+    }
+    .task-bar-text {
+        font-size: 11px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+    }
+
+    /* ═══════════════════════════════════════════
+       VNC PANEL
+       ═══════════════════════════════════════════ */
+    .vnc-panel {
+        grid-column: 1;
+        grid-row: 3;
+        background: #000;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border-default);
+        position: relative;
+    }
+    .vnc-toolbar {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 5px 12px;
+        display: flex;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    .vnc-toolbar button {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 12px;
+        transition: all var(--transition-fast);
+    }
+    .vnc-toolbar button:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+        border-color: var(--border-hover);
+    }
+    .vnc-viewport {
+        flex: 1;
+        display: flex;
+        align-items: stretch;
+        justify-content: stretch;
+        background: #050508;
+        position: relative;
+        overflow: hidden;
+    }
+    .vnc-viewport canvas {
+        position: absolute;
+        top: 0; left: 0;
+    }
+    .vnc-placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        color: var(--text-muted);
+        gap: 12px;
+    }
+    .vnc-placeholder svg { width: 64px; height: 64px; opacity: .35; }
+    .vnc-placeholder p { font-size: 13px; }
+    .vnc-iframe {
+        width: 100%; height: 100%;
+        border: none;
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+    }
+
+    /* ═══════════════════════════════════════════
+       CONTROL PANEL
+       ═══════════════════════════════════════════ */
+    .control-panel {
+        grid-column: 2;
+        grid-row: 3;
+        background: var(--bg-surface);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .cp-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 14px 14px;
+    }
+    .cp-scroll::-webkit-scrollbar { width: 5px; }
+    .cp-scroll::-webkit-scrollbar-track { background: transparent; }
+    .cp-scroll::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+    .cp-scroll::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+    /* Sections */
+    .section {
+        margin-bottom: 14px;
+    }
+    .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px 0;
+        margin-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+    }
+    .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .8px;
+        color: var(--text-muted);
+    }
+    .section-toggle {
+        background: none;
+        border: none;
+        color: var(--accent);
+        font-size: 11px;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 4px;
+        transition: background var(--transition-fast);
+    }
+    .section-toggle:hover { background: var(--accent-bg); }
+
+    /* ── Buttons ── */
+    .btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        width: 100%;
+        padding: 9px 14px;
+        border: 1px solid transparent;
+        border-radius: var(--radius-md);
+        font-size: 13px;
+        font-weight: 500;
+        font-family: var(--font-sans);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        margin-bottom: 6px;
+        position: relative;
+        overflow: hidden;
+    }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn:active:not(:disabled) { transform: scale(.98); }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) {
+        background: var(--accent-light);
+        box-shadow: 0 0 16px var(--accent-glow);
+    }
+    .btn-success { background: var(--green); color: #fff; }
+    .btn-success:hover:not(:disabled) { background: #0ea472; box-shadow: 0 0 16px rgba(16,185,129,.3); }
+    .btn-info { background: var(--blue); color: #fff; }
+    .btn-info:hover:not(:disabled) { background: #2563eb; box-shadow: 0 0 16px rgba(59,130,246,.3); }
+    .btn-warning { background: var(--orange); color: #000; }
+    .btn-warning:hover:not(:disabled) { background: #d97706; }
+    .btn-danger { background: var(--red); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #dc2626; box-shadow: 0 0 16px rgba(239,68,68,.3); }
+    .btn-secondary {
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-default);
+    }
+    .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-hover);
+        color: var(--text);
+        border-color: var(--border-hover);
+    }
+
+    .btn-sm { padding: 7px 12px; font-size: 12px; }
+
+    .spinner {
+        width: 13px; height: 13px;
+        border: 2px solid rgba(255,255,255,.25);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin .7s linear infinite;
+        display: none;
+        flex-shrink: 0;
+    }
+    .btn.loading .spinner { display: block; }
+    .btn.loading .btn-text { display: none; }
+    .btn.loading { pointer-events: none; opacity: .7; }
+
+    /* ── Input groups ── */
+    .input-row {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+    }
+    .input-row input[type="number"] {
+        width: 64px;
+        padding: 8px 8px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 13px;
+        font-family: var(--font-sans);
+        outline: none;
+        text-align: center;
+        transition: border-color var(--transition-fast);
+        -moz-appearance: textfield;
+    }
+    .input-row input::-webkit-inner-spin-button { -webkit-appearance: none; }
+    .input-row input:focus { border-color: var(--accent); }
+    .input-row .btn { flex: 1; margin-bottom: 0; }
+
+    .btn-row {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+    }
+    .btn-row .btn { flex: 1; }
+
+    /* ── Config Forms ── */
+    .config-content {
+        display: none;
+        animation: slideDown .25s var(--ease-out);
+    }
+    .config-content.show { display: block; }
+    @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-6px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .config-card {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 14px;
+    }
+    .form-group {
+        margin-bottom: 12px;
+    }
+    .form-group:last-child { margin-bottom: 0; }
+    .form-group label {
+        display: block;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-bottom: 5px;
+    }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        background: var(--bg-base);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-sm);
+        padding: 8px 10px;
+        color: var(--text);
+        font-size: 12px;
+        font-family: var(--font-sans);
+        outline: none;
+        transition: border-color var(--transition-fast);
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-bg);
+    }
+    .form-group textarea {
+        min-height: 64px;
+        resize: vertical;
+        font-family: var(--font-sans);
+        line-height: 1.5;
+    }
+    .form-group select {
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        padding-right: 28px;
+    }
+    .form-row {
+        display: flex;
+        gap: 8px;
+    }
+    .form-row .form-group { flex: 1; }
+    .form-row .form-sep {
+        display: flex;
+        align-items: center;
+        color: var(--text-muted);
+        font-size: 12px;
+        padding-bottom: 12px;
+    }
+
+    .template-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .template-item {
+        background: var(--bg-base);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 8px 10px;
+        cursor: pointer;
+        transition: border-color var(--transition-fast);
+    }
+    .template-item:hover { border-color: var(--accent); }
+    .template-name {
+        font-size: 12px;
+        color: var(--accent-light);
+        font-weight: 500;
+    }
+    .template-text {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 2px;
+    }
+
+    /* ═══════════════════════════════════════════
+       LOG FOOTER (full-width, always visible)
+       ═══════════════════════════════════════════ */
+    .log-footer {
+        grid-column: 1 / -1;
+        grid-row: 4;
+        background: var(--bg-surface);
+        border-top: 1px solid var(--border-default);
+        display: flex;
+        flex-direction: column;
+        height: 190px;
+        min-height: 60px;
+        max-height: 500px;
+        transition: height var(--transition-slow);
+        position: relative;
+    }
+    .log-footer.collapsed .log-body { display: none; }
+    .log-footer.collapsed { height: auto; }
+
+    /* Resize handle */
+    .log-resize {
+        height: 5px;
+        cursor: ns-resize;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        position: relative;
+        z-index: 5;
+    }
+    .log-resize::after {
+        content: '';
+        width: 40px;
+        height: 3px;
+        background: var(--border-hover);
+        border-radius: 2px;
+        transition: background var(--transition-fast);
+    }
+    .log-resize:hover::after { background: var(--accent); }
+
+    .log-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 14px;
+        height: 30px;
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .log-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .6px;
+        color: var(--text-muted);
+    }
+    .log-count {
+        font-size: 10px;
+        background: var(--bg-elevated);
+        color: var(--text-muted);
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-variant-numeric: tabular-nums;
+    }
+    .log-spacer { flex: 1; }
+    .log-btn {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+    }
+    .log-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text-secondary);
+        border-color: var(--border-hover);
+    }
+
+    .log-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 14px 10px;
+    }
+    .log-body::-webkit-scrollbar { width: 4px; }
+    .log-body::-webkit-scrollbar-track { background: transparent; }
+    .log-body::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 2px; }
+
+    .log-line {
+        margin: 2px 0;
+        line-height: 1.45;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        animation: logIn .15s var(--ease-out);
+    }
+    @keyframes logIn {
+        from { opacity: 0; transform: translateX(-4px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+    .log-time { color: var(--text-muted); margin-right: 4px; }
+    .log-info { color: var(--green); }
+    .log-error { color: var(--red); }
+    .log-warn { color: var(--orange); }
+
+    /* ═══════════════════════════════════════════
+       QUICK ACTION GRID
+       ═══════════════════════════════════════════ */
+    .action-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+    .action-grid .btn { margin-bottom: 0; }
+    .action-grid-full { grid-column: 1 / -1; }
     </style>
 </head>
 <body>
-    <!-- 左侧VNC面板 -->
-    <div class="vnc-panel">
-        <div class="vnc-header">
-            <div class="vnc-title">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 0a8 8 0 100 16A8 8 0 008 0zm0 14A6 6 0 118 2a6 6 0 018 12z"/>
-                    <path d="M8 4a4 4 0 100 8 4 4 0 000-8z"/>
-                </svg>
-                <span>虚拟桌面</span>
+
+    <!-- ═══ HEADER ═══ -->
+    <header class="header">
+        <div class="header-brand">
+            <div class="logo-mark">BO</div>
+            <div class="logo-text">
+                <span class="logo-title">招聘驾驶舱</span>
+                <span class="logo-sub">BOSS Zhipin Automation</span>
             </div>
-            <div class="vnc-status">
-                <span class="status-dot" id="vncStatusDot"></span>
-                <span class="status-text" id="vncStatusText">未连接</span>
+        </div>
+
+        <div class="h-divider"></div>
+
+        <div class="header-stats">
+            <div class="h-stat">
+                <span class="h-stat-value" id="statProcessed">0</span>
+                <span class="h-stat-label">已处理</span>
             </div>
+            <div class="h-stat">
+                <span class="h-stat-value" id="statResumes">0</span>
+                <span class="h-stat-label">简历</span>
+            </div>
+            <div class="h-stat">
+                <span class="h-stat-value" id="statReplied">0</span>
+                <span class="h-stat-label">已回复</span>
+            </div>
+        </div>
+
+        <div class="header-spacer"></div>
+
+        <div class="header-auth" id="authSection">
+            <div class="auth-inputs">
+                <input type="text" id="login-user" value="admin" placeholder="用户" class="h-input">
+                <input type="password" id="login-pass" placeholder="密码" class="h-input">
+                <button class="h-auth-btn" onclick="doLogin(event)">
+                    <span class="spinner"></span>
+                    <span class="btn-text">登录</span>
+                </button>
+            </div>
+            <span class="auth-badge" id="authStatus">未登录</span>
+        </div>
+
+        <div class="h-divider"></div>
+
+        <div class="header-vnc">
+            <span class="status-dot" id="vncStatusDot"></span>
+            <span class="vnc-text" id="vncStatusText">未连接</span>
+        </div>
+    </header>
+
+    <!-- ═══ TASK PROGRESS BAR ═══ -->
+    <div class="task-bar" id="taskStatus">
+        <div class="task-bar-info">
+            <span class="task-spinner"></span>
+            <span class="task-bar-name" id="taskStatusName">正在执行...</span>
+        </div>
+        <div class="task-bar-track">
+            <div class="task-bar-fill" id="taskProgressBar"></div>
+        </div>
+        <span class="task-bar-pct" id="taskStatusPercent">0%</span>
+        <span class="task-bar-text" id="taskStatusText">等待启动...</span>
+    </div>
+
+    <!-- ═══ MAIN ═══ -->
+    <main class="vnc-panel">
+        <div class="vnc-toolbar">
+            <button onclick="refreshVNC()">🔄 刷新</button>
+            <button onclick="zoomIn()">🔍+ 放大</button>
+            <button onclick="zoomOut()">🔍− 缩小</button>
+            <button onclick="screenshot()">📷 截图</button>
         </div>
         <div class="vnc-viewport" id="vncViewport">
             <div class="vnc-placeholder" id="vncPlaceholder">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <rect x="2" y="3" width="20" height="14" rx="2"/>
-                    <path d="M8 21h8"/>
-                    <path d="M12 17v4"/>
+                    <path d="M8 21h8"/><path d="M12 17v4"/>
                 </svg>
-                <p>点击"连接桌面"启动浏览器</p>
+                <p>点击「打开BOSS直聘」启动浏览器</p>
             </div>
             <iframe class="vnc-iframe" id="vncFrame" style="display:none;" allow="clipboard-read; clipboard-write"></iframe>
         </div>
-        <div class="vnc-toolbar">
-            <button onclick="refreshVNC()">🔄 刷新</button>
-            <button onclick="zoomIn()">🔍+ 放大</button>
-            <button onclick="zoomOut()">🔍- 缩小</button>
-            <button onclick="screenshot()">📷 截图</button>
-        </div>
-    </div>
+    </main>
 
-    <!-- 右侧控制面板 -->
-    <div class="control-panel">
-        <div class="panel-header">
-            <h1>🤖 BOSS直聘控制台</h1>
-            <p>自动化招聘助手</p>
-        </div>
-
-        <div class="panel-content">
-            <!-- API 认证登录 -->
-            <div class="section" id="authSection">
-                <div class="section-title">🔐 API 认证</div>
-                <div style="display:flex;gap:6px;align-items:center;">
-                    <input type="text" id="login-user" value="admin" placeholder="用户名" style="flex:1;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:13px;background:var(--bg-input);color:var(--text-color);">
-                    <input type="password" id="login-pass" placeholder="密码" style="flex:1;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:13px;background:var(--bg-input);color:var(--text-color);">
-                    <button class="btn btn-primary btn-sm" onclick="doLogin()" style="white-space:nowrap;">
-                        <span class="spinner"></span>
-                        <span class="btn-text">登录</span>
-                    </button>
-                </div>
-                <div id="authStatus" style="font-size:12px;margin-top:4px;color:var(--text-muted);">未登录 — 部分功能不可用</div>
-            </div>
-
-            <!-- 统计信息 -->
-            <div class="stats">
-                <div class="stat-item">
-                    <div class="stat-value" id="statProcessed">0</div>
-                    <div class="stat-label">已处理</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="statResumes">0</div>
-                    <div class="stat-label">简历数</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="statReplied">0</div>
-                    <div class="stat-label">已回复</div>
-                </div>
-            </div>
+    <!-- ═══ CONTROL PANEL ═══ -->
+    <aside class="control-panel">
+        <div class="cp-scroll">
 
             <!-- 浏览器控制 -->
             <div class="section">
-                <div class="section-title">浏览器控制</div>
-                <button class="btn btn-success" onclick="openBossZhipin()">
-                    <span class="spinner"></span>
-                    <span class="btn-text">🚀 打开BOSS直聘</span>
-                </button>
-                <button class="btn btn-primary" onclick="connectVNC()">
-                    <span class="spinner"></span>
-                    <span class="btn-text">🌐 连接桌面</span>
-                </button>
-                <button class="btn btn-info" onclick="checkLogin()">
-                    <span class="spinner"></span>
-                    <span class="btn-text">✅ 检查登录状态</span>
-                </button>
-                <div style="display:flex;gap:8px;margin-bottom:8px;">
-                    <button class="btn btn-secondary btn-sm" style="flex:1" onclick="exportCookies()">
+                <div class="section-header">
+                    <span class="section-label">浏览器</span>
+                </div>
+                <div class="action-grid">
+                    <button class="btn btn-success" onclick="openBossZhipin(event)">
+                        <span class="spinner"></span>
+                        <span class="btn-text">🚀 打开BOSS</span>
+                    </button>
+                    <button class="btn btn-primary" onclick="connectVNC(event)">
+                        <span class="spinner"></span>
+                        <span class="btn-text">🌐 连接桌面</span>
+                    </button>
+                    <button class="btn btn-info action-grid-full" onclick="checkLogin(event)">
+                        <span class="spinner"></span>
+                        <span class="btn-text">✅ 检查登录状态</span>
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="exportCookies(event)">
                         <span class="spinner"></span>
                         <span class="btn-text">💾 导出Cookie</span>
                     </button>
-                    <button class="btn btn-secondary btn-sm" style="flex:1" onclick="importCookies()">
+                    <button class="btn btn-secondary btn-sm" onclick="importCookies(event)">
                         <span class="spinner"></span>
                         <span class="btn-text">📂 导入Cookie</span>
                     </button>
                 </div>
             </div>
 
-            <!-- 批量操作 -->
+            <!-- 批量自动化 -->
             <div class="section">
-                <div class="section-title">批量自动化操作</div>
-
-                <!-- 任务状态显示 -->
-                <div class="task-status" id="taskStatus">
-                    <div class="task-status-header">
-                        <div class="task-status-title">
-                            <span class="task-status-spinner"></span>
-                            <span id="taskStatusName">正在执行...</span>
-                        </div>
-                        <span id="taskStatusPercent" style="color: #667eea; font-size: 12px; font-weight: bold;">0%</span>
-                    </div>
-                    <div class="task-progress">
-                        <div class="task-progress-bar" id="taskProgressBar"></div>
-                    </div>
-                    <div class="task-status-text" id="taskStatusText">等待启动...</div>
+                <div class="section-header">
+                    <span class="section-label">批量自动化</span>
                 </div>
-
-                <div class="input-group">
+                <div class="input-row">
                     <input type="number" id="batchLimit" value="20" placeholder="人数">
                     <button class="btn btn-success" onclick="batchFilterAndHello()" id="btnFilterHello">
                         <span class="spinner"></span>
                         <span class="btn-text">👋 筛选+打招呼</span>
                     </button>
                 </div>
-                <div class="input-group">
+                <div class="input-row">
                     <input type="number" id="resumeLimit" value="10" placeholder="人数">
                     <button class="btn btn-warning" onclick="batchGetResumes()" id="btnGetResumes">
                         <span class="spinner"></span>
                         <span class="btn-text">📄 批量获取简历</span>
                     </button>
                 </div>
-                <div class="input-group">
+                <div class="input-row">
                     <input type="number" id="replyLimit" value="15" placeholder="人数">
                     <button class="btn btn-danger" onclick="batchReplyMessages()" id="btnReplyMessages">
                         <span class="spinner"></span>
@@ -566,14 +926,14 @@
                 </div>
             </div>
 
-            <!-- 筛选配置 -->
+            <!-- 筛选条件 -->
             <div class="section">
-                <div class="section-title">
-                    筛选条件配置
-                    <button onclick="toggleConfig('filterConfig')">展开/收起</button>
+                <div class="section-header">
+                    <span class="section-label">筛选条件</span>
+                    <button class="section-toggle" onclick="toggleConfig('filterConfig')">展开/收起</button>
                 </div>
                 <div class="config-content show" id="filterConfig">
-                    <div class="config-form">
+                    <div class="config-card">
                         <div class="form-group">
                             <label>学历要求</label>
                             <select id="degreeFilter">
@@ -594,7 +954,7 @@
                                     <option value="5">5年+</option>
                                     <option value="10">10年+</option>
                                 </select>
-                                <span style="color:#666;padding-top:10px;">至</span>
+                                <span class="form-sep">—</span>
                                 <select id="yearsMax">
                                     <option value="100">不限</option>
                                     <option value="3">3年</option>
@@ -609,28 +969,26 @@
                             <input type="text" id="schoolWhitelist" placeholder="清华大学,北京大学,浙江大学...">
                         </div>
                         <div class="form-group">
-                            <label>关键词包含（逗号分隔）</label>
+                            <label>关键词包含</label>
                             <input type="text" id="requireKeywords" placeholder="Python,Java,全栈...">
                         </div>
                         <div class="form-group">
-                            <label>关键词排除（逗号分隔）</label>
+                            <label>关键词排除</label>
                             <input type="text" id="excludeKeywords" placeholder="外包,实习,初级...">
                         </div>
-                        <button class="btn btn-secondary btn-sm" onclick="saveFilterConfig()">
-                            保存筛选配置
-                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="saveFilterConfig()">保存筛选配置</button>
                     </div>
                 </div>
             </div>
 
-            <!-- 话术配置 -->
+            <!-- 回复话术 -->
             <div class="section">
-                <div class="section-title">
-                    回复话术设置
-                    <button onclick="toggleConfig('templateConfig')">展开/收起</button>
+                <div class="section-header">
+                    <span class="section-label">回复话术</span>
+                    <button class="section-toggle" onclick="toggleConfig('templateConfig')">展开/收起</button>
                 </div>
                 <div class="config-content" id="templateConfig">
-                    <div class="config-form">
+                    <div class="config-card">
                         <div class="form-group">
                             <label>打招呼话术</label>
                             <textarea id="helloTemplate" placeholder="您好，我对您的经历很感兴趣，希望能进一步了解...">您好，我对您的经历很感兴趣，希望能进一步了解您的背景，方便的话可以聊一聊吗？</textarea>
@@ -643,21 +1001,19 @@
                             <label>后续跟进话术</label>
                             <textarea id="followTemplate" placeholder="感谢回复，关于...">感谢回复，关于我们公司的情况，您想了解哪方面的信息呢？</textarea>
                         </div>
-                        <button class="btn btn-secondary btn-sm" onclick="saveTemplateConfig()">
-                            保存话术配置
-                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="saveTemplateConfig()">保存话术配置</button>
                     </div>
                 </div>
             </div>
 
             <!-- 岗位面试话术库 -->
             <div class="section">
-                <div class="section-title">
-                    岗位面试话术库
-                    <button onclick="toggleConfig('positionTemplates')">展开/收起</button>
+                <div class="section-header">
+                    <span class="section-label">岗位话术库</span>
+                    <button class="section-toggle" onclick="toggleConfig('positionTemplates')">展开/收起</button>
                 </div>
                 <div class="config-content" id="positionTemplates">
-                    <div class="config-form">
+                    <div class="config-card">
                         <div class="form-group">
                             <label>选择岗位</label>
                             <select id="positionSelect" onchange="loadPositionTemplate()">
@@ -669,41 +1025,52 @@
                             <input type="text" id="positionName" placeholder="例如：后端工程师、前端开发...">
                         </div>
                         <div class="form-group">
-                            <label>面试问题（每行一个问题，支持 {候选人姓名} 占位符）</label>
+                            <label>面试问题（每行一个，支持 {候选人姓名} 占位符）</label>
                             <textarea id="positionQuestions" placeholder="1. 能讲讲您最满意的项目经历吗？&#10;2. 工作地点：北京，工作时间：965，能接受吗？&#10;3. 本周三或周四下午方便面试吗？" rows="6"></textarea>
                         </div>
-                        <div class="form-row">
-                            <button class="btn btn-secondary btn-sm" onclick="savePositionTemplate()">💾 保存岗位话术</button>
-                            <button class="btn btn-secondary btn-sm" onclick="deletePositionTemplate()">🗑️ 删除当前岗位</button>
+                        <div class="btn-row">
+                            <button class="btn btn-secondary btn-sm" onclick="savePositionTemplate()">💾 保存</button>
+                            <button class="btn btn-secondary btn-sm" onclick="deletePositionTemplate()">🗑️ 删除</button>
                         </div>
-                        <div class="template-list" id="positionList" style="margin-top: 15px;">
-                            <!-- 岗位列表将在这里动态生成 -->
-                        </div>
+                        <div class="template-list" id="positionList" style="margin-top:10px;"></div>
                     </div>
                 </div>
             </div>
 
             <!-- 快捷操作 -->
             <div class="section">
-                <div class="section-title">快捷操作</div>
-                <button class="btn btn-secondary btn-sm" onclick="navigateToChat()">💬 打开聊天页</button>
-                <button class="btn btn-secondary btn-sm" onclick="navigateToList()">📋 打开候选人列表</button>
-            </div>
-        </div>
-
-        <!-- 底部固定日志面板 -->
-        <div class="panel-footer">
-            <div style="padding: 12px 15px 8px 15px;">
-                <div class="section-title" style="margin-bottom: 8px;">操作日志</div>
-                <div class="log-panel" id="logPanel">
-                    <div class="log-line"><span class="log-time">[系统]</span> 等待操作...</div>
+                <div class="section-header">
+                    <span class="section-label">快捷操作</span>
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-secondary btn-sm" onclick="navigateToChat()">💬 聊天页</button>
+                    <button class="btn btn-secondary btn-sm" onclick="navigateToList()">📋 候选人</button>
                 </div>
             </div>
-        </div>
-    </div>
 
+        </div>
+    </aside>
+
+    <!-- ═══ LOG FOOTER ═══ -->
+    <footer class="log-footer" id="logFooter">
+        <div class="log-resize" id="logResizeHandle"></div>
+        <div class="log-toolbar">
+            <span class="log-title">操作日志</span>
+            <span class="log-count" id="logCount">0</span>
+            <span class="log-spacer"></span>
+            <button class="log-btn" onclick="clearLogs()">清除</button>
+            <button class="log-btn" onclick="toggleLogPanel()" id="logToggleBtn">▼ 收起</button>
+        </div>
+        <div class="log-body" id="logPanel">
+            <div class="log-line"><span class="log-time">[系统]</span> <span class="log-info">等待操作...</span></div>
+        </div>
+    </footer>
+
+    <!-- ═══════════════════════════════════════════
+         JAVASCRIPT — All backend integration preserved
+         ═══════════════════════════════════════════ -->
     <script>
-        const API_BASE = 'http://localhost:8002';  // 外部端口8002→容器8001(避免SSH隧道冲突)
+        const API_BASE = 'http://localhost:8002';
         let vncConnected = false;
         let vncScale = 1;
         let authToken = localStorage.getItem('auth_token') || null;
@@ -721,39 +1088,13 @@
                 resume: '您好，看了您的资料非常匹配我们的需求，方便发一份简历参考吗？',
                 follow: '感谢回复，关于我们公司的情况，您想了解哪方面的信息呢？'
             },
-            positions: {} // 岗位面试话术库: { "岗位名": ["问题1", "问题2", ...] }
+            positions: {}
         };
 
-        // 任务状态管理
-        let currentTask = {
-            type: null,  // 'filter', 'resume', 'reply'
-            taskId: null,
-            active: false
-        };
+        let currentTask = { type: null, taskId: null, active: false };
 
-        // 加载保存的配置
-        function loadConfig() {
-            const saved = localStorage.getItem('bossConfig');
-            if (saved) {
-                config = JSON.parse(saved);
-                // 填充表单
-                document.getElementById('degreeFilter').value = config.filter.degree || '';
-                document.getElementById('yearsMin').value = config.filter.yearsMin || 0;
-                document.getElementById('yearsMax').value = config.filter.yearsMax || 100;
-                document.getElementById('schoolWhitelist').value = config.filter.schoolWhitelist || '';
-                document.getElementById('requireKeywords').value = config.filter.requireKeywords || '';
-                document.getElementById('excludeKeywords').value = config.filter.excludeKeywords || '';
-                document.getElementById('helloTemplate').value = config.templates.hello || '';
-                document.getElementById('resumeTemplate').value = config.templates.resume || '';
-                document.getElementById('followTemplate').value = config.templates.follow || '';
-            }
-            // 初始化岗位列表
-            renderPositionList();
-        }
-
-        function saveConfig() {
-            localStorage.setItem('bossConfig', JSON.stringify(config));
-        }
+        // ── Log system ──
+        let logEntryCount = 0;
 
         function log(message, type = 'info') {
             const panel = document.getElementById('logPanel');
@@ -761,21 +1102,107 @@
             const colorClass = type === 'error' ? 'log-error' : type === 'warn' ? 'log-warn' : 'log-info';
             panel.innerHTML += `<div class="log-line"><span class="log-time">[${time}]</span> <span class="${colorClass}">${message}</span></div>`;
             panel.scrollTop = panel.scrollHeight;
+            logEntryCount++;
+            const countEl = document.getElementById('logCount');
+            if (countEl) countEl.textContent = logEntryCount;
+        }
+
+        function clearLogs() {
+            const panel = document.getElementById('logPanel');
+            panel.innerHTML = '';
+            logEntryCount = 0;
+            const countEl = document.getElementById('logCount');
+            if (countEl) countEl.textContent = '0';
+            log('日志已清除', 'info');
+        }
+
+        let logPanelCollapsed = false;
+        function toggleLogPanel() {
+            const footer = document.getElementById('logFooter');
+            const btn = document.getElementById('logToggleBtn');
+            logPanelCollapsed = !logPanelCollapsed;
+            if (logPanelCollapsed) {
+                footer.classList.add('collapsed');
+                btn.textContent = '▲ 展开';
+            } else {
+                footer.classList.remove('collapsed');
+                btn.textContent = '▼ 收起';
+            }
+        }
+
+        // ── Log resize ──
+        (function initLogResize() {
+            function setup() {
+                const handle = document.getElementById('logResizeHandle');
+                const footer = document.getElementById('logFooter');
+                if (!handle || !footer) return;
+                let startY, startH;
+                handle.addEventListener('mousedown', function(e) {
+                    startY = e.clientY;
+                    startH = footer.offsetHeight;
+                    document.addEventListener('mousemove', onDrag);
+                    document.addEventListener('mouseup', onStop);
+                    e.preventDefault();
+                });
+                function onDrag(e) {
+                    const delta = startY - e.clientY;
+                    const newH = Math.min(Math.max(startH + delta, 60), 500);
+                    footer.style.height = newH + 'px';
+                }
+                function onStop() {
+                    document.removeEventListener('mousemove', onDrag);
+                    document.removeEventListener('mouseup', onStop);
+                }
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', setup);
+            } else {
+                setup();
+            }
+        })();
+
+        // ── Config ──
+        function loadConfig() {
+            try {
+                const saved = localStorage.getItem('bossConfig');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    config = { ...config, ...parsed };
+                    config.filter = { ...config.filter, ...(parsed.filter || {}) };
+                    config.templates = { ...config.templates, ...(parsed.templates || {}) };
+                }
+            } catch (e) {
+                console.warn('Config load failed, using defaults:', e);
+            }
+            document.getElementById('degreeFilter').value = config.filter.degree || '';
+            document.getElementById('yearsMin').value = config.filter.yearsMin || 0;
+            document.getElementById('yearsMax').value = config.filter.yearsMax || 100;
+            document.getElementById('schoolWhitelist').value = config.filter.schoolWhitelist || '';
+            document.getElementById('requireKeywords').value = config.filter.requireKeywords || '';
+            document.getElementById('excludeKeywords').value = config.filter.excludeKeywords || '';
+            document.getElementById('helloTemplate').value = config.templates.hello || '';
+            document.getElementById('resumeTemplate').value = config.templates.resume || '';
+            document.getElementById('followTemplate').value = config.templates.follow || '';
+            renderPositionList();
+        }
+
+        function saveConfig() {
+            localStorage.setItem('bossConfig', JSON.stringify(config));
         }
 
         function setLoading(btn, loading) {
+            if (!btn) return;
             btn.classList.toggle('loading', loading);
             btn.disabled = loading;
         }
 
-        // 更新任务状态面板
+        // ── Task Status ──
         function updateTaskStatus(active, name = '', progress = 0, text = '') {
             const panel = document.getElementById('taskStatus');
             const nameEl = document.getElementById('taskStatusName');
             const percentEl = document.getElementById('taskStatusPercent');
             const progressBar = document.getElementById('taskProgressBar');
             const textEl = document.getElementById('taskStatusText');
-
             if (active) {
                 panel.classList.add('active');
                 nameEl.textContent = name;
@@ -787,7 +1214,6 @@
             }
         }
 
-        // 清除任务状态
         function clearTaskStatus() {
             currentTask = { type: null, taskId: null, active: false };
             updateTaskStatus(false);
@@ -799,18 +1225,16 @@
             document.getElementById('statReplied').textContent = replied;
         }
 
-        // JWT Auth - Login function
+        // ── Auth ──
         async function login() {
             const username = document.getElementById('login-user')?.value || 'admin';
             const password = document.getElementById('login-pass')?.value || '';
-
             try {
                 const resp = await fetch(`${API_BASE}/api/auth/login`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({username, password})
                 });
-
                 if (resp.ok) {
                     const data = await resp.json();
                     authToken = data.access_token;
@@ -831,27 +1255,25 @@
             }
         }
 
-        // UI-facing login wrapper
-        async function doLogin() {
-            const btn = event.target.closest('.btn');
+        async function doLogin(e) {
+            const btn = e && e.target ? (e.target.closest('.h-auth-btn') || e.target.closest('.btn')) : null;
             setLoading(btn, true);
             const ok = await login();
             setLoading(btn, false);
         }
 
-        // Update the auth section UI
         function updateAuthUI(isLoggedIn) {
             const el = document.getElementById('authStatus');
             const section = document.getElementById('authSection');
             if (!el || !section) return;
             if (isLoggedIn) {
-                el.innerHTML = '✅ 已认证 — 所有功能可用';
+                el.innerHTML = '✅ 已认证';
                 el.style.color = '#10b981';
-                section.style.opacity = '0.7';
+                section.classList.add('auth-done');
             } else {
-                el.innerHTML = '⚠️ 未登录 — 请输入密码后点击"登录"';
+                el.innerHTML = '⚠️ 未登录';
                 el.style.color = '#f59e0b';
-                section.style.opacity = '1';
+                section.classList.remove('auth-done');
             }
         }
 
@@ -879,16 +1301,12 @@
             log('✅ 话术配置已保存', 'info');
         }
 
-        // 岗位面试话术库函数
+        // ── Position Templates ──
         function renderPositionList() {
             const select = document.getElementById('positionSelect');
             const list = document.getElementById('positionList');
             const positions = Object.keys(config.positions || {});
-
-            // 保存当前选中的值
             const currentValue = select.value;
-
-            // 重新生成下拉框
             select.innerHTML = '<option value="">-- 添加新岗位 --</option>';
             positions.forEach(name => {
                 const option = document.createElement('option');
@@ -896,26 +1314,14 @@
                 option.textContent = name;
                 select.appendChild(option);
             });
-
-            // 恢复选中状态
-            if (currentValue && positions.includes(currentValue)) {
-                select.value = currentValue;
-            }
-
-            // 生成岗位列表
+            if (currentValue && positions.includes(currentValue)) select.value = currentValue;
             list.innerHTML = '';
             positions.forEach(name => {
                 const questions = config.positions[name];
                 const item = document.createElement('div');
                 item.className = 'template-item';
-                item.innerHTML = `
-                    <div class="template-name">${name} <small style="color:#666">(${questions.length}个问题)</small></div>
-                    <div class="template-text">${questions.slice(0, 2).join('、')}${questions.length > 2 ? '...' : ''}</div>
-                `;
-                item.onclick = () => {
-                    document.getElementById('positionSelect').value = name;
-                    loadPositionTemplate();
-                };
+                item.innerHTML = `<div class="template-name">${name} <small style="color:var(--text-muted)">(${questions.length}个问题)</small></div><div class="template-text">${questions.slice(0, 2).join('、')}${questions.length > 2 ? '...' : ''}</div>`;
+                item.onclick = () => { document.getElementById('positionSelect').value = name; loadPositionTemplate(); };
                 list.appendChild(item);
             });
         }
@@ -923,7 +1329,6 @@
         function loadPositionTemplate() {
             const select = document.getElementById('positionSelect');
             const positionName = select.value;
-
             if (positionName && config.positions[positionName]) {
                 document.getElementById('positionName').value = positionName;
                 document.getElementById('positionQuestions').value = config.positions[positionName].join('\n');
@@ -937,92 +1342,52 @@
         function savePositionTemplate() {
             const positionName = document.getElementById('positionName').value.trim();
             const questionsText = document.getElementById('positionQuestions').value.trim();
-
-            if (!positionName) {
-                log('❌ 请输入岗位名称', 'error');
-                return;
-            }
-
-            if (!questionsText) {
-                log('❌ 请输入面试问题', 'error');
-                return;
-            }
-
-            // 将问题按行分割，过滤空行
-            const questions = questionsText.split('\n')
-                .map(q => q.trim())
-                .filter(q => q.length > 0);
-
-            if (questions.length === 0) {
-                log('❌ 请至少输入一个问题', 'error');
-                return;
-            }
-
-            // 保存到配置
-            if (!config.positions) {
-                config.positions = {};
-            }
+            if (!positionName) { log('❌ 请输入岗位名称', 'error'); return; }
+            if (!questionsText) { log('❌ 请输入面试问题', 'error'); return; }
+            const questions = questionsText.split('\n').map(q => q.trim()).filter(q => q.length > 0);
+            if (questions.length === 0) { log('❌ 请至少输入一个问题', 'error'); return; }
+            if (!config.positions) config.positions = {};
             config.positions[positionName] = questions;
             saveConfig();
-
-            // 更新界面
             renderPositionList();
             document.getElementById('positionSelect').value = positionName;
-
             log(`✅ 岗位 "${positionName}" 已保存 (${questions.length}个问题)`, 'info');
         }
 
         function deletePositionTemplate() {
             const positionName = document.getElementById('positionName').value.trim();
-
             if (!positionName || !config.positions || !config.positions[positionName]) {
-                log('❌ 没有选中的岗位', 'error');
-                return;
+                log('❌ 没有选中的岗位', 'error'); return;
             }
-
             if (confirm(`确定要删除岗位 "${positionName}" 吗？`)) {
                 delete config.positions[positionName];
                 saveConfig();
-
-                // 清空表单
                 document.getElementById('positionName').value = '';
                 document.getElementById('positionQuestions').value = '';
-
-                // 更新界面
                 renderPositionList();
-
                 log(`✅ 岗位 "${positionName}" 已删除`, 'info');
             }
         }
 
-        // 获取指定岗位的面试问题（供 Agent 使用）
         function getPositionQuestions(positionName, candidateName = '') {
-            if (!config.positions || !config.positions[positionName]) {
-                return null;
-            }
-
-            // 替换占位符
+            if (!config.positions || !config.positions[positionName]) return null;
             return config.positions[positionName].map(q => {
                 return q.replace(/{候选人姓名}/g, candidateName).replace(/{name}/g, candidateName);
             });
         }
 
-        // VNC控制
-        // F3: 打开BOSS直聘 - 启动Chrome并导航到zhipin.com
-        async function openBossZhipin() {
-            const btn = event.target.closest('.btn');
+        // ── VNC Control ──
+        async function openBossZhipin(e) {
+            const btn = e && e.target ? e.target.closest('.btn') : null;
             setLoading(btn, true);
             log('正在启动浏览器并打开BOSS直聘...', 'info');
-
             try {
                 const data = await apiCall('/api/browser/open-boss');
                 setLoading(btn, false);
-
                 if (data && data.status === 'ok') {
                     log('✅ Chrome已启动，BOSS直聘已打开', 'info');
                     log('正在连接VNC桌面以查看浏览器...', 'info');
-                    // 自动连接VNC显示浏览器窗口
-                    await connectVNC(null);
+                    await connectVNC({});
                 } else if (data && data.status === 'error') {
                     log(`❌ 启动失败: ${data.message}`, 'error');
                 } else {
@@ -1034,48 +1399,29 @@
             }
         }
 
-        // noVNC RFB instance (replaces iframe approach)
-        // VNC 通过 noVNC iframe (port 6901) 连接
-
-        // connectVNC - iframe 方式加载 noVNC（6901），由 noVNC 内部处理密码和连接
-        async function connectVNC(btnEl) {
-            let btn = btnEl;
-            if (!btn) {
-                try { btn = event.target.closest('.btn'); } catch (e) {}
-            }
+        async function connectVNC(e) {
+            let btn = null;
+            if (e && e.target) { try { btn = e.target.closest('.btn'); } catch (ex) {} }
             if (btn) setLoading(btn, true);
             log('正在连接远程桌面...', 'info');
-
             try {
                 const vncConfig = await apiCall('/api/vnc/config', null, 'GET');
                 if (btn) setLoading(btn, false);
-
-                if (!vncConfig) {
-                    log('获取VNC配置失败', 'error');
-                    return;
-                }
-
-                // 前端拼接 noVNC URL（密码不在服务端日志）
-                // resize=scale: 自动缩放桌面到 iframe 大小
-                // password: 自动传递 VNC 密码认证
+                if (!vncConfig) { log('获取VNC配置失败', 'error'); return; }
                 const novncUrl = `${vncConfig.novnc_url}&password=${encodeURIComponent(vncConfig.password)}&resize=scale`;
-
                 document.getElementById('vncPlaceholder').style.display = 'none';
                 const iframe = document.getElementById('vncFrame');
                 iframe.src = novncUrl;
                 iframe.style.display = 'block';
-
                 vncConnected = false;
                 document.getElementById('vncStatusDot').className = 'status-dot busy';
                 document.getElementById('vncStatusText').textContent = '连接中...';
-
                 iframe.onload = () => {
                     vncConnected = true;
                     document.getElementById('vncStatusDot').className = 'status-dot online';
                     document.getElementById('vncStatusText').textContent = '已连接';
                     log('✅ VNC远程桌面已连接', 'info');
                 };
-
                 setTimeout(() => {
                     if (!vncConnected) {
                         vncConnected = true;
@@ -1102,12 +1448,8 @@
         }
 
         function refreshVNC() {
-            if (vncConnected) {
-                screenshot();
-                log('刷新桌面...', 'info');
-            } else {
-                log('请先连接浏览器', 'warn');
-            }
+            if (vncConnected) { screenshot(); log('刷新桌面...', 'info'); }
+            else { log('请先连接浏览器', 'warn'); }
         }
 
         function zoomIn() {
@@ -1131,25 +1473,18 @@
             } else {
                 iframe.style.transform = `scale(${vncScale})`;
                 iframe.style.transformOrigin = '0 0';
-                // 补偿缩放后的尺寸，避免裁切
                 iframe.style.width = `${100 / vncScale}%`;
                 iframe.style.height = `${100 / vncScale}%`;
             }
         }
 
         function screenshot() {
-            if (!vncConnected) {
-                log('请先连接浏览器', 'warn');
-                return;
-            }
-
+            if (!vncConnected) { log('请先连接浏览器', 'warn'); return; }
             log('正在获取截图...', 'info');
             apiCall('/api/browser/screenshot').then(data => {
                 if (data && data.status === 'success') {
                     const imgData = `data:image/png;base64,${data.screenshot}`;
                     log(`✅ 截图已获取: ${data.title || data.url || '浏览器截图'}`, 'info');
-
-                    // 尝试在新标签页中打开截图
                     try {
                         const win = window.open('', '_blank');
                         if (win) {
@@ -1171,34 +1506,28 @@
             });
         }
 
-        // API调用
+        // ── API ──
         async function apiCall(endpoint, body = null, method = 'POST') {
             try {
                 const options = {
                     method: method,
                     headers: { 'Content-Type': 'application/json' }
                 };
-
-                // Add JWT Authorization header
                 const token = localStorage.getItem('auth_token');
                 if (token) {
                     options.headers = {...options.headers, 'Authorization': `Bearer ${token}`};
                 }
-
                 if (body && (method === 'POST' || method === 'PUT')) {
                     options.body = JSON.stringify(body);
                 }
                 const response = await fetch(`${API_BASE}${endpoint}`, options);
-
-                // Handle 401 - token expired or missing
                 if (response.status === 401) {
                     authToken = null;
                     localStorage.removeItem('auth_token');
                     updateAuthUI(false);
-                    log('⚠️ API 认证失败，请在左侧"API 认证"区域输入密码登录', 'warn');
+                    log('⚠️ API 认证失败，请先登录', 'warn');
                     return null;
                 }
-
                 return await response.json();
             } catch (e) {
                 log(`请求失败: ${e.message}`, 'error');
@@ -1206,21 +1535,16 @@
             }
         }
 
+        // ── Login Check ──
         let _loginPollTimer = null;
         let _loginBtnEl = null;
 
-        function checkLogin() {
-            const btn = event.target.closest('.btn');
+        function checkLogin(e) {
+            const btn = e && e.target ? e.target.closest('.btn') : null;
             _loginBtnEl = btn;
             setLoading(btn, true);
             log('🔍 正在检查BOSS直聘登录状态...', 'info');
-
-            // 停止之前的轮询
-            if (_loginPollTimer) {
-                clearInterval(_loginPollTimer);
-                _loginPollTimer = null;
-            }
-
+            if (_loginPollTimer) { clearInterval(_loginPollTimer); _loginPollTimer = null; }
             _doCheckLogin();
         }
 
@@ -1231,38 +1555,24 @@
                     log('❌ 登录检查请求失败', 'error');
                     return;
                 }
-
                 if (data.logged_in) {
-                    // 登录成功
                     if (_loginBtnEl) setLoading(_loginBtnEl, false);
                     document.getElementById('vncStatusDot').className = 'status-dot online';
                     document.getElementById('vncStatusText').textContent = '已登录';
                     const userInfo = data.username ? ` (${data.username})` : '';
                     log('✅ 已登录' + userInfo, 'info');
-
-                    // 自动导出Cookie（保存登录态到文件）
                     apiCall('/api/browser/export-cookies').then(ck => {
-                        if (ck && ck.status === 'ok') {
-                            log('💾 Cookie已自动备份 (' + ck.count + '条)', 'info');
-                        }
+                        if (ck && ck.status === 'ok') log('💾 Cookie已自动备份 (' + ck.count + '条)', 'info');
                     });
-
-                    // 停止轮询
-                    if (_loginPollTimer) {
-                        clearInterval(_loginPollTimer);
-                        _loginPollTimer = null;
-                    }
+                    if (_loginPollTimer) { clearInterval(_loginPollTimer); _loginPollTimer = null; }
                     _loginBtnEl = null;
                 } else {
-                    // 未登录
                     if (data.qr_visible) {
                         if (_loginBtnEl) setLoading(_loginBtnEl, false);
                         log('📱 登录二维码已显示在VNC桌面中，请用手机BOSS直聘APP扫码', 'warn');
                     } else {
                         log('📱 未登录，请在VNC中查看登录页面并扫码', 'warn');
                     }
-
-                    // 开始轮询（每5秒检查一次，最多120次=10分钟）
                     if (!_loginPollTimer) {
                         log('⏳ 每5秒自动检查登录状态，请扫码后等待...', 'info');
                         let pollCount = 0;
@@ -1282,32 +1592,27 @@
             });
         }
 
-        function exportCookies() {
-            const btn = event.target.closest('.btn');
+        function exportCookies(e) {
+            const btn = e && e.target ? e.target.closest('.btn') : null;
             setLoading(btn, true);
             log('正在导出Cookie备份...');
             apiCall('/api/browser/export-cookies').then(data => {
                 setLoading(btn, false);
-                if (data && data.status === 'ok') {
-                    log('✅ Cookie已导出 (' + data.count + '条)', 'info');
-                } else {
-                    log('❌ 导出失败: ' + (data?.message || '未知错误'), 'error');
-                }
+                if (data && data.status === 'ok') log('✅ Cookie已导出 (' + data.count + '条)', 'info');
+                else log('❌ 导出失败: ' + (data?.message || '未知错误'), 'error');
             });
         }
 
-        function importCookies() {
-            const btn = event.target.closest('.btn');
+        function importCookies(e) {
+            const btn = e && e.target ? e.target.closest('.btn') : null;
             setLoading(btn, true);
             log('📂 正在恢复Cookie...');
             apiCall('/api/browser/import-cookies').then(data => {
                 setLoading(btn, false);
                 if (data && data.status === 'ok') {
                     log('✅ Cookie已恢复 (' + data.imported + '/' + data.total + '条)', 'info');
-                    // 导入后刷新页面使cookie生效
                     log('🔄 正在刷新页面使Cookie生效...', 'info');
                     apiCall('/api/browser/execute', { script: 'location.reload()' }).then(() => {
-                        // 刷新后延迟检查登录状态
                         setTimeout(() => {
                             log('🔍 正在验证登录状态...', 'info');
                             _doCheckLogin();
@@ -1319,6 +1624,7 @@
             });
         }
 
+        // ── Batch Operations ──
         let _filterPollTimer = null;
 
         function batchFilterAndHello() {
@@ -1326,16 +1632,8 @@
             const limit = parseInt(document.getElementById('batchLimit').value) || 20;
             setLoading(btn, true);
             log(`👋 开始筛选+打招呼，上限 ${limit} 人...`, 'info');
-
-            // 清除之前的任务状态
-            if (_filterPollTimer) {
-                clearInterval(_filterPollTimer);
-                _filterPollTimer = null;
-            }
-
-            // Build request matching FilterContactRequest model
-            const schoolList = (config.filter.schoolWhitelist || '')
-                .split(',').map(s => s.trim()).filter(s => s.length > 0);
+            if (_filterPollTimer) { clearInterval(_filterPollTimer); _filterPollTimer = null; }
+            const schoolList = (config.filter.schoolWhitelist || '').split(',').map(s => s.trim()).filter(s => s.length > 0);
             const requestBody = {
                 daily_cap: limit,
                 min_degree: config.filter.degree || '本科',
@@ -1343,26 +1641,18 @@
                 school_whitelist: schoolList.length > 0 ? schoolList : undefined,
                 dry_run: false,
             };
-
             apiCall('/api/filter/contact', requestBody).then(data => {
                 if (data && (data.status === 'queued' || data.status === 'started')) {
                     const taskId = data.task_id;
                     log(`✅ 任务已加入队列 (ID: ${taskId})`, 'info');
-                    // 设置当前任务状态
                     currentTask = { type: 'filter', taskId: taskId, active: true };
-                    updateTaskStatus(true, '筛选+打招呼', 0, `任务 ID: ${taskId} - 等待启动...`);
-                    // Start polling for progress
+                    updateTaskStatus(true, '筛选+打招呼', 0, `任务 ID: ${taskId}`);
                     _pollFilterStatus(taskId, limit);
                 } else {
                     setLoading(btn, false);
-                    // 401/403 → data is null, show auth error
-                    if (!data) {
-                        log('❌ 启动失败: API 认证失败，请在左侧"API 认证"区域登录', 'error');
-                    } else if (data.detail) {
-                        log(`❌ 启动失败: ${data.detail}`, 'error');
-                    } else {
-                        log(`❌ 启动失败: ${(data && data.message) || '未知错误'}`, 'error');
-                    }
+                    if (!data) log('❌ 启动失败: API 认证失败，请先登录', 'error');
+                    else if (data.detail) log(`❌ 启动失败: ${data.detail}`, 'error');
+                    else log(`❌ 启动失败: ${(data && data.message) || '未知错误'}`, 'error');
                 }
             });
         }
@@ -1371,9 +1661,8 @@
             let pollCount = 0;
             _filterPollTimer = setInterval(() => {
                 pollCount++;
-                if (pollCount > 200) { // 10 min max
-                    clearInterval(_filterPollTimer);
-                    _filterPollTimer = null;
+                if (pollCount > 200) {
+                    clearInterval(_filterPollTimer); _filterPollTimer = null;
                     log('⏰ 任务轮询超时', 'warn');
                     clearTaskStatus();
                     setLoading(document.getElementById('btnFilterHello'), false);
@@ -1384,12 +1673,9 @@
                     if (data.status === 'running') {
                         const progress = data.progress || 0;
                         updateTaskStatus(true, '筛选+打招呼', progress, `正在处理候选人...`);
-                        if (pollCount % 5 === 0) {
-                            log(`⏳ 进行中... (${progress}%)`, 'info');
-                        }
+                        if (pollCount % 5 === 0) log(`⏳ 进行中... (${progress}%)`, 'info');
                     } else if (data.status === 'completed') {
-                        clearInterval(_filterPollTimer);
-                        _filterPollTimer = null;
+                        clearInterval(_filterPollTimer); _filterPollTimer = null;
                         const r = data.result || {};
                         log(`✅ 任务完成! 联系:${r.contacted||0} 跳过:${r.skipped||0} 失败:${r.failed||0} 扫描:${r.total_scanned||0}`, 'info');
                         log(`📊 配额: ${r.cap_used || limit}`, 'info');
@@ -1397,8 +1683,7 @@
                         clearTaskStatus();
                         setLoading(document.getElementById('btnFilterHello'), false);
                     } else if (data.status === 'failed' || data.status === 'error') {
-                        clearInterval(_filterPollTimer);
-                        _filterPollTimer = null;
+                        clearInterval(_filterPollTimer); _filterPollTimer = null;
                         log(`❌ 任务失败: ${data.error || '未知错误'}`, 'error');
                         clearTaskStatus();
                         setLoading(document.getElementById('btnFilterHello'), false);
@@ -1412,16 +1697,11 @@
             const limit = parseInt(document.getElementById('resumeLimit').value) || 10;
             setLoading(btn, true);
             log(`📄 开始批量获取简历，上限 ${limit} 人...`, 'info');
-
-            apiCall('/api/resume/batch', {
-                limit: limit
-            }).then(data => {
+            apiCall('/api/resume/batch', { limit: limit }).then(data => {
                 if (data && data.status === 'started') {
                     log(`✅ 任务已启动，预计获取 ${limit} 份简历`, 'info');
-                    // 设置当前任务状态
                     currentTask = { type: 'resume', taskId: null, active: true };
                     updateTaskStatus(true, '批量获取简历', 0, `正在处理候选人...`);
-                    // 开始轮询任务状态
                     pollResumeStatus(btn, limit);
                 } else if (data && data.status === 'error') {
                     log(`❌ ${data.message}`, 'error');
@@ -1432,12 +1712,11 @@
             });
         }
 
-        // 轮询简历任务状态
         function pollResumeStatus(btn, limit) {
             let pollCount = 0;
             const interval = setInterval(async () => {
                 pollCount++;
-                if (pollCount > 100) { // 5分钟超时
+                if (pollCount > 100) {
                     clearInterval(interval);
                     log('⏰ 简历任务轮询超时', 'warn');
                     clearTaskStatus();
@@ -1446,15 +1725,10 @@
                 }
                 try {
                     const data = await apiCall('/api/resume/status', null, 'GET');
-
-                    if (!data) {
-                        clearInterval(interval);
-                        return;
-                    }
-
+                    if (!data) { clearInterval(interval); return; }
                     if (data.status === 'completed') {
                         log(`✅ 简历下载任务完成`, 'info');
-                        loadResumeList(); // 刷新简历列表
+                        loadResumeList();
                         clearInterval(interval);
                         clearTaskStatus();
                         setLoading(btn, false);
@@ -1468,17 +1742,12 @@
                         const total = data.total || limit;
                         const progress = total > 0 ? Math.round((processed / total) * 100) : 0;
                         updateTaskStatus(true, '批量获取简历', progress, `已处理 ${processed}/${total} 人`);
-                        if (pollCount % 5 === 0) {
-                            log(`⏳ 任务进行中... (${processed}/${total})`, 'info');
-                        }
+                        if (pollCount % 5 === 0) log(`⏳ 任务进行中... (${processed}/${total})`, 'info');
                     }
-                } catch (e) {
-                    console.error('轮询状态失败:', e);
-                }
-            }, 3000); // 每3秒轮询一次
+                } catch (e) { console.error('轮询状态失败:', e); }
+            }, 3000);
         }
 
-        // 加载简历列表（可选功能）
         function loadResumeList() {
             apiCall('/api/resume/list', null, 'GET').then(data => {
                 if (data && Array.isArray(data)) {
@@ -1493,7 +1762,6 @@
             const limit = parseInt(document.getElementById('replyLimit').value) || 15;
             setLoading(btn, true);
             log(`💬 开始批量回复未读消息，上限 ${limit} 人...`, 'info');
-
             apiCall('/api/chat/batch', {
                 limit: limit,
                 dry_run: false,
@@ -1501,10 +1769,8 @@
             }).then(data => {
                 if (data && (data.status === 'started' || data.status === 'queued')) {
                     log(`✅ 任务已启动，预计回复 ${limit} 人`, 'info');
-                    // 设置当前任务状态
                     currentTask = { type: 'reply', taskId: null, active: true };
                     updateTaskStatus(true, '批量回复未读', 0, `正在处理联系人...`);
-                    // 开始轮询进度
                     pollChatReplyStatus(btn, limit);
                 } else if (data && data.message) {
                     log(`📋 ${data.message}`, 'info');
@@ -1526,8 +1792,7 @@
             _chatReplyPollTimer = setInterval(() => {
                 count++;
                 if (count > 200) {
-                    clearInterval(_chatReplyPollTimer);
-                    _chatReplyPollTimer = null;
+                    clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null;
                     log('⏰ 回复任务轮询超时', 'warn');
                     clearTaskStatus();
                     setLoading(btn, false);
@@ -1536,15 +1801,13 @@
                 apiCall('/api/workflow/reply-status', null, 'GET').then(data => {
                     if (!data) return;
                     if (data.status === 'completed') {
-                        clearInterval(_chatReplyPollTimer);
-                        _chatReplyPollTimer = null;
+                        clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null;
                         log(`✅ 回复完成! 成功:${data.success||0} 失败:${data.failed||0}`, 'info');
                         updateStats(0, 0, (data.success||0));
                         clearTaskStatus();
                         setLoading(btn, false);
                     } else if (data.status === 'error' || data.status === 'failed') {
-                        clearInterval(_chatReplyPollTimer);
-                        _chatReplyPollTimer = null;
+                        clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null;
                         log(`❌ 任务失败: ${data.message || '未知错误'}`, 'error');
                         clearTaskStatus();
                         setLoading(btn, false);
@@ -1553,9 +1816,7 @@
                         const total = data.total || limit;
                         const progress = total > 0 ? Math.round((processed / total) * 100) : 0;
                         updateTaskStatus(true, '批量回复未读', progress, `已处理 ${processed}/${total} 人`);
-                        if (count % 10 === 0) {
-                            log(`⏳ 回复中... (${processed}/${total})`, 'info');
-                        }
+                        if (count % 10 === 0) log(`⏳ 回复中... (${processed}/${total})`, 'info');
                     }
                 });
             }, 3000);
@@ -1571,17 +1832,14 @@
             apiCall('/api/browser/navigate', { url: 'https://www.zhipin.com/web/geek/job' });
         }
 
-        // 页面加载时初始化
+        // ── Init ──
         window.onload = function() {
             loadConfig();
-            // 检查并显示 API 认证状态
             const token = localStorage.getItem('auth_token');
             updateAuthUI(!!token);
-            // 加载时只检查浏览器状态，不自动触发登录检查
-            // 用户需手动点击"检查登录状态"按钮
             log('📡 系统就绪，请依次操作：连接桌面 → 打开BOSS直聘 → 检查登录', 'info');
             if (!token) {
-                log('⚠️ 请先在"API 认证"区域输入密码登录，否则批量操作不可用', 'warn');
+                log('⚠️ 请先在顶栏输入密码登录API，否则批量操作不可用', 'warn');
             }
         };
     </script>
