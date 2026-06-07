@@ -624,97 +624,151 @@ class BrowserAutomation:
             return ""
 
     async def check_login(self) -> Dict:
-        """检测 BOSS直聘登录状态（F4 增强）
+        """检测 BOSS直聘登录状态
 
-        核心逻辑：反向判断 — 页面显示"登录/注册"则未登录，否则已登录。
-        这比正向猜 DOM 选择器可靠得多：
-        - URL 含 /web/user/ 或 login/register → 登录页
-        - 页面 innerText 含"登录/注册"且无候选人内容 → 公开页面
+        检测策略（按优先级）:
+        1. Cookie 检测: wt2/wbg/zp_at/bst 存在且未过期 → 已登录
+        2. URL 检测: 在登录页(passport/user) → 未登录
+        3. iframe 内容检测: 等待 iframe 加载后检查招聘者文案
+        4. 主页面文案检测: 检查侧边栏等非 iframe 内容
 
-        Returns:
-            {logged_in, message, username?, qr_visible?}
+        关键: 不再盲目导航到登录页。只有 URL 确实在登录页时才报未登录。
+        iframe 加载慢时用轮询等待(最多10秒)而非立即判定未登录。
         """
         if not await self._ensure_session(timeout=8):
             return {"logged_in": False, "message": "浏览器未连接或重连失败"}
         try:
-            # --- Step 0: 导航到招聘者 Dashboard ---
-            try:
-                await asyncio.wait_for(
-                    self.page.get("https://www.zhipin.com/web/chat/recommend"), timeout=10
-                )
-                await asyncio.sleep(3)
-            except asyncio.TimeoutError:
-                pass
-
-            # --- Step 1: 读取页面状态 ---
+            # --- Step 0: 导航到推荐页(如果不在 BOSS 域) ---
             current_url = await self._safe_evaluate("window.location.href")
+            if "zhipin.com" not in current_url:
+                try:
+                    await asyncio.wait_for(
+                        self.page.get("https://www.zhipin.com/web/chat/recommend"),
+                        timeout=15,
+                    )
+                    await asyncio.sleep(3)
+                except asyncio.TimeoutError:
+                    pass
+                current_url = await self._safe_evaluate("window.location.href")
+
             if not current_url:
                 return {"logged_in": False, "message": "页面响应超时"}
 
-            # --- Step 2: 反向判断 — 在登录页或页面有"登录/注册" → 未登录 ---
-            page_text = await self._safe_evaluate("document.body.innerText.substring(0,500)")
-
+            # --- Step 1: URL 判断 — 确实在登录页 → 未登录 ---
             on_login_page = (
                 "/web/user/" in current_url
-                or "login" in current_url.lower()
-                or "register" in current_url.lower()
                 or "passport" in current_url.lower()
             )
-            has_public_header = (
-                "登录/注册" in page_text
-                or "我要招聘" in page_text  # BOSS 公开页 header
-            )
-            has_recruiter_content = (
-                "推荐牛人" in page_text
-                or "职位管理" in page_text    # 招聘者侧边栏
-                or "牛人管理" in page_text    # 招聘者侧边栏
-                or "道具" in page_text        # 招聘者侧边栏
+            # 注意: /web/chat/recommend URL 包含 "login" 不算登录页
+            # 只有 /web/user/ 或 passport 才是真正的登录页
+
+            if on_login_page:
+                logger.info(f"URL 指向登录页: {current_url}")
+                # 不主动导航到登录页，只报告状态
+                qr_visible = await self._detect_qr_code()
+                return {
+                    "logged_in": False,
+                    "message": "当前在登录页，请扫码登录",
+                    "qr_visible": qr_visible,
+                }
+
+            # --- Step 2: Cookie 检测（最可靠） ---
+            cookie_check = await self._safe_evaluate("""
+            (function() {
+                // 检查 document.cookie 中可访问的登录态 cookie
+                var dc = document.cookie;
+                var hasBst = dc.indexOf('bst=') >= 0;
+                // wt2/wbg/zp_at 是 HttpOnly，document.cookie 读不到
+                // 但如果 bst 存在且页面不在登录页，大概率已登录
+                return hasBst ? 'has_bst' : 'no_bst';
+            })()
+            """)
+
+            # --- Step 3: 等待 iframe 加载并检查内容 ---
+            # 推荐页的"推荐牛人"文案在 iframe 内，需要等待 iframe 加载
+            recruiter_found = False
+            for wait_round in range(3):
+                iframe_check = await self._safe_evaluate("""
+                (function() {
+                    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+                    if (!iframe) return 'no_iframe';
+                    var doc = iframe.contentDocument;
+                    if (!doc) return 'no_access';
+                    var text = doc.body ? doc.body.innerText : '';
+                    if (text.indexOf('推荐牛人') >= 0 || text.indexOf('打招呼') >= 0) return 'recruiter';
+                    if (text.indexOf('加载中') >= 0 || text.length < 10) return 'loading';
+                    return 'other:' + text.substring(0, 50);
+                })()
+                """)
+
+                if "recruiter" in iframe_check:
+                    recruiter_found = True
+                    break
+                elif "loading" in iframe_check or "no_iframe" in iframe_check:
+                    await asyncio.sleep(3)
+                else:
+                    break  # iframe 有内容但不是招聘者页面
+
+            # --- Step 4: 主页面侧边栏检测 ---
+            page_text = await self._safe_evaluate("document.body.innerText.substring(0,500)")
+            has_sidebar = (
+                "职位管理" in page_text
+                or "牛人管理" in page_text
+                or "道具" in page_text
             )
 
-            # 有招聘者内容且不在登录页 → 已登录
-            if has_recruiter_content and not on_login_page:
-                logger.info("页面含招聘者Dashboard内容，判定已登录")
+            # --- Step 5: 综合判断 ---
+            if recruiter_found:
+                logger.info("iframe 内含招聘者内容，判定已登录")
                 try:
                     await self.export_cookies()
                 except Exception:
                     pass
-                return {"logged_in": True, "message": "已登录（页面内容检测）"}
+                return {"logged_in": True, "message": "已登录（iframe内容检测）"}
 
-            # 在登录页或有公开header → 未登录
-            if on_login_page or has_public_header:
-                logger.info(f"判定未登录 (url_login={on_login_page}, public_header={has_public_header})")
+            if has_sidebar and not on_login_page:
+                logger.info("侧边栏含招聘者菜单，判定已登录")
+                try:
+                    await self.export_cookies()
+                except Exception:
+                    pass
+                return {"logged_in": True, "message": "已登录（侧边栏检测）"}
 
-            # --- Step 3: 未登录 → 尝试导入 cookie 恢复 ---
+            if cookie_check == "has_bst" and not on_login_page:
+                logger.info("有 bst cookie 且不在登录页，判定已登录（页面可能仍在加载）")
+                return {"logged_in": True, "message": "已登录（cookie检测，页面加载中）"}
+
+            # --- Step 6: 未检测到登录态 → 尝试 cookie 恢复 ---
             if COOKIE_FILE.exists():
                 logger.info("尝试导入备份cookie恢复登录态...")
                 try:
                     import_result = await self.import_cookies()
                     logger.info(f"导入: {import_result.get('imported',0)}/{import_result.get('total',0)}")
                     if import_result.get("imported", 0) > 0:
-                        # 刷新页面使 cookie 生效，重新做反向检测
                         try:
                             await self.page.get("https://www.zhipin.com/web/chat/recommend")
                         except Exception:
                             pass
-                        await asyncio.sleep(5)
-                        retry_text = await self._safe_evaluate("document.body.innerText.substring(0,500)")
-                        if "推荐牛人" in retry_text or "职位管理" in retry_text or "牛人管理" in retry_text:
-                            logger.info("Cookie恢复成功，页面显示招聘者内容")
-                            try:
-                                await self.export_cookies()
-                            except Exception:
-                                pass
-                            return {"logged_in": True, "message": "已登录（cookie恢复）"}
+                        await asyncio.sleep(8)
+                        # 重做一次检测
+                        retry_url = await self._safe_evaluate("window.location.href")
+                        if retry_url and "/web/user/" not in retry_url and "passport" not in retry_url:
+                            retry_text = await self._safe_evaluate("document.body.innerText.substring(0,500)")
+                            if "职位管理" in retry_text or "牛人管理" in retry_text:
+                                logger.info("Cookie恢复成功")
+                                try:
+                                    await self.export_cookies()
+                                except Exception:
+                                    pass
+                                return {"logged_in": True, "message": "已登录（cookie恢复）"}
                 except Exception as e:
                     logger.warning(f"Cookie恢复失败: {e}")
 
-            # --- Step 4: 仍失败 → 导航到登录页显示二维码 ---
-            logger.info("未检测到登录态，导航到登录页...")
-            qr_visible = await self._navigate_to_login_page()
+            # 未登录 — 不再主动导航到登录页（避免破坏已有会话）
+            logger.info("未检测到登录态")
             return {
                 "logged_in": False,
-                "message": "请在 VNC 中用手机扫码登录",
-                "qr_visible": qr_visible,
+                "message": "未检测到登录态，请在 VNC 中确认登录状态",
             }
         except Exception as e:
             logger.error(f"检测登录状态失败: {e}")
