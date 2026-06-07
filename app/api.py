@@ -186,6 +186,37 @@ manager = AutomationManager()
 # ============================================================
 _browser_task_lock = threading.Lock()
 _active_task_type: Optional[str] = None
+_LOCK_TIMEOUT_SECONDS = 600  # 10 分钟锁超时
+_lock_acquired_at: Optional[float] = None  # 锁获取时间
+
+
+def _force_unlock_if_stale():
+    """如果锁被持有超过 _LOCK_TIMEOUT_SECONDS，强制释放（防死锁）"""
+    global _active_task_type, _lock_acquired_at
+    if _lock_acquired_at and _browser_task_lock.locked():
+        import time as _time
+        if _time.time() - _lock_acquired_at > _LOCK_TIMEOUT_SECONDS:
+            api_logger.warning(f"锁超时 ({_LOCK_TIMEOUT_SECONDS}s)，强制释放 (task={_active_task_type})")
+            try:
+                _browser_task_lock.release()
+            except RuntimeError:
+                pass
+            _active_task_type = None
+            _lock_acquired_at = None
+
+
+@app.post("/api/browser/force-unlock")
+async def force_unlock_browser():
+    """强制释放浏览器任务锁（紧急恢复用）"""
+    global _active_task_type, _lock_acquired_at
+    try:
+        if _browser_task_lock.locked():
+            _browser_task_lock.release()
+    except RuntimeError:
+        pass
+    _active_task_type = None
+    _lock_acquired_at = None
+    return {"status": "ok", "message": "浏览器锁已强制释放"}
 
 # ============================================================
 # 数据库
@@ -257,31 +288,80 @@ async def get_candidates(
     limit: int = 100,
     current_user: dict = Depends(verify_token)
 ):
+    """获取候选人列表 — 优先 contact_records，回退 processed_candidates"""
     conn = get_db()
     try:
-        if status:
-            rows = conn.execute("SELECT * FROM candidates WHERE status = ? LIMIT ?", (status, limit)).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM candidates LIMIT ?", (limit,)).fetchall()
-        return {"candidates": [dict(row) for row in rows]}
+        # 优先查 contact_records（F5 正式运行后会有数据）
+        cr_count = conn.execute("SELECT COUNT(*) FROM contact_records").fetchone()[0]
+        if cr_count > 0:
+            query = "SELECT boss_id, action as status, action_date as contacted_at, created_at FROM contact_records"
+            params: list = []
+            if status:
+                query += " WHERE action = ?"
+                params.append(status)
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(query, params).fetchall()
+            return {"candidates": [dict(row) for row in rows], "source": "contact_records"}
+
+        # 回退: processed_candidates（含 OCR 数据，需清洗）
+        rows = conn.execute(
+            "SELECT candidate_key, created_at FROM processed_candidates ORDER BY created_at DESC LIMIT ?",
+            (limit * 3,),
+        ).fetchall()
+        cleaned = []
+        for row in rows:
+            key = row["candidate_key"] or ""
+            # 过滤 OCR 乱码
+            if key.startswith("g:") or "--no-sandbox" in key or len(key) > 100:
+                continue
+            cleaned.append({
+                "name": key[:30],
+                "status": "contacted",
+                "created_at": row["created_at"],
+            })
+            if len(cleaned) >= limit:
+                break
+        return {"candidates": cleaned, "source": "processed_candidates"}
     finally:
         conn.close()
 
 @app.get("/api/stats")
 async def get_stats(current_user: dict = Depends(verify_token)):
+    """获取统计数据 — 优先 contact_records，回退 processed_candidates"""
     conn = get_db()
     try:
-        total = conn.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
-        by_status = conn.execute(
-            "SELECT status, COUNT(*) as count FROM candidates GROUP BY status"
-        ).fetchall()
+        # 优先查 contact_records（F5 正式运行后会有数据）
+        cr_count = conn.execute("SELECT COUNT(*) FROM contact_records").fetchone()[0]
+        if cr_count > 0:
+            total = conn.execute(
+                "SELECT COUNT(DISTINCT boss_id) FROM contact_records"
+            ).fetchone()[0]
+            by_status = conn.execute(
+                "SELECT action as status, COUNT(*) as count FROM contact_records GROUP BY action"
+            ).fetchall()
+            today_processed = conn.execute(
+                "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE action = 'contacted' AND date(action_date) = date('now')"
+            ).fetchone()[0]
+            return {
+                "total_candidates": total,
+                "by_status": {row['status']: row['count'] for row in by_status},
+                "today_processed": today_processed,
+            }
+
+        # 回退: processed_candidates
+        total = conn.execute("SELECT COUNT(*) FROM processed_candidates").fetchone()[0]
         today_processed = conn.execute(
             "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = date('now')"
         ).fetchone()[0]
+        # 简历下载统计
+        resume_count = conn.execute(
+            "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1"
+        ).fetchone()[0]
         return {
             "total_candidates": total,
-            "by_status": {row['status']: row['count'] for row in by_status},
-            "today_processed": today_processed
+            "by_status": {"contacted": total, "resume_downloaded": resume_count},
+            "today_processed": today_processed,
         }
     finally:
         conn.close()
@@ -398,7 +478,7 @@ async def browser_screenshot(req: ScreenshotRequest = None):
     """
     if req is None:
         req = ScreenshotRequest()
-    return await automation.screenshot(full_page=req.full_page)
+    return await automation.screenshot()
 
 
 class NavigateRequest(BaseModel):
@@ -423,124 +503,54 @@ async def browser_execute_script(req: ExecuteScriptRequest):
 
 @app.post("/api/browser/open-boss")
 async def open_boss_browser():
-    """打开BOSS直聘 - 在VNC桌面中启动Chrome并导航到zhipin.com
+    """打开BOSS直聘 - 复用已有Chrome或启动新实例，然后导航到zhipin.com
 
-    启动系统Chrome浏览器（可见于VNC桌面），启用CDP远程调试端口9222，
-    然后通过Playwright连接到该浏览器实例，供后续自动化控制使用。
-
-    流程：
-    1. 清理可能占用9222端口的旧Chrome进程
-    2. 在X11桌面（DISPLAY=:1）中启动Chrome，直接打开zhipin.com
-    3. 等待CDP调试端口就绪（最多30秒）
-    4. 通过browser_manager连接到已启动的Chrome
+    智能流程：
+    1. 如果 automation 已连接且有活跃 session → 直接导航
+    2. 如果 CDP 9222 端口有 Chrome 但未连接 → connect() 复用
+    3. 否则 → connect() 自动启动新 Chrome（带 --no-sandbox）
+    4. 导航到 zhipin.com + 注入 cookie
     """
-    import subprocess, time, socket
+    import socket
 
-    # 平台适配：选择正确的Chrome可执行文件
-    if IS_MACOS:
-        chrome_bin = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    else:
-        # Linux容器中: Playwright Chromium 已软链接为 google-chrome
-        chrome_bin = "google-chrome"
-
-    # 1. 清理可能占用调试端口的旧Chrome进程
-    try:
-        subprocess.run(
-            ["pkill", "-f", "remote-debugging-port=9222"],
-            capture_output=True, timeout=5
-        )
-        time.sleep(1)
-    except Exception:
-        pass  # 没有旧进程，忽略
-
-    # 如果automation已经连接到现有Chrome，先断开
+    # Step 1: 已连接且session存活 → 直接导航
     if automation._connected:
-        await automation.disconnect()
-
-    # 2. 启动Chrome在X11桌面中（VNC可见）
-    display = os.environ.get("DISPLAY", ":1")
-    env = os.environ.copy()
-    env["DISPLAY"] = display
-
-    chrome_args = [
-        chrome_bin,
-        "--remote-debugging-port=9222",
-        "--remote-debugging-address=0.0.0.0",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled",
-        "--window-size=1280,720",
-        "--window-position=0,0",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--user-data-dir=/app/data/chrome-profile",
-        "https://www.zhipin.com/",
-    ]
-
-    try:
-        subprocess.Popen(
-            chrome_args,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=env,
-        )
-    except FileNotFoundError:
-        return {"status": "error", "message": f"未找到Chrome浏览器: {chrome_bin}"}
-    except Exception as e:
-        return {"status": "error", "message": f"启动Chrome失败: {str(e)}"}
-
-    # 3. 等待CDP调试端口就绪（最多30秒）
-    cdp_ready = False
-    for _ in range(30):
-        time.sleep(1)
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            result = sock.connect_ex(("localhost", 9222))
-            sock.close()
-            if result == 0:
-                cdp_ready = True
-                break
+            await asyncio.wait_for(automation.page.evaluate("1"), timeout=3)
+            api_logger.info("open-boss: 复用现有活跃CDP session")
         except Exception:
-            pass
+            # session 已死，重连
+            await automation.disconnect()
+            connect_result = await automation.connect()
+            if connect_result.get("status") not in ("connected", "already_connected"):
+                return {"status": "error", "message": f"CDP重连失败: {connect_result}"}
+    else:
+        # Step 2/3: connect() 内部自动检测并启动 Chrome
+        connect_result = await automation.connect()
+        if connect_result.get("status") not in ("connected", "already_connected"):
+            return {"status": "error", "message": f"Chrome启动/连接失败: {connect_result}"}
 
-    if not cdp_ready:
-        return {
-            "status": "error",
-            "message": "Chrome进程已启动但CDP调试端口未就绪（30秒超时），请检查VNC桌面",
-        }
+    # Step 4: 导航到 zhipin.com
+    nav_result = await automation.navigate("https://www.zhipin.com/")
+    await asyncio.sleep(3)
 
-    # 4. 通过CDP连接到已启动的Chrome
-    connect_result = await automation.connect()
-
-    # 5. 等待zhipin.com页面加载完成，再注入cookie
+    # Step 5: 注入已保存的 cookie
     cookie_result = None
-    if connect_result.get("status") == "connected":
-        # 等待页面加载（Chrome启动时已带zhipin.com URL）
-        await asyncio.sleep(3)
-
-        # 导航确认在zhipin.com（如果不在则导航）
-        current_url = await automation.execute_js("window.location.href") or ""
-        if "zhipin.com" not in current_url:
-            api_logger.info(f"当前不在zhipin.com，正在导航... (当前: {current_url})")
-            await automation.navigate("https://www.zhipin.com/")
-            await asyncio.sleep(2)
-
-        # 注入已保存的cookie
+    try:
         cookie_result = await automation.import_cookies()
         api_logger.info(f"Cookie注入结果: {cookie_result}")
-
-        # 注入后刷新页面使cookie生效
         if cookie_result and cookie_result.get("imported", 0) > 0:
             await asyncio.sleep(1)
             await automation.execute_js("location.reload()")
             await asyncio.sleep(2)
+    except Exception as e:
+        api_logger.warning(f"Cookie注入失败（非致命）: {e}")
 
     return {
         "status": "ok",
         "message": "Chrome已启动并打开BOSS直聘，可在VNC桌面中查看",
-        "cdp_ready": cdp_ready,
-        "connect_result": connect_result,
+        "connect_result": connect_result if not automation._connected else {"status": "already_connected"},
+        "nav_result": nav_result,
         "cookie_injection": cookie_result,
     }
 
@@ -587,16 +597,21 @@ async def reply_messages(req: WorkflowRequest, current_user: dict = Depends(veri
     在独立线程中运行 batch_reply_workflow，避免阻塞 FastAPI 事件循环。
     通过 GET /api/workflow/reply-status 查询进度。
     """
-    global _reply_task_status, _active_task_type
+    global _reply_task_status, _active_task_type, _lock_acquired_at
 
+    _force_unlock_if_stale()
     if not _browser_task_lock.acquire(blocking=False):
         return {"status": "error", "message": f"浏览器正被 {_active_task_type} 任务占用，请稍后重试"}
 
     if _reply_task_status.get("status") == "running":
-        _browser_task_lock.release()
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
         return {"status": "error", "message": "已有回复任务正在运行"}
 
     _active_task_type = "F7-reply"
+    _lock_acquired_at = __import__('time').time()
     _reply_task_status = {
         "status": "running",
         "replied": 0,
@@ -676,8 +691,13 @@ def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template:
         _reply_task_status["message"] = str(e)
         api_logger.error(f"[F7] 线程失败: {e}")
     finally:
+        global _active_task_type, _lock_acquired_at
         _active_task_type = None
-        _browser_task_lock.release()
+        _lock_acquired_at = None
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
 
 
 @app.get("/api/workflow/reply-status")
@@ -723,8 +743,9 @@ async def batch_download_resumes(
     在独立线程中运行，避免阻塞 FastAPI 事件循环。
     遍历聊天联系人，检测简历按钮，下载或请求简历。
     """
-    global resume_task_status, _active_task_type
+    global resume_task_status, _active_task_type, _lock_acquired_at
 
+    _force_unlock_if_stale()
     if not _browser_task_lock.acquire(blocking=False):
         return {"status": "error", "message": f"浏览器正被 {_active_task_type} 任务占用，请稍后重试"}
 
@@ -733,6 +754,7 @@ async def batch_download_resumes(
         return {"status": "error", "message": "已有简历任务正在运行"}
 
     _active_task_type = "F6-resume"
+    _lock_acquired_at = __import__('time').time()
     resume_task_status = {
         "status": "running",
         "processed": 0,
@@ -813,8 +835,13 @@ def _run_resume_in_thread(max_count: int, dry_run: bool = False):
         resume_task_status["message"] = str(e)
         api_logger.error(f"F6 线程失败: {e}")
     finally:
+        global _active_task_type, _lock_acquired_at
         _active_task_type = None
-        _browser_task_lock.release()
+        _lock_acquired_at = None
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
 
 
 @app.get("/api/resume/status")
@@ -1082,11 +1109,14 @@ async def start_filter_contact(
             daemon=True
         )
 
-        # 获取浏览器任务锁（非阻塞）
+        # 获取浏览器任务锁（非阻塞，先检测超时）
+        global _lock_acquired_at
+        _force_unlock_if_stale()
         if not _browser_task_lock.acquire(blocking=False):
             del _filter_tasks[task_id]
             raise HTTPException(status_code=409, detail=f"浏览器正被 {_active_task_type} 任务占用，请稍后重试")
         _active_task_type = "F5-filter"
+        _lock_acquired_at = __import__('time').time()
 
         thread.start()
 
@@ -1198,8 +1228,13 @@ def _run_filter_contact_in_thread(
         _filter_tasks[task_id]["error"] = str(e)
         _filter_tasks[task_id]["completed_at"] = datetime.now().isoformat()
     finally:
+        global _active_task_type, _lock_acquired_at
         _active_task_type = None
-        _browser_task_lock.release()
+        _lock_acquired_at = None
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
 
 
 @app.get("/api/filter/status/{task_id}")
@@ -1521,7 +1556,7 @@ async def get_conversation_sessions(
     limit: int = Query(50, ge=1, le=200),
     current_user: dict = Depends(verify_token),
 ):
-    """对话会话列表 — 按候选人分组"""
+    """对话会话列表 — 按候选人分组（含OCR乱码清洗）"""
     conn = get_db()
     try:
         rows = conn.execute(
@@ -1533,9 +1568,36 @@ async def get_conversation_sessions(
                GROUP BY candidate_name
                ORDER BY last_at DESC
                LIMIT ?""",
-            (limit,),
+            (limit * 3,),  # 多取3倍数据，清洗后再截断
         ).fetchall()
-        return {"sessions": [dict(row) for row in rows], "total": len(rows)}
+
+        # 清洗逻辑：过滤OCR乱码 + 截断过长名称
+        OCR_GARBAGE_MARKERS = [
+            "g:", "--no-sandbox", "Stability and security",
+            "security will suffer", "every time you restart",
+            "客服 热线", "验证码登录", "BOSS号我要找", "我要招聘",
+            "and security will",
+        ]
+
+        def clean_name(name: str) -> str | None:
+            if not name:
+                return None
+            if len(name) > 100:
+                return None
+            for marker in OCR_GARBAGE_MARKERS:
+                if marker in name:
+                    return None
+            return name[:30] if len(name) > 30 else name
+
+        cleaned = []
+        for row in rows:
+            clean = clean_name(row["candidate_name"])
+            if clean:
+                cleaned.append({**dict(row), "candidate_name": clean})
+            if len(cleaned) >= limit:
+                break
+
+        return {"sessions": cleaned, "total": len(cleaned)}
     except Exception as e:
         api_logger.error(f"查询对话会话失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -141,6 +141,10 @@ class BrowserAutomation:
         """连接到 Chrome CDP（复用现有 Chrome 或启动新实例）
 
         使用 user_data_dir 确保重用 Chrome profile 中的登录 cookie。
+        在 Docker root 环境下，nodriver sandbox=False 可能无法正确传递
+        --no-sandbox，因此先检测 CDP 端口是否已有 Chrome 在监听：
+        - 有 → 直接连接 nodriver 到现有 Chrome
+        - 没有 → 手动启动 Chrome（带 --no-sandbox）再连接
         """
         with self._lock:
             try:
@@ -150,10 +154,9 @@ class BrowserAutomation:
                 if uc is None:
                     return {"status": "error", "message": "nodriver 未安装"}
 
-                # 使用 user_data_dir 重用 Chrome profile（含登录 cookie）
                 user_data = "/app/data/chrome-profile"
 
-                # 清理上一次异常退出残留的锁文件（容器重启后 Chrome 无法启动）
+                # 清理上一次异常退出残留的锁文件
                 for lock_file in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
                     lock_path = os.path.join(user_data, lock_file)
                     if os.path.exists(lock_path):
@@ -161,18 +164,51 @@ class BrowserAutomation:
                             os.remove(lock_path)
                         except OSError:
                             pass
-                self.browser = await uc.start(
-                    user_data_dir=user_data,
-                    browser_args=[
-                        f"--remote-debugging-port={port}",
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
-                    sandbox=False,
-                    host="127.0.0.1",
-                    port=port,
-                )
+
+                # Step 1: 检测 CDP 端口是否已有 Chrome 在监听
+                cdp_alive = await self._check_cdp_port(port)
+
+                # Step 2: 没有 Chrome → 手动启动
+                if not cdp_alive:
+                    launched = await self._launch_chrome(port, user_data)
+                    if not launched:
+                        return {"status": "error", "message": "Chrome 启动失败，请检查 VNC 桌面"}
+
+                # Step 3: nodriver 连接到 CDP（复用已启动的 Chrome）
+                try:
+                    self.browser = await uc.start(
+                        user_data_dir=user_data,
+                        browser_args=[
+                            f"--remote-debugging-port={port}",
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-blink-features=AutomationControlled",
+                        ],
+                        sandbox=False,
+                        host="127.0.0.1",
+                        port=port,
+                    )
+                except Exception as start_err:
+                    # nodriver start 失败（常见于 root 环境的 sandbox 问题），
+                    # 尝试直接通过 CDP websocket 连接已运行的 Chrome
+                    logger.warning(f"nodriver start 失败: {start_err}，尝试直接 CDP 连接...")
+                    try:
+                        self.browser = await uc.start(
+                            user_data_dir=user_data,
+                            browser_executable_path="google-chrome",
+                            browser_args=[
+                                f"--remote-debugging-port={port}",
+                                "--no-sandbox",
+                                "--disable-dev-shm-usage",
+                            ],
+                            sandbox=False,
+                            host="127.0.0.1",
+                            port=port,
+                        )
+                    except Exception as fallback_err:
+                        logger.error(f"CDP 直接连接也失败: {fallback_err}")
+                        return {"status": "error", "message": f"浏览器连接失败: {fallback_err}"}
+
                 self.page = self.browser.main_tab
                 self._connected = True
                 logger.info(f"已连接到 Chrome CDP (profile: {user_data})")
@@ -180,6 +216,70 @@ class BrowserAutomation:
             except Exception as e:
                 logger.error(f"连接 Chrome 失败: {e}")
                 return {"status": "error", "message": str(e)}
+
+    @staticmethod
+    async def _check_cdp_port(port: int = 9222) -> bool:
+        """检测 CDP 端口是否有 Chrome 在监听"""
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(("127.0.0.1", port))
+            sock.close()
+            return result == 0
+        except Exception:
+            return False
+
+    @staticmethod
+    async def _launch_chrome(port: int = 9222, user_data: str = "/app/data/chrome-profile") -> bool:
+        """手动启动 Chrome（带 --no-sandbox），返回是否成功"""
+        import socket
+        display = os.environ.get("DISPLAY", ":1")
+        env = {**os.environ, "DISPLAY": display}
+
+        # 找 Chrome 二进制
+        chrome_bin = "google-chrome"
+        for candidate in ["google-chrome-stable", "google-chrome", "chromium-browser", "chromium"]:
+            if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
+                chrome_bin = candidate
+                break
+
+        try:
+            subprocess.Popen(
+                [
+                    chrome_bin,
+                    f"--remote-debugging-port={port}",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    f"--user-data-dir={user_data}",
+                    "about:blank",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+            )
+        except Exception as e:
+            logger.error(f"Chrome 启动失败: {e}")
+            return False
+
+        # 等待 CDP 端口就绪（最多 15 秒）
+        for _ in range(15):
+            await asyncio.sleep(1)
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                result = sock.connect_ex(("127.0.0.1", port))
+                sock.close()
+                if result == 0:
+                    logger.info(f"Chrome CDP 端口 {port} 已就绪")
+                    return True
+            except Exception:
+                pass
+
+        logger.error("Chrome CDP 端口等待超时 (15s)")
+        return False
 
     async def disconnect(self) -> Dict:
         """断开浏览器连接"""
@@ -501,6 +601,28 @@ class BrowserAutomation:
         "bst",          # BOSS security token
     ]
 
+    @staticmethod
+    def _safe_str(val: Any) -> str:
+        """安全地将 CDP 返回值转为字符串。
+        nodriver evaluate 可能返回 ExceptionDetails 等非字符串对象。
+        """
+        if val is None:
+            return ""
+        if isinstance(val, str):
+            return val
+        # CDP RemoteObject 或 ExceptionDetails → 取 description/message 或 str()
+        if isinstance(val, dict):
+            return val.get("value", val.get("description", val.get("message", ""))) or ""
+        return str(val) if val else ""
+
+    async def _safe_evaluate(self, js: str, timeout: int = 8) -> str:
+        """安全执行 JS 并返回字符串，超时或异常返回空串。"""
+        try:
+            result = await asyncio.wait_for(self.page.evaluate(js), timeout=timeout)
+            return self._safe_str(result)
+        except Exception:
+            return ""
+
     async def check_login(self) -> Dict:
         """检测 BOSS直聘登录状态（F4 增强）
 
@@ -525,19 +647,12 @@ class BrowserAutomation:
                 pass
 
             # --- Step 1: 读取页面状态 ---
-            try:
-                current_url = await asyncio.wait_for(
-                    self.page.evaluate("window.location.href"), timeout=5
-                ) or ""
-            except asyncio.TimeoutError:
+            current_url = await self._safe_evaluate("window.location.href")
+            if not current_url:
                 return {"logged_in": False, "message": "页面响应超时"}
 
             # --- Step 2: 反向判断 — 在登录页或页面有"登录/注册" → 未登录 ---
-            page_text = ""
-            try:
-                page_text = await self.page.evaluate("document.body.innerText.substring(0,500)") or ""
-            except Exception:
-                pass
+            page_text = await self._safe_evaluate("document.body.innerText.substring(0,500)")
 
             on_login_page = (
                 "/web/user/" in current_url
@@ -577,10 +692,12 @@ class BrowserAutomation:
                     logger.info(f"导入: {import_result.get('imported',0)}/{import_result.get('total',0)}")
                     if import_result.get("imported", 0) > 0:
                         # 刷新页面使 cookie 生效，重新做反向检测
-                        await self.page.get("https://www.zhipin.com/web/chat/recommend")
-                        # F5 修复：增加等待时间从 3s → 5s，确保 cookie 完全应用
+                        try:
+                            await self.page.get("https://www.zhipin.com/web/chat/recommend")
+                        except Exception:
+                            pass
                         await asyncio.sleep(5)
-                        retry_text = await self.page.evaluate("document.body.innerText.substring(0,500)") or ""
+                        retry_text = await self._safe_evaluate("document.body.innerText.substring(0,500)")
                         if "推荐牛人" in retry_text or "职位管理" in retry_text or "牛人管理" in retry_text:
                             logger.info("Cookie恢复成功，页面显示招聘者内容")
                             try:
@@ -613,7 +730,7 @@ class BrowserAutomation:
             logger.warning("_navigate_to_login_page: page 为 None，跳过")
             return False
         try:
-            current_url = await self.page.evaluate("window.location.href") or ""
+            current_url = await self._safe_evaluate("window.location.href")
             # 如果已在登录页，不重复导航
             if "login" not in current_url and "user" not in current_url:
                 await self.page.get(self.LOGIN_URL)
