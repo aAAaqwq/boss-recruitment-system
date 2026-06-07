@@ -25,13 +25,13 @@
        失败 → 降级模式（依赖Chrome默认下载目录）
 
 4. 导航到聊天页
-   └─ navigate_to_chat()
-       ├─ 点击左侧"沟通"导航按钮
-       ├─ 备用: 直接导航 /web/geek/chat
+   └─ 目标URL: https://www.zhipin.com/web/chat/index
+       ├─ navigate_to_chat() 点击左侧"沟通"导航
+       ├─ 备用: 直接导航 /web/chat/index
        └─ 获取联系人列表 (get_contacts)
 
 5. 联系人列表为空
-   └─ 备用导航 /web/geek/chat → 重试 get_contacts
+   └─ 备用导航 /web/chat/index → 重试 get_contacts
        仍为空 → 返回 completed (downloaded=0)
 
 6. 主循环 (遍历 contacts[:max_count])
@@ -48,25 +48,30 @@
    │      ├─ 精确匹配: '在线简历' / '附件简历' / '查看简历'
    │      └─ 无按钮 → 跳过 (no_resume_btn)
    │
-   ├─ 6d. 点击简历按钮
-   │      └─ 等待3秒 (简历预览加载)
+   ├─ 6d. 点击"附件简历"按钮 → BOSS自动处理4种情况:
+   │      │
+   │      ├─ Case-1: PDF预览弹出 → 对方已发附件简历 ✅
+   │      │   ├─ 等待PDF渲染完成
+   │      │   ├─ 查找下载按钮 ('下载'/'保存'/'导出')
+   │      │   ├─ 点击下载 → CDP拦截保存到 data/resumes/
+   │      │   ├─ 验证: 对比前后文件列表
+   │      │   └─ db.insert_resume_op(action="downloaded")
+   │      │
+   │      ├─ Case-2: "向牛人请求简历"弹窗 → 已沟通未发简历 ⏳
+   │      │   ├─ 点击"确认"/"确定"按钮
+   │      │   ├─ 等待: 确认后PDF可能弹出 → 走Case-1流程
+   │      │   └─ 无PDF → db.insert_resume_op(action="requested")
+   │      │
+   │      ├─ Case-3: "附件简历请求中" → 已请求待处理 ⏭
+   │      │   └─ 跳过, db.insert_resume_op(action="requested_pending")
+   │      │
+   │      └─ Case-4: "双方回复后可以向TA请求" → 未充分沟通 ❌
+   │          └─ 跳过, db.insert_resume_op(action="need_reply")
    │
-   ├─ 6e. 查找下载按钮 (_JS_FIND_DOWNLOAD_BTN)
-   │      ├─ 精确匹配: '下载' / '保存' / '导出'
-   │      ├─ Fallback: a[download] 链接
-   │      └─ 无下载按钮 → 记录 "在线简历已请求"
-   │
-   ├─ 6f. 点击下载 + 验证
-   │      ├─ 记录下载前 data/resumes/ 文件列表
-   │      ├─ automation.click(dl.x, dl.y)
-   │      ├─ 等待4秒
-   │      ├─ 对比文件列表: 有新文件 → file_verified=True
-   │      └─ db.insert_resume_op(action="downloaded")
-   │
-   ├─ 6g. 关闭简历预览
+   ├─ 6e. 关闭简历预览
    │      └─ automation.press_key("Escape")
    │
-   └─ 6h. 每3次操作截图一次
+   └─ 6f. 每3次操作截图一次
 
 7. 释放浏览器任务锁
    └─ _browser_task_lock.release()
@@ -75,22 +80,66 @@
    └─ {downloaded, skipped, failed, total_scanned, details: [...]}
 ```
 
+## "附件简历"按钮的4种返回状态
+
+点击"附件简历"后，BOSS 系统会根据沟通状态返回不同结果：
+
+```
+click("附件简历")
+     │
+     ├─ 等待 2-3 秒
+     │
+     ├─ 检测到 PDF 预览 (AXWebArea + PDF) ──────── Case-1 ✅
+     │   └─ 对方已上传附件 → 直接提取/下载
+     │
+     ├─ 检测到 "向牛人请求简历" 弹窗 ────────── Case-2 ⏳
+     │   └─ 已沟通但对方未发 → 点确认索取
+     │   └─ 确认后PDF弹出 → 升级为Case-1
+     │
+     ├─ 检测到 "附件简历请求中" ─────────────── Case-3 ⏭
+     │   └─ 之前已请求，等待对方处理
+     │
+     ├─ 检测到 "双方回复后可以向TA请求" ──────── Case-4 ❌
+     │   └─ 双方沟通不够，无法索取
+     │
+     └─ 其他: "简历请求已发送" / 无反应 ─────── unknown ⏭
+         └─ 对方未上传附件 或 未沟通
+```
+
+| Case | 页面特征 | 含义 | 动作 | 记录 |
+|------|----------|------|------|------|
+| Case-1 | PDF预览弹出 | 对方已发附件 | 下载/提取 | `action="downloaded"` |
+| Case-2 | "向牛人请求简历"弹窗 | 已沟通未发 | 点确认索取 | `action="requested"` |
+| Case-3 | "附件简历请求中" | 已请求待处理 | 跳过 | `action="requested_pending"` |
+| Case-4 | "双方回复后可以向TA请求" | 未充分沟通 | 跳过 | `action="need_reply"` |
+
 ## BOSS DOM 结构
 
 ```
-聊天页 (左右分栏)
+聊天页 /web/chat/index (左右分栏)
 ├── 左侧: 联系人列表
 │   └── .chat-item / .contact-item / .conversation
 │       └── innerText → name / subtitle / hasUnread
 │
 └── 右侧: 聊天详情 (x > 450px)
-    └── 简历按钮
-        ├── "在线简历"  → 打开在线简历预览
-        └── "附件简历"  → 可能直接触发下载
+    ├── 候选人信息行: 姓名 · 学历 · 学校 · 工作年限
+    ├── 简历按钮区:
+    │   ├── "在线简历"  → 打开在线简历页面 (HTML渲染)
+    │   └── "附件简历"  → 触发上述4种情况
+    │
+    └── 底部操作栏:
+        ├── "求简历" / "换电话" / "查看微信"
+        └── "约面试" / "不合适"
 
-简历预览层
+附件简历预览 (Case-1 PDF弹出时)
+├── AXWebArea (PDF)
+│   └── 简历文本内容 (可提取)
 └── 下载按钮: "下载" / "保存" / "导出"
     或 a[download] 链接
+
+索取确认弹窗 (Case-2)
+└── "向牛人请求简历"
+    └── "确认" / "取消" 按钮
 ```
 
 ## CDP 下载拦截
@@ -121,10 +170,24 @@ nodriver CDP 命令: Page.setDownloadBehavior
   4. 未下载 → 继续操作
 ```
 
+## 参考: cua-boss-system 实现
+
+原始CUA实现位于 `../cua-boss-system/scripts/cua_collect.py`，核心差异：
+
+| 对比项 | CUA版本 (cua_collect.py) | 当前版本 (resume_collector.py) |
+|--------|--------------------------|-------------------------------|
+| 访问方式 | Apple AX树 + cua-driver | nodriver CDP + xdotool |
+| 聊天页 | `/web/chat/index` | `/web/chat/index` (已对齐) |
+| 4种Case处理 | 完整实现 (Case-1/2/3/4) | 需完善 (当前仅处理PDF和下载) |
+| 简历提取 | PDF文本提取 → 存入DB | CDP下载到文件 |
+| 候选人UID | data-id属性提取 | 用姓名(非唯一) |
+| 附加操作 | 不合适→点"不合适"+ 换微信 | 仅处理简历 |
+
 ## 本次修复 (2026-06-07)
 
 | 修复点 | 旧行为 | 新行为 |
 |--------|--------|--------|
+| 聊天页URL | /web/geek/chat | /web/chat/index |
 | 文件下载 | 点击按钮但无CDP拦截，文件不保存 | `enable_download_interception()` + 文件验证 |
 | 登录检查 | 无，直接操作 → 登录页误操作 | `check_login()` 前置检查 |
 | JS选择器 | 匹配所有含"简历"文本的元素 | 精确匹配: '在线简历'/'附件简历'/'查看简历' |
@@ -144,6 +207,8 @@ nodriver CDP 命令: Page.setDownloadBehavior
 
 ## 已知问题
 
-- 在线简历（无附件）只能记录为"requested"，无法下载文件
+- Case-2 确认索取后PDF可能不弹出，只能记录 "requested"
+- Case-3/4 未实现精确检测，当前仅记录为 "no_resume_btn"
+- 在线简历（无附件）只能记录为 "requested"，无法下载文件
 - Chrome 版本差异可能导致 `Page.setDownloadBehavior` 降级
-- 候选人姓名可能重复（BOSS 显示名不是唯一标识）
+- 候选人姓名可能重复（BOSS 显示名不是唯一标识，应提取 data-id）
