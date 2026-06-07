@@ -1,610 +1,695 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BOSS直聘三位一体系统 - Web管理界面</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0d1117;
-            color: #e6edf3;
-            min-height: 100vh;
-        }
-        
-        .header {
-            background: #161b22;
-            padding: 12px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #30363d;
-        }
-        
-        .header h1 {
-            font-size: 18px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .status-badge {
-            background: #238636;
-            color: #fff;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        .status-badge.stopped {
-            background: #da3633;
-        }
-        
-        .main-container {
-            display: flex;
-            height: calc(100vh - 56px);
-        }
-        
-        /* 左侧：远程桌面 */
-        .desktop-panel {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            border-right: 1px solid #30363d;
-        }
-        
-        .desktop-header {
-            background: #161b22;
-            padding: 10px 15px;
-            border-bottom: 1px solid #30363d;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .desktop-container {
-            flex: 1;
-            background: #000;
-            position: relative;
-        }
-        
-        /* noVNC iframe */
-        #vncFrame {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-        
-        .vnc-placeholder {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            color: #8b949e;
-        }
-        
-        .vnc-placeholder .icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-        }
-        
-        .vnc-placeholder p {
-            margin: 10px 0;
-        }
-        
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        
-        .btn-primary {
-            background: #238636;
-            color: #fff;
-        }
-        
-        .btn-primary:hover {
-            background: #2ea043;
-        }
-        
-        .btn-secondary {
-            background: #21262d;
-            color: #e6edf3;
-            border: 1px solid #30363d;
-        }
-        
-        .btn-secondary:hover {
-            background: #30363d;
-        }
-        
-        .btn-danger {
-            background: #da3633;
-            color: #fff;
-        }
-        
-        .btn-danger:hover {
-            background: #f85149;
-        }
-        
-        /* 右侧：控制面板 */
-        .control-panel {
-            width: 350px;
-            display: flex;
-            flex-direction: column;
-            background: #161b22;
-        }
-        
-        .panel-section {
-            padding: 15px;
-            border-bottom: 1px solid #30363d;
-        }
-        
-        .panel-section h3 {
-            font-size: 14px;
-            color: #8b949e;
-            margin-bottom: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        /* 步骤指示器 */
-        .steps {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 15px;
-        }
-        
-        .step {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            flex: 1;
-        }
-        
-        .step-circle {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: #21262d;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 14px;
-            margin-bottom: 6px;
-            border: 2px solid #30363d;
-            transition: all 0.3s;
-        }
-        
-        .step.active .step-circle {
-            background: #238636;
-            border-color: #238636;
-            color: #fff;
-        }
-        
-        .step.completed .step-circle {
-            background: #1f6feb;
-            border-color: #1f6feb;
-            color: #fff;
-        }
-        
-        .step-label {
-            font-size: 11px;
-            color: #8b949e;
-        }
-        
-        .step.active .step-label,
-        .step.completed .step-label {
-            color: #e6edf3;
-        }
-        
-        /* 统计卡片 */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-        
-        .stat-card {
-            background: #21262d;
-            border-radius: 8px;
-            padding: 12px;
-            text-align: center;
-        }
-        
-        .stat-card .value {
-            font-size: 28px;
-            font-weight: bold;
-            color: #58a6ff;
-        }
-        
-        .stat-card .label {
-            font-size: 11px;
-            color: #8b949e;
-            margin-top: 4px;
-        }
-        
-        /* 日志区域 */
-        .log-section {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-        }
-        
-        .log-container {
-            flex: 1;
-            background: #0d1117;
-            border-radius: 8px;
-            padding: 12px;
-            overflow-y: auto;
-            font-family: 'Monaco', 'Consolas', monospace;
-            font-size: 12px;
-            line-height: 1.6;
-            margin-top: 10px;
-        }
-        
-        .log-line {
-            color: #8b949e;
-        }
-        
-        .log-line.info { color: #e6edf3; }
-        .log-line.success { color: #3fb950; }
-        .log-line.error { color: #f85149; }
-        .log-line.warning { color: #d29922; }
-        
-        /* 控制按钮 */
-        .controls {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 15px;
-        }
-        
-        .controls .btn {
-            flex: 1;
-            min-width: 100px;
-        }
-        
-        /* VNC连接状态 */
-        .vnc-status {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-        }
-        
-        .vnc-status .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #da3633;
-        }
-        
-        .vnc-status.connected .dot {
-            background: #3fb950;
-        }
-        
-        /* 设置区域 */
-        .settings-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid #21262d;
-        }
-        
-        .settings-row:last-child {
-            border-bottom: none;
-        }
-        
-        .settings-label {
-            font-size: 13px;
-        }
-        
-        .settings-input {
-            width: 80px;
-            padding: 6px 10px;
-            background: #21262d;
-            border: 1px solid #30363d;
-            border-radius: 4px;
-            color: #e6edf3;
-            font-size: 13px;
-        }
-        
-        /* 进度条 */
-        .progress-bar {
-            height: 4px;
-            background: #21262d;
-            border-radius: 2px;
-            overflow: hidden;
-            margin-top: 15px;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #238636, #1f6feb);
-            transition: width 0.3s;
-            width: 0%;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据总控平台 — BOSS招聘系统</title>
+<style>
+/* ═══════════════════════════════════════════
+   Design System — Gemini Deep Space (与 8321 驾驶舱一致)
+   ═══════════════════════════════════════════ */
+:root {
+    --bg-base: #131314;
+    --bg-surface: #1b1b1f;
+    --bg-elevated: #26262c;
+    --bg-hover: #2f3035;
+    --bg-active: #3a3b42;
+    --border: rgba(255,255,255,.06);
+    --border-default: rgba(255,255,255,.10);
+    --border-hover: rgba(255,255,255,.18);
+    --border-accent: rgba(138,180,248,.35);
+    --text: #e8eaed;
+    --text-secondary: #bdc1c6;
+    --text-muted: #92979e;
+    --accent: #8ab4f8;
+    --accent-light: #aecbfa;
+    --accent-bg: rgba(138,180,248,.08);
+    --accent-glow: rgba(138,180,248,.20);
+    --accent-gradient: linear-gradient(135deg, #8ab4f8, #c58af9, #f5a5c0);
+    --green: #81c995; --green-bg: rgba(129,201,149,.08);
+    --orange: #fcad70; --orange-bg: rgba(252,173,112,.08);
+    --red: #f28b82; --red-bg: rgba(242,139,130,.08);
+    --blue: #8ab4f8; --blue-bg: rgba(138,180,248,.08);
+    --font-sans: 'Google Sans', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    --font-mono: "SF Mono", "Monaco", "Menlo", monospace;
+    --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-pill: 20px;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+    --shadow-md: 0 2px 8px rgba(0,0,0,.4);
+    --ease-out: cubic-bezier(.2,0,0,1);
+    --transition-fast: 100ms var(--ease-out);
+    --transition-normal: 200ms var(--ease-out);
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+body {
+    display: flex; flex-direction: column; height: 100vh;
+    background: var(--bg-base); color: var(--text);
+    font-family: var(--font-sans); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+}
+
+/* ── Header ── */
+.header {
+    height: 54px; background: var(--bg-surface); border-bottom: 1px solid var(--border-default);
+    display: flex; align-items: center; padding: 0 16px; gap: 6px;
+    flex-shrink: 0; position: relative; z-index: 20;
+}
+.header::after {
+    content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(138,180,248,.25), rgba(197,138,249,.15), transparent);
+    pointer-events: none;
+}
+.logo-mark {
+    width: 30px; height: 30px; background: var(--accent-gradient); border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 12px; color: #131314; flex-shrink: 0;
+}
+.logo-text { display: flex; flex-direction: column; line-height: 1.15; }
+.logo-title { font-weight: 700; font-size: 13px; }
+.logo-sub { font-size: 11px; color: var(--text-secondary); }
+.h-divider { width: 1px; height: 28px; background: var(--border-default); flex-shrink: 0; margin: 0 4px; }
+.header-stats { display: flex; gap: 4px; }
+.h-stat {
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 4px 10px; display: flex; align-items: center; gap: 6px;
+}
+.h-stat-value { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center; }
+.h-stat-label { font-size: 11px; color: var(--text-secondary); letter-spacing: .3px; }
+.header-spacer { flex: 1; }
+.header-auth { display: flex; align-items: center; gap: 6px; }
+.h-input {
+    width: 100px; padding: 5px 8px; background: var(--bg-elevated);
+    border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+    color: var(--text); font-size: 12px; font-family: var(--font-sans); outline: none;
+}
+.h-input:focus { border-color: var(--accent); }
+.h-input::placeholder { color: var(--text-muted); }
+.h-btn {
+    padding: 5px 12px; border: none; border-radius: var(--radius-sm); font-size: 12px;
+    font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px;
+    white-space: nowrap; transition: all var(--transition-fast);
+}
+.h-btn-primary { background: var(--accent); color: #131314; }
+.h-btn-primary:hover { background: var(--accent-light); }
+.h-btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-default); }
+.h-btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+.auth-badge {
+    font-size: 12px; padding: 4px 10px; border-radius: var(--radius-sm);
+    background: var(--green-bg); border: 1px solid rgba(129,201,149,.2);
+    display: none; align-items: center; gap: 4px;
+}
+#authSection.auth-done .auth-inputs { display: none; }
+#authSection.auth-done .auth-badge { display: flex; }
+
+/* ── Tab Bar ── */
+.tab-bar {
+    height: 36px; background: var(--bg-surface); border-bottom: 1px solid var(--border-default);
+    display: flex; align-items: stretch; padding: 0 16px; flex-shrink: 0; gap: 2px;
+}
+.tab {
+    padding: 0 14px; font-size: 12px; font-weight: 500; color: var(--text-muted);
+    cursor: pointer; border: none; background: none; border-bottom: 2px solid transparent;
+    display: flex; align-items: center; gap: 6px; transition: all var(--transition-fast);
+    font-family: var(--font-sans);
+}
+.tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--accent-bg); }
+.tab-badge {
+    font-size: 10px; padding: 1px 5px; border-radius: 10px;
+    background: var(--bg-active); color: var(--text-muted); font-weight: 600;
+}
+
+/* ── Content ── */
+.content { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.tab-panel { display: none; padding: 20px; height: 100%; overflow-y: auto; }
+.tab-panel.active { display: block; }
+
+/* ── Shared Components ── */
+.card {
+    background: var(--bg-surface); border: 1px solid var(--border-default);
+    border-radius: var(--radius-md); padding: 16px; margin-bottom: 12px;
+}
+.card-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.stat-card {
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 14px; text-align: center;
+}
+.stat-card .value { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-card .label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.stat-card .value.green { color: var(--green); }
+.stat-card .value.blue { color: var(--accent); }
+.stat-card .value.orange { color: var(--orange); }
+
+/* Status row */
+.status-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); margin-bottom: 6px;
+}
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+.status-dot.idle { background: var(--text-muted); }
+.status-dot.running { background: var(--green); box-shadow: 0 0 6px rgba(129,201,149,.4); }
+.status-dot.completed { background: var(--accent); }
+.status-dot.error { background: var(--red); }
+.status-dot.online { background: var(--green); box-shadow: 0 0 6px rgba(129,201,149,.4); }
+.status-dot.offline { background: var(--red); }
+.status-label { font-weight: 600; min-width: 60px; }
+.status-text { color: var(--text-secondary); font-size: 12px; flex: 1; }
+
+/* Data table */
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table th {
+    text-align: left; padding: 8px 10px; background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-default); color: var(--text-muted);
+    font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+    position: sticky; top: 0; z-index: 1;
+}
+.data-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+.data-table tr:hover td { background: var(--bg-hover); color: var(--text); }
+.badge {
+    display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
+    font-size: 11px; font-weight: 600;
+}
+.badge-green { background: var(--green-bg); color: var(--green); }
+.badge-blue { background: var(--blue-bg); color: var(--accent); }
+.badge-orange { background: var(--orange-bg); color: var(--orange); }
+.badge-red { background: var(--red-bg); color: var(--red); }
+
+/* Chat bubbles */
+.chat-panel { display: flex; gap: 12px; height: calc(100vh - 250px); }
+.chat-list { width: 240px; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow-y: auto; flex-shrink: 0; }
+.chat-item {
+    padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer;
+    transition: background var(--transition-fast);
+}
+.chat-item:hover { background: var(--bg-hover); }
+.chat-item.active { background: var(--accent-bg); border-left: 3px solid var(--accent); }
+.chat-item .name { font-weight: 600; font-size: 12px; }
+.chat-item .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.chat-timeline { flex: 1; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 16px; overflow-y: auto; }
+.msg { margin-bottom: 10px; max-width: 75%; }
+.msg.bot { margin-left: auto; }
+.msg-bubble {
+    padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px; line-height: 1.5;
+}
+.msg.candidate .msg-bubble { background: var(--bg-elevated); color: var(--text-secondary); }
+.msg.bot .msg-bubble { background: var(--accent-bg); color: var(--accent-light); border: 1px solid var(--border-accent); }
+.msg-meta { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
+.msg.bot .msg-meta { text-align: right; }
+
+/* Config section */
+.config-section { margin-bottom: 16px; }
+.config-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition-fast);
+    font-weight: 600; font-size: 12px;
+}
+.config-header:hover { background: var(--bg-hover); }
+.config-body { padding: 12px 0; display: none; }
+.config-body.open { display: block; }
+.config-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; }
+.config-label { font-size: 12px; color: var(--text-secondary); }
+.config-input {
+    width: 120px; padding: 5px 8px; background: var(--bg-elevated);
+    border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+    color: var(--text); font-size: 12px; font-family: var(--font-sans);
+}
+.config-input:focus { border-color: var(--accent); }
+.config-textarea {
+    width: 100%; min-height: 60px; padding: 8px; background: var(--bg-elevated);
+    border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+    color: var(--text); font-size: 12px; font-family: var(--font-sans); resize: vertical;
+}
+.btn-save {
+    padding: 5px 14px; background: var(--accent); color: #131314; border: none;
+    border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.btn-save:hover { background: var(--accent-light); }
+
+/* Filter bar */
+.filter-bar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+.filter-bar select, .filter-bar input {
+    padding: 5px 8px; background: var(--bg-elevated); border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm); color: var(--text); font-size: 12px; font-family: var(--font-sans);
+}
+.filter-bar select:focus, .filter-bar input:focus { border-color: var(--accent); }
+
+/* Log footer */
+.log-bar {
+    height: 140px; background: var(--bg-surface); border-top: 1px solid var(--border-default);
+    display: flex; flex-direction: column; flex-shrink: 0;
+}
+.log-header {
+    padding: 6px 14px; display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-muted);
+}
+.log-body { flex: 1; overflow-y: auto; padding: 6px 14px; font-family: var(--font-mono); font-size: 11px; }
+.log-line { padding: 1px 0; color: var(--text-muted); }
+.log-line.info { color: var(--text-secondary); }
+.log-line.success { color: var(--green); }
+.log-line.error { color: var(--red); }
+.log-line.warn { color: var(--orange); }
+
+/* Trend table */
+.trend-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.trend-table th { text-align: center; padding: 6px 8px; background: var(--bg-elevated); color: var(--text-muted); font-size: 11px; }
+.trend-table td { text-align: center; padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+.trend-table tr:hover td { background: var(--bg-hover); }
+
+/* Responsive helpers */
+.empty-state { text-align: center; padding: 40px; color: var(--text-muted); font-size: 13px; }
+.loading { opacity: .6; pointer-events: none; }
+</style>
 </head>
 <body>
-    <div class="header">
-        <h1>
-            🚀 BOSS直聘三位一体系统
-            <span class="status-badge" id="statusBadge">待启动</span>
-        </h1>
-        <div style="display: flex; gap: 10px;">
-            <a href="http://localhost:8321" class="btn btn-primary" style="text-decoration:none;">📊 到仪表盘</a>
-            <button class="btn btn-secondary" onclick="refreshStatus()">🔄 刷新</button>
-            <button class="btn btn-secondary" onclick="openVNCNewWindow()">↗️ 新窗口打开</button>
+
+<!-- ═══════════════ Header ═══════════════ -->
+<div class="header">
+    <div class="logo-mark">DC</div>
+    <div class="logo-text">
+        <div class="logo-title">数据总控平台</div>
+        <div class="logo-sub">BOSS Recruitment</div>
+    </div>
+    <div class="h-divider"></div>
+    <div class="header-stats" id="headerStats">
+        <div class="h-stat"><span class="h-stat-value" id="hContacted">-</span><span class="h-stat-label">联系</span></div>
+        <div class="h-stat"><span class="h-stat-value" id="hResumes">-</span><span class="h-stat-label">简历</span></div>
+        <div class="h-stat"><span class="h-stat-value" id="hReplied">-</span><span class="h-stat-label">回复</span></div>
+        <div class="h-stat"><span class="h-stat-value" id="hRemaining">-</span><span class="h-stat-label">剩余</span></div>
+    </div>
+    <div class="header-spacer"></div>
+    <div id="authSection">
+        <div class="auth-inputs">
+            <input class="h-input" id="authUser" placeholder="用户名" value="admin">
+            <input class="h-input" id="authPass" type="password" placeholder="密码">
+            <button class="h-btn h-btn-primary" onclick="doLogin()">登录</button>
+        </div>
+        <div class="auth-badge"><span style="color:var(--green)">●</span> <span id="authUserLabel"></span></div>
+    </div>
+    <div class="h-divider"></div>
+    <a href="http://localhost:8321" target="_blank" class="h-btn h-btn-ghost" title="打开驾驶舱">→ 驾驶舱</a>
+</div>
+
+<!-- ═══════════════ Tab Bar ═══════════════ -->
+<div class="tab-bar">
+    <button class="tab active" onclick="switchTab(0)">数据总览</button>
+    <button class="tab" onclick="switchTab(1)">候选人</button>
+    <button class="tab" onclick="switchTab(2)">简历操作</button>
+    <button class="tab" onclick="switchTab(3)">对话记录</button>
+    <button class="tab" onclick="switchTab(4)">配置管理</button>
+</div>
+
+<!-- ═══════════════ Content ═══════════════ -->
+<div class="content">
+
+<!-- Tab 0: Dashboard -->
+<div class="tab-panel active" id="tab0">
+    <div class="card">
+        <div class="card-title">今日概览</div>
+        <div class="stat-grid">
+            <div class="stat-card"><div class="value green" id="dContacted">0</div><div class="label">今日联系</div></div>
+            <div class="stat-card"><div class="value blue" id="dResumes">0</div><div class="label">简历下载</div></div>
+            <div class="stat-card"><div class="value blue" id="dReplied">0</div><div class="label">AI回复</div></div>
+            <div class="stat-card"><div class="value orange" id="dRemaining">80</div><div class="label">剩余额度</div></div>
         </div>
     </div>
-    
-    <div class="main-container">
-        <!-- 左侧：远程桌面 -->
-        <div class="desktop-panel">
-            <div class="desktop-header">
-                <div class="vnc-status" id="vncStatus">
-                    <span class="dot"></span>
-                    <span>远程桌面: 未连接</span>
-                </div>
-                <button class="btn btn-secondary" onclick="connectVNC()">🔗 连接</button>
-            </div>
-            <div class="desktop-container" id="desktopContainer">
-                <div class="vnc-placeholder" id="vncPlaceholder">
-                    <div class="icon">🖥️</div>
-                    <p>远程桌面未连接</p>
-                    <p style="margin-top: 15px;">
-                        <button class="btn btn-primary" onclick="connectVNC()">连接远程桌面</button>
-                    </p>
-                    <p style="margin-top: 20px; font-size: 12px; color: #8b949e;">
-                        ⚠️ 本地精简模式：VNC远程桌面需Docker环境<br>
-                        控制面板功能可直接使用API进行操作
-                    </p>
-                </div>
-                <iframe id="vncFrame" style="display: none;"></iframe>
-            </div>
-        </div>
-        
-        <!-- 右侧：控制面板 -->
-        <div class="control-panel">
-            <div class="panel-section">
-                <h3>📊 今日统计</h3>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="value" id="todayGreet">0</div>
-                        <div class="label">打招呼</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="value" id="todayResume">0</div>
-                        <div class="label">获取简历</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="value" id="todayChat">0</div>
-                        <div class="label">AI对话</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="value" id="remaining">80</div>
-                        <div class="label">剩余额度</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="panel-section">
-                <h3>📍 执行进度</h3>
-                <div class="steps">
-                    <div class="step" id="step1">
-                        <div class="step-circle">1</div>
-                        <div class="step-label">打招呼</div>
-                    </div>
-                    <div class="step" id="step2">
-                        <div class="step-circle">2</div>
-                        <div class="step-label">获取简历</div>
-                    </div>
-                    <div class="step" id="step3">
-                        <div class="step-circle">3</div>
-                        <div class="step-label">AI对话</div>
-                    </div>
-                    <div class="step" id="step4">
-                        <div class="step-circle">✓</div>
-                        <div class="step-label">完成</div>
-                    </div>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill"></div>
-                </div>
-            </div>
-            
-            <div class="panel-section">
-                <h3>⚙️ 设置</h3>
-                <div class="settings-row">
-                    <span class="settings-label">每日上限</span>
-                    <input type="number" class="settings-input" id="dailyCap" value="80">
-                </div>
-                <div class="settings-row">
-                    <span class="settings-label">执行间隔(秒)</span>
-                    <input type="number" class="settings-input" id="interval" value="60">
-                </div>
-            </div>
-            
-            <div class="panel-section log-section">
-                <h3>📋 运行日志</h3>
-                <div class="log-container" id="logContainer">
-                    <div class="log-line info">[系统] 等待启动...</div>
-                </div>
-                <div class="controls">
-                    <button class="btn btn-primary" onclick="startAutomation()">▶️ 启动</button>
-                    <button class="btn btn-danger" onclick="stopAutomation()">⏹️ 停止</button>
-                </div>
-            </div>
+    <div class="card">
+        <div class="card-title">任务状态</div>
+        <div class="status-row"><div class="status-dot idle" id="f5dot"></div><div class="status-label">F5 筛选</div><div class="status-text" id="f5text">空闲</div></div>
+        <div class="status-row"><div class="status-dot idle" id="f6dot"></div><div class="status-label">F6 简历</div><div class="status-text" id="f6text">空闲</div></div>
+        <div class="status-row"><div class="status-dot idle" id="f7dot"></div><div class="status-label">F7 回复</div><div class="status-text" id="f7text">空闲</div></div>
+        <div class="status-row"><div class="status-dot offline" id="brDot"></div><div class="status-label">浏览器</div><div class="status-text" id="brText">未连接</div></div>
+    </div>
+    <div class="card">
+        <div class="card-title">7日趋势</div>
+        <table class="trend-table">
+            <thead><tr><th>日期</th><th>联系</th><th>简历</th><th>回复</th><th>回复率</th></tr></thead>
+            <tbody id="trendBody"><tr><td colspan="5" class="empty-state">加载中...</td></tr></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Tab 1: Candidates -->
+<div class="tab-panel" id="tab1">
+    <div class="filter-bar">
+        <select id="candStatusFilter" onchange="loadCandidates()">
+            <option value="">全部状态</option>
+            <option value="new">新发现</option>
+            <option value="contacted">已联系</option>
+            <option value="replied">已回复</option>
+            <option value="chatting">沟通中</option>
+            <option value="resume_downloaded">已下载简历</option>
+        </select>
+        <input id="candSearch" placeholder="搜索姓名/学校..." oninput="loadCandidates()" style="width:200px">
+        <select id="candLimit" onchange="loadCandidates()">
+            <option value="50">50条</option><option value="100" selected>100条</option><option value="200">200条</option>
+        </select>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+        <table class="data-table">
+            <thead><tr><th>姓名</th><th>学校</th><th>学历</th><th>年限</th><th>职位</th><th>状态</th><th>时间</th></tr></thead>
+            <tbody id="candBody"><tr><td colspan="7" class="empty-state">请先登录</td></tr></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Tab 2: Resume Operations -->
+<div class="tab-panel" id="tab2">
+    <div class="stat-grid" style="margin-bottom:12px">
+        <div class="stat-card"><div class="value" id="rTotal">0</div><div class="label">总操作</div></div>
+        <div class="stat-card"><div class="value green" id="rDownloaded">0</div><div class="label">已下载</div></div>
+        <div class="stat-card"><div class="value blue" id="rRequested">0</div><div class="label">已请求</div></div>
+        <div class="stat-card"><div class="value orange" id="rFailed">0</div><div class="label">失败</div></div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+        <table class="data-table">
+            <thead><tr><th>候选人</th><th>操作</th><th>下载</th><th>微信</th><th>日期</th></tr></thead>
+            <tbody id="resumeBody"><tr><td colspan="5" class="empty-state">请先登录</td></tr></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Tab 3: Conversations -->
+<div class="tab-panel" id="tab3">
+    <div class="chat-panel">
+        <div class="chat-list" id="convList"><div class="empty-state">加载中...</div></div>
+        <div class="chat-timeline" id="convTimeline">
+            <div class="empty-state">← 选择一个对话查看详情</div>
         </div>
     </div>
-    
-    <script>
-        // 配置
-        const VNC_URL = 'http://localhost:6901';
-        const API_URL = 'http://localhost:8001';
-        
-        let isRunning = false;
-        let vncConnected = false;
-        
-        // 连接VNC远程桌面
-        function connectVNC() {
-            addLog('正在连接远程桌面...', 'info');
-            
-            const placeholder = document.getElementById('vncPlaceholder');
-            const frame = document.getElementById('vncFrame');
-            const status = document.getElementById('vncStatus');
-            
-            frame.src = VNC_URL + '?autoconnect=true';
-            frame.style.display = 'block';
-            placeholder.style.display = 'none';
-            
-            // 检测连接状态
-            frame.onload = function() {
-                vncConnected = true;
-                status.classList.add('connected');
-                status.querySelector('span:last-child').textContent = '远程桌面: 已连接';
-                addLog('✅ 远程桌面已连接', 'success');
-            };
-            
-            frame.onerror = function() {
-                frame.style.display = 'none';
-                placeholder.style.display = 'flex';
-                status.querySelector('span:last-child').textContent = '远程桌面: 不可用 (需Docker)';
-                addLog('❌ VNC远程桌面不可用 — 当前为本地精简模式，Docker未安装', 'error');
-                addLog('💡 控制功能通过API直连，管理面板可正常使用', 'info');
-            };
-        }
-        
-        // 在新窗口打开VNC
-        function openVNCNewWindow() {
-            window.open(VNC_URL, '_blank');
-        }
-        
-        // 启动自动化
-        async function startAutomation() {
-            if (isRunning) {
-                addLog('⚠️ 自动化已在运行中', 'warning');
-                return;
-            }
-            
-            isRunning = true;
-            document.getElementById('statusBadge').textContent = '运行中';
-            document.getElementById('statusBadge').classList.remove('stopped');
-            
-            addLog('🚀 启动自动化流程...', 'info');
-            
-            try {
-                // Step 1: 打招呼
-                await runStep('greet', '打招呼');
-                
-                // Step 2: 获取简历
-                await runStep('resume', '获取简历');
-                
-                // Step 3: AI对话
-                await runStep('chat', 'AI对话');
-                
-                setStepStatus(4, 'completed');
-                addLog('✅ 全部流程完成!', 'success');
-                
-            } catch (error) {
-                addLog(`❌ 执行失败: ${error.message}`, 'error');
-            }
-            
-            isRunning = false;
-            document.getElementById('statusBadge').textContent = '已完成';
-        }
-        
-        async function runStep(step, name) {
-            const stepNum = step === 'greet' ? 1 : step === 'resume' ? 2 : 3;
-            setStepStatus(stepNum, 'active');
-            addLog(`📌 开始执行: ${name}...`, 'info');
-            
-            // 调用API
-            try {
-                const response = await fetch(`${API_URL}/api/run/${step}`, { method: 'POST' });
-                const result = await response.json();
-                addLog(`✅ ${name}完成: ${JSON.stringify(result)}`, 'success');
-            } catch (e) {
-                // API不可用时模拟
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                addLog(`✅ ${name}完成 (模拟)`, 'success');
-            }
-            
-            setStepStatus(stepNum, 'completed');
-        }
-        
-        // 停止自动化
-        function stopAutomation() {
-            isRunning = false;
-            document.getElementById('statusBadge').textContent = '已停止';
-            document.getElementById('statusBadge').classList.add('stopped');
-            addLog('⏹️ 已停止自动化', 'warning');
-        }
-        
-        // 设置步骤状态
-        function setStepStatus(stepNum, status) {
-            const step = document.getElementById(`step${stepNum}`);
-            if (step) {
-                step.className = `step ${status}`;
-            }
-            
-            // 更新进度条
-            const progress = ((stepNum - 1) / 3) * 100 + (status === 'completed' ? 33 : 0);
-            document.getElementById('progressFill').style.width = `${Math.min(progress, 100)}%`;
-        }
-        
-        // 添加日志
-        function addLog(message, level = 'info') {
-            const container = document.getElementById('logContainer');
-            const time = new Date().toLocaleTimeString();
-            const line = document.createElement('div');
-            line.className = `log-line ${level}`;
-            line.textContent = `[${time}] ${message}`;
-            container.appendChild(line);
-            container.scrollTop = container.scrollHeight;
-        }
-        
-        // 刷新状态
-        async function refreshStatus() {
-            try {
-                const response = await fetch(`${API_URL}/api/stats`);
-                const stats = await response.json();
-                
-                document.getElementById('todayGreet').textContent = stats.today_greet || 0;
-                document.getElementById('todayResume').textContent = stats.today_resume || 0;
-                document.getElementById('todayChat').textContent = stats.today_chat || 0;
-                document.getElementById('remaining').textContent = 80 - (stats.today_greet || 0);
-            } catch (e) {
-                console.log('API不可用');
-            }
-        }
-        
-        // 初始化
-        addLog('系统已加载，请连接远程桌面后启动自动化', 'info');
-        
-        // 自动连接VNC
-        setTimeout(() => {
-            addLog('提示: 点击"连接"按钮查看远程桌面', 'info');
-        }, 1000);
-    </script>
+</div>
+
+<!-- Tab 4: Config -->
+<div class="tab-panel" id="tab4">
+    <div class="config-section">
+        <div class="config-header" onclick="toggleConfig(this)">▶ 筛选条件</div>
+        <div class="config-body">
+            <div class="config-row"><span class="config-label">最低学历</span>
+                <select class="config-input" id="cfgMinDegree"><option>博士</option><option>硕士</option><option selected>本科</option><option>大专</option></select></div>
+            <div class="config-row"><span class="config-label">最低工作年限</span>
+                <input class="config-input" id="cfgMinYears" type="number" value="3" min="0" max="30"></div>
+            <div class="config-row"><span class="config-label">每日联系上限</span>
+                <input class="config-input" id="cfgDailyCap" type="number" value="80" min="10" max="200"></div>
+            <div class="config-row"><span class="config-label">每日聊天轮次上限</span>
+                <input class="config-input" id="cfgChatCap" type="number" value="5" min="1" max="20"></div>
+            <div style="padding:10px 14px"><button class="btn-save" onclick="saveFilterConfig()">保存筛选配置</button></div>
+        </div>
+    </div>
+    <div class="config-section">
+        <div class="config-header" onclick="toggleConfig(this)">▶ 回复模板</div>
+        <div class="config-body">
+            <div class="config-row"><span class="config-label">模板名称</span>
+                <input class="config-input" id="tplName" style="width:200px" placeholder="如: 跟进模板"></div>
+            <div style="padding:8px 14px"><textarea class="config-textarea" id="tplContent" placeholder="输入模板内容，可用 {候选人姓名} 占位符"></textarea></div>
+            <div style="padding:4px 14px"><button class="btn-save" onclick="saveTemplate()">保存模板</button></div>
+            <div style="padding:8px 14px"><div class="card-title">已保存模板</div><div id="tplList" style="font-size:12px;color:var(--text-secondary)">加载中...</div></div>
+        </div>
+    </div>
+    <div class="config-section">
+        <div class="config-header" onclick="toggleConfig(this)">▶ AI 配置 (只读)</div>
+        <div class="config-body">
+            <div class="config-row"><span class="config-label">模型</span><span style="color:var(--accent)">deepseek-chat</span></div>
+            <div class="config-row"><span class="config-label">API 状态</span><span id="aiStatus" style="color:var(--text-muted)">未检测</span></div>
+        </div>
+    </div>
+</div>
+
+</div>
+
+<!-- ═══════════════ Log Footer ═══════════════ -->
+<div class="log-bar">
+    <div class="log-header"><span>操作日志</span><div style="display:flex;gap:6px"><button class="h-btn h-btn-ghost" onclick="clearLog()" style="font-size:11px;padding:2px 8px">清空</button></div></div>
+    <div class="log-body" id="logBody"></div>
+</div>
+
+<script>
+// ── Config ──
+const API = 'http://localhost:8002';
+let token = localStorage.getItem('auth_token') || '';
+
+// ── Shared Utils ──
+async function apiCall(endpoint, body, method) {
+    const opts = {
+        method: method || (body ? 'POST' : 'GET'),
+        headers: { 'Content-Type': 'application/json' },
+    };
+    if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+    if (body && method !== 'GET') opts.body = JSON.stringify(body);
+    const res = await fetch(API + endpoint, opts);
+    if (res.status === 401) { token = ''; localStorage.removeItem('auth_token'); updateAuthUI(false); throw new Error('未认证'); }
+    if (!res.ok) { const e = await res.json().catch(() => ({detail: res.statusText})); throw new Error(e.detail || res.statusText); }
+    return res.json();
+}
+
+function log(msg, type = 'info') {
+    const body = document.getElementById('logBody');
+    const t = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.className = 'log-line ' + type;
+    line.textContent = `[${t}] ${msg}`;
+    body.appendChild(line);
+    if (body.children.length > 200) body.removeChild(body.firstChild);
+    body.scrollTop = body.scrollHeight;
+}
+function clearLog() { document.getElementById('logBody').innerHTML = ''; }
+
+function statusDot(status) {
+    const m = { running: 'running', completed: 'completed', error: 'error', idle: 'idle', stopped: 'idle' };
+    return m[status] || 'idle';
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+// ── Auth ──
+async function doLogin() {
+    const u = document.getElementById('authUser').value;
+    const p = document.getElementById('authPass').value;
+    try {
+        const res = await fetch(API + '/api/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p }),
+        });
+        if (!res.ok) throw new Error('认证失败');
+        const data = await res.json();
+        token = data.access_token;
+        localStorage.setItem('auth_token', token);
+        updateAuthUI(true, u);
+        log('登录成功', 'success');
+        loadAll();
+    } catch (e) { log('登录失败: ' + e.message, 'error'); }
+}
+function updateAuthUI(ok, user) {
+    const s = document.getElementById('authSection');
+    if (ok) { s.classList.add('auth-done'); document.getElementById('authUserLabel').textContent = user || 'admin'; }
+    else { s.classList.remove('auth-done'); }
+}
+
+// ── Tab Switching ──
+const tabs = document.querySelectorAll('.tab');
+const panels = document.querySelectorAll('.tab-panel');
+function switchTab(i) {
+    tabs.forEach((t, idx) => t.classList.toggle('active', idx === i));
+    panels.forEach((p, idx) => p.classList.toggle('active', idx === i));
+    // Lazy load on first switch
+    if (i === 1) loadCandidates();
+    if (i === 2) loadResumeOps();
+    if (i === 3) loadConversationList();
+    if (i === 4) loadConfig();
+}
+
+// ── Tab 0: Dashboard ──
+async function loadDashboard() {
+    try {
+        const [stats, tasks, trend] = await Promise.all([
+            apiCall('/api/stats'),
+            apiCall('/api/tasks/status'),
+            apiCall('/api/stats/daily-trend?days=7'),
+        ]);
+        // Stats
+        const byStatus = stats.by_status || {};
+        const today = stats.today_processed || 0;
+        document.getElementById('dContacted').textContent = today;
+        document.getElementById('dResumes').textContent = byStatus.resume_downloaded || 0;
+        document.getElementById('dReplied').textContent = byStatus.replied || 0;
+        document.getElementById('dRemaining').textContent = Math.max(0, 80 - today);
+        // Header chips
+        document.getElementById('hContacted').textContent = today;
+        document.getElementById('hResumes').textContent = byStatus.resume_downloaded || 0;
+        document.getElementById('hReplied').textContent = byStatus.replied || 0;
+        document.getElementById('hRemaining').textContent = Math.max(0, 80 - today);
+        // Tasks
+        renderTaskStatus('f5', tasks.f5_filter);
+        renderTaskStatus('f6', tasks.f6_resume);
+        renderTaskStatus('f7', tasks.f7_reply);
+        // Browser
+        const br = tasks.browser || {};
+        document.getElementById('brDot').className = 'status-dot ' + (br.connected ? 'online' : 'offline');
+        document.getElementById('brText').textContent = br.connected ? '已连接' : '未连接';
+        // Trend
+        const trendData = trend.trend || [];
+        const tbody = document.getElementById('trendBody');
+        if (trendData.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="empty-state">暂无数据</td></tr>'; return; }
+        tbody.innerHTML = trendData.map(d =>
+            `<tr><td>${esc(d.date)}</td><td>${d.contacted}</td><td>${d.resumes}</td><td>${d.replies}</td><td>${d.reply_rate}%</td></tr>`
+        ).join('');
+    } catch (e) { log('仪表盘加载失败: ' + e.message, 'error'); }
+}
+function renderTaskStatus(prefix, task) {
+    const s = task?.status || 'idle';
+    const dot = document.getElementById(prefix + 'dot');
+    const text = document.getElementById(prefix + 'text');
+    dot.className = 'status-dot ' + statusDot(s);
+    const labels = { idle: '空闲', running: '运行中...', completed: '已完成', error: '出错', stopped: '已停止', failed: '失败' };
+    let desc = labels[s] || s;
+    if (task?.message) desc += ' — ' + task.message;
+    else if (task?.result?.message) desc += ' — ' + task.result.message;
+    else if (task?.error) desc += ' — ' + task.error;
+    text.textContent = desc;
+}
+
+// ── Tab 1: Candidates ──
+async function loadCandidates() {
+    const status = document.getElementById('candStatusFilter').value;
+    const limit = document.getElementById('candLimit').value;
+    let url = `/api/candidates?limit=${limit}`;
+    if (status) url += `&status=${status}`;
+    try {
+        const data = await apiCall(url);
+        const candidates = data.candidates || [];
+        const search = document.getElementById('candSearch').value.toLowerCase();
+        const filtered = search ? candidates.filter(c => (c.name || '').toLowerCase().includes(search) || (c.school || '').toLowerCase().includes(search)) : candidates;
+        const tbody = document.getElementById('candBody');
+        if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state">无数据</td></tr>'; return; }
+        const badgeMap = { new: 'badge-blue', contacted: 'badge-orange', replied: 'badge-green', chatting: 'badge-blue', resume_downloaded: 'badge-green' };
+        tbody.innerHTML = filtered.map(c => `<tr>
+            <td style="font-weight:600">${esc(c.name)}</td><td>${esc(c.school)}</td><td>${esc(c.degree)}</td>
+            <td>${c.years || '-'}</td><td>${esc(c.position)}</td>
+            <td><span class="badge ${badgeMap[c.status] || 'badge-blue'}">${c.status || '-'}</span></td>
+            <td>${(c.created_at || '').slice(0, 10)}</td></tr>`).join('');
+    } catch (e) { document.getElementById('candBody').innerHTML = `<tr><td colspan="7" class="empty-state">${esc(e.message)}</td></tr>`; }
+}
+
+// ── Tab 2: Resume Operations ──
+async function loadResumeOps() {
+    try {
+        const [list, stats] = await Promise.all([
+            apiCall('/api/resume/list?limit=100'),
+            apiCall('/api/resume/stats'),
+        ]);
+        const items = Array.isArray(list) ? list : (list.resumes || []);
+        const s = stats || {};
+        document.getElementById('rTotal').textContent = s.total_operations || items.length || 0;
+        document.getElementById('rDownloaded').textContent = s.downloaded || 0;
+        document.getElementById('rRequested').textContent = s.requested || 0;
+        document.getElementById('rFailed').textContent = s.failed || 0;
+        const tbody = document.getElementById('resumeBody');
+        if (!items.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty-state">无数据</td></tr>'; return; }
+        tbody.innerHTML = items.map(r => `<tr>
+            <td style="font-weight:600">${esc(r.candidate_name)}</td>
+            <td>${esc(r.status)}</td>
+            <td>${r.file_size > 0 ? '<span class="badge badge-green">✓</span>' : '<span class="badge badge-orange">-</span>'}</td>
+            <td>-</td>
+            <td>${(r.created_at || '').slice(0, 10)}</td></tr>`).join('');
+    } catch (e) { document.getElementById('resumeBody').innerHTML = `<tr><td colspan="5" class="empty-state">${esc(e.message)}</td></tr>`; }
+}
+
+// ── Tab 3: Conversations ──
+let _selectedConv = '';
+async function loadConversationList() {
+    try {
+        const data = await apiCall('/api/conversations?limit=50');
+        const sessions = data.sessions || [];
+        const el = document.getElementById('convList');
+        if (!sessions.length) { el.innerHTML = '<div class="empty-state">无对话记录</div>'; return; }
+        el.innerHTML = sessions.map(s => {
+            const enc = encodeURIComponent(s.candidate_name || '');
+            return `<div class="chat-item${_selectedConv === s.candidate_name ? ' active' : ''}" data-name="${esc(s.candidate_name)}" onclick="selectConv(decodeURIComponent(this.dataset.name))">
+            <div class="name">${esc(s.candidate_name)}</div>
+            <div class="meta">${s.rounds || 0} 轮 · ${(s.last_at || '').slice(0, 10)}</div></div>`;
+        }).join('');
+    } catch (e) { document.getElementById('convList').innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; }
+}
+async function selectConv(name) {
+    _selectedConv = name;
+    document.querySelectorAll('.chat-item').forEach(el => el.classList.toggle('active', el.querySelector('.name')?.textContent === name));
+    try {
+        const data = await apiCall(`/api/chat/history?candidate_name=${encodeURIComponent(name)}&limit=50`);
+        const history = data.history || [];
+        const tl = document.getElementById('convTimeline');
+        if (!history.length) { tl.innerHTML = '<div class="empty-state">无消息记录</div>'; return; }
+        tl.innerHTML = history.map(h => {
+            const isBot = h.role === 'assistant' || h.role === 'boss';
+            return `<div class="msg ${isBot ? 'bot' : 'candidate'}">
+                <div class="msg-bubble">${esc(h.content)}</div>
+                <div class="msg-meta">${isBot ? '我方' : '候选人'}</div></div>`;
+        }).join('');
+        tl.scrollTop = tl.scrollHeight;
+    } catch (e) { document.getElementById('convTimeline').innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; }
+}
+
+// ── Tab 4: Config ──
+async function loadConfig() {
+    try {
+        const [filterCfg, caps, templates] = await Promise.all([
+            apiCall('/api/filter/config').catch(() => ({})),
+            apiCall('/api/config/daily-caps').catch(() => ({})),
+            apiCall('/api/chat/templates').catch(() => ({templates:[]})),
+        ]);
+        if (filterCfg.min_degree_default) document.getElementById('cfgMinDegree').value = filterCfg.min_degree_default;
+        if (filterCfg.min_years_default) document.getElementById('cfgMinYears').value = filterCfg.min_years_default;
+        if (caps.daily_contact_cap) document.getElementById('cfgDailyCap').value = caps.daily_contact_cap;
+        if (caps.daily_chat_rounds_cap) document.getElementById('cfgChatCap').value = caps.daily_chat_rounds_cap;
+        const tpls = templates.templates || [];
+        document.getElementById('tplList').innerHTML = tpls.length
+            ? tpls.map(t => `<div style="padding:4px 0;border-bottom:1px solid var(--border)"><b>${esc(t.name)}</b>: ${esc((t.content || '').slice(0, 80))}...</div>`).join('')
+            : '暂无模板';
+    } catch (e) { log('配置加载失败: ' + e.message, 'warn'); }
+}
+async function saveFilterConfig() {
+    try {
+        const cfg = {
+            min_degree: document.getElementById('cfgMinDegree').value,
+            min_years: parseInt(document.getElementById('cfgMinYears').value) || 3,
+            daily_cap: parseInt(document.getElementById('cfgDailyCap').value) || 80,
+        };
+        await apiCall('/api/filter/config', cfg, 'PUT');
+        // Also save daily caps separately
+        await apiCall('/api/config/daily-caps', {
+            daily_contact_cap: cfg.daily_cap,
+            daily_chat_rounds_cap: parseInt(document.getElementById('cfgChatCap').value) || 5,
+        }, 'PUT');
+        log('配置已保存', 'success');
+    } catch (e) { log('保存失败: ' + e.message, 'error'); }
+}
+async function saveTemplate() {
+    const name = document.getElementById('tplName').value;
+    const content = document.getElementById('tplContent').value;
+    if (!name || !content) { log('模板名称和内容不能为空', 'warn'); return; }
+    try {
+        await apiCall('/api/chat/template', { name, content }, 'POST');
+        log('模板已保存: ' + name, 'success');
+        loadConfig();
+    } catch (e) { log('模板保存失败: ' + e.message, 'error'); }
+}
+function toggleConfig(el) {
+    const body = el.nextElementSibling;
+    const isOpen = body.classList.toggle('open');
+    const label = el.dataset.label || el.textContent.replace(/^[▼▶]\s*/, '');
+    if (!el.dataset.label) el.dataset.label = label;
+    el.textContent = (isOpen ? '▼ ' : '▶ ') + label;
+}
+
+// ── Init ──
+function loadAll() { loadDashboard(); }
+function init() {
+    if (token) { updateAuthUI(true, 'admin'); loadAll(); }
+    else { log('请先登录', 'info'); }
+    // Auto-refresh dashboard every 15s
+    setInterval(() => { if (token) loadDashboard(); }, 15000);
+}
+init();
+</script>
 </body>
 </html>

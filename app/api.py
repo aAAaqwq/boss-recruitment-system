@@ -15,7 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -58,7 +58,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -1407,6 +1407,191 @@ async def get_templates(current_user: dict = Depends(verify_token)):
     except Exception as e:
         api_logger.error(f"获取模板失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# 3101 数据总控平台 — 扩展端点
+# ============================================================
+
+@app.get("/api/tasks/status")
+async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
+    """统一任务状态 — 聚合 F5/F6/F7 + 浏览器状态"""
+    try:
+        # F5: 取最新一条 filter task
+        f5_latest = None
+        if _filter_tasks:
+            f5_latest = max(_filter_tasks.values(), key=lambda t: t.get("started_at", ""))
+        f5_status = f5_latest if f5_latest else {"status": "idle"}
+
+        return {
+            "f5_filter": f5_status,
+            "f6_resume": resume_task_status,
+            "f7_reply": _reply_task_status,
+            "browser": {"connected": automation._connected},
+        }
+    except Exception as e:
+        api_logger.error(f"获取任务状态失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stats/daily-trend")
+async def get_daily_trend(
+    days: int = Query(7, ge=1, le=30),
+    current_user: dict = Depends(verify_token),
+):
+    """最近 N 天每日统计趋势"""
+    conn = get_db()
+    try:
+        trend = []
+        for i in range(days - 1, -1, -1):
+            # Compute date label via SQLite, then reuse as parameter
+            row = conn.execute("SELECT date('now', ?)", (f'-{int(i)} days',)).fetchone()
+            date_label = row[0]
+
+            contacted = conn.execute(
+                "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = ?",
+                (date_label,),
+            ).fetchone()[0]
+
+            resumes = conn.execute(
+                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1 AND date(created_at) = ?",
+                (date_label,),
+            ).fetchone()[0]
+
+            replies = conn.execute(
+                "SELECT COUNT(*) FROM conversations WHERE action = 'auto_reply' AND date(created_at) = ?",
+                (date_label,),
+            ).fetchone()[0]
+
+            reply_rate = round(replies / contacted * 100, 1) if contacted > 0 else 0.0
+
+            trend.append({
+                "date": date_label,
+                "contacted": contacted,
+                "resumes": resumes,
+                "replies": replies,
+                "reply_rate": reply_rate,
+            })
+        return {"trend": trend, "days": days}
+    except Exception as e:
+        api_logger.error(f"获取每日趋势失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.get("/api/contact-records")
+async def get_contact_records(
+    action: Optional[str] = None,
+    date: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=500),
+    current_user: dict = Depends(verify_token),
+):
+    """打招呼 / 联系记录"""
+    conn = get_db()
+    try:
+        query = "SELECT * FROM contact_records"
+        conditions: list = []
+        params: list = []
+
+        if action:
+            conditions.append("action = ?")
+            params.append(action)
+        if date:
+            conditions.append("date(action_date) = ?")
+            params.append(date)
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
+        return {"records": [dict(row) for row in rows], "total": len(rows)}
+    except Exception as e:
+        api_logger.error(f"查询contact_records失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.get("/api/conversations")
+async def get_conversation_sessions(
+    limit: int = Query(50, ge=1, le=200),
+    current_user: dict = Depends(verify_token),
+):
+    """对话会话列表 — 按候选人分组"""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT candidate_name,
+                      COUNT(*) as rounds,
+                      MIN(created_at) as first_at,
+                      MAX(created_at) as last_at
+               FROM conversations
+               GROUP BY candidate_name
+               ORDER BY last_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {"sessions": [dict(row) for row in rows], "total": len(rows)}
+    except Exception as e:
+        api_logger.error(f"查询对话会话失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+class DailyCapsRequest(BaseModel):
+    daily_contact_cap: int = Field(default=80, ge=1)
+    daily_chat_rounds_cap: int = Field(default=5, ge=1)
+
+
+@app.put("/api/config/daily-caps")
+async def update_daily_caps(
+    req: DailyCapsRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """动态修改每日上限 — 保存到 runtime_state"""
+    conn = get_db()
+    try:
+        caps = {
+            "daily_contact_cap": req.daily_contact_cap,
+            "daily_chat_rounds_cap": req.daily_chat_rounds_cap,
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO runtime_state (key, value, updated_at) VALUES (?, ?, ?)",
+            ("daily_caps", json.dumps(caps), datetime.now().isoformat()),
+        )
+        conn.commit()
+        api_logger.info(f"用户 {current_user['sub']} 更新每日上限: {caps}")
+        return {"status": "success", "caps": caps}
+    except Exception as e:
+        api_logger.error(f"更新每日上限失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.get("/api/config/daily-caps")
+async def get_daily_caps(current_user: dict = Depends(verify_token)):
+    """读取当前每日上限配置"""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT value FROM runtime_state WHERE key = 'daily_caps'"
+        ).fetchone()
+        if row:
+            caps = json.loads(row["value"])
+        else:
+            caps = {"daily_contact_cap": 80, "daily_chat_rounds_cap": 5}
+        return {"status": "success", "caps": caps}
+    except Exception as e:
+        api_logger.error(f"获取每日上限失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
