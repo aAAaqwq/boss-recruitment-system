@@ -1028,15 +1028,24 @@
                         </div>
                         <div class="form-group">
                             <label>学校白名单</label>
-                            <input type="text" id="schoolWhitelist" placeholder="清华大学,北京大学,浙江大学...">
+                            <div style="display:flex;gap:6px;">
+                                <input type="text" id="schoolWhitelist" placeholder="清华大学,北京大学,浙江大学..." style="flex:1;">
+                                <button class="btn btn-sm" onclick="openTextEditor('schoolWhitelist','编辑学校白名单')" title="展开编辑" style="flex-shrink:0;padding:4px 10px;">📝</button>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>关键词包含</label>
-                            <input type="text" id="requireKeywords" placeholder="Python,Java,全栈...">
+                            <div style="display:flex;gap:6px;">
+                                <input type="text" id="requireKeywords" placeholder="Python,Java,全栈..." style="flex:1;">
+                                <button class="btn btn-sm" onclick="openTextEditor('requireKeywords','编辑包含关键词')" title="展开编辑" style="flex-shrink:0;padding:4px 10px;">📝</button>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>关键词排除</label>
-                            <input type="text" id="excludeKeywords" placeholder="外包,实习,初级...">
+                            <div style="display:flex;gap:6px;">
+                                <input type="text" id="excludeKeywords" placeholder="外包,实习,初级..." style="flex:1;">
+                                <button class="btn btn-sm" onclick="openTextEditor('excludeKeywords','编辑排除关键词')" title="展开编辑" style="flex-shrink:0;padding:4px 10px;">📝</button>
+                            </div>
                         </div>
                         <button class="btn btn-secondary btn-sm" onclick="saveFilterConfig()">保存筛选配置</button>
                     </div>
@@ -1242,7 +1251,7 @@
         })();
 
         // ── Config ──
-        function loadConfig() {
+        async function loadConfig() {
             // 1. 先从 localStorage 加载本地缓存
             try {
                 const saved = localStorage.getItem('bossConfig');
@@ -1257,7 +1266,7 @@
             }
 
             // 2. 从 API 加载服务端已保存的配置（覆盖本地默认值）
-            loadConfigFromAPI();
+            await loadConfigFromAPI();
 
             // 3. 用当前 config 填充表单
             applyConfigToForm();
@@ -1265,20 +1274,33 @@
         }
 
         function applyConfigToForm() {
-            document.getElementById('degreeFilter').value = config.filter.degree || '';
-            document.getElementById('yearsMin').value = config.filter.yearsMin || 0;
-            document.getElementById('yearsMax').value = config.filter.yearsMax || 100;
-            document.getElementById('schoolWhitelist').value = config.filter.schoolWhitelist || '';
-            document.getElementById('requireKeywords').value = config.filter.requireKeywords || '';
-            document.getElementById('excludeKeywords').value = config.filter.excludeKeywords || '';
-            document.getElementById('helloTemplate').value = config.templates.hello || '';
-            document.getElementById('resumeTemplate').value = config.templates.resume || '';
-            document.getElementById('followTemplate').value = config.templates.follow || '';
+            const degEl = document.getElementById('degreeFilter');
+            const yrsMinEl = document.getElementById('yearsMin');
+            const yrsMaxEl = document.getElementById('yearsMax');
+            const schEl = document.getElementById('schoolWhitelist');
+            const reqKwEl = document.getElementById('requireKeywords');
+            const excKwEl = document.getElementById('excludeKeywords');
+            const helloEl = document.getElementById('helloTemplate');
+            const resumeEl = document.getElementById('resumeTemplate');
+            const followEl = document.getElementById('followTemplate');
+            if (degEl) degEl.value = config.filter.degree || '';
+            if (yrsMinEl) yrsMinEl.value = config.filter.yearsMin || 0;
+            if (yrsMaxEl) yrsMaxEl.value = config.filter.yearsMax || 100;
+            if (schEl) schEl.value = config.filter.schoolWhitelist || '';
+            if (reqKwEl) reqKwEl.value = config.filter.requireKeywords || '';
+            if (excKwEl) excKwEl.value = config.filter.excludeKeywords || '';
+            if (helloEl) helloEl.value = config.templates.hello || '';
+            if (resumeEl) resumeEl.value = config.templates.resume || '';
+            if (followEl) followEl.value = config.templates.follow || '';
+        }
+
+        function getAuthToken() {
+            return localStorage.getItem('auth_token') || localStorage.getItem('token') || authToken || null;
         }
 
         async function loadConfigFromAPI() {
             try {
-                const token = localStorage.getItem('token');
+                const token = getAuthToken();
                 if (!token) return;
                 const resp = await fetch('/api/filter/config', {
                     headers: { 'Authorization': 'Bearer ' + token }
@@ -1288,7 +1310,7 @@
                 const saved = apiCfg.saved || {};
 
                 // 用 API 已保存的值覆盖 config（优先级: API > localStorage > 默认）
-                if (saved.min_degree !== undefined) config.filter.degree = saved.min_degree;
+                if (saved.min_degree !== undefined && saved.min_degree !== '') config.filter.degree = saved.min_degree;
                 if (saved.min_years !== undefined) config.filter.yearsMin = saved.min_years;
                 if (saved.school_whitelist && Array.isArray(saved.school_whitelist) && saved.school_whitelist.length > 0) {
                     config.filter.schoolWhitelist = saved.school_whitelist.join(',');
@@ -1308,7 +1330,7 @@
 
                 // 更新表单
                 applyConfigToForm();
-                log('已同步服务端筛选配置', 'info');
+                log('✅ 已同步服务端筛选配置', 'info');
             } catch (e) {
                 console.warn('API config load failed:', e);
             }
@@ -1316,6 +1338,58 @@
 
         function saveConfig() {
             localStorage.setItem('bossConfig', JSON.stringify(config));
+        }
+
+        // ── 弹出大文本编辑器 ──
+        function openTextEditor(inputId, title) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+
+            // 创建遮罩和编辑器
+            let overlay = document.getElementById('textEditorOverlay');
+            if (overlay) overlay.remove();
+
+            overlay = document.createElement('div');
+            overlay.id = 'textEditorOverlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+            overlay.innerHTML = `
+                <div style="background:var(--bg-card,#1e1e2e);border-radius:12px;padding:24px;width:90%;max-width:680px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                        <h3 style="margin:0;color:var(--text-primary,#e0e0e0);font-size:16px;">${title}</h3>
+                        <button onclick="closeTextEditor()" style="background:none;border:none;color:var(--text-secondary,#888);font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
+                    </div>
+                    <textarea id="textEditorArea" style="flex:1;min-height:280px;width:100%;background:var(--bg-input,#2a2a3e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border,#3a3a4e);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${(input.value || '').replace(/</g,'&lt;')}</textarea>
+                    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+                        <button onclick="closeTextEditor()" style="padding:8px 16px;border-radius:6px;background:var(--bg-input,#2a2a3e);color:var(--text-secondary,#888);border:1px solid var(--border,#3a3a4e);cursor:pointer;">取消</button>
+                        <button onclick="confirmTextEditor('${inputId}')" style="padding:8px 20px;border-radius:6px;background:var(--accent,#6c5ce7);color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            // 点击遮罩关闭
+            overlay.addEventListener('click', function(e) {
+                if (e.target === overlay) closeTextEditor();
+            });
+
+            // 聚焦文本框
+            const area = document.getElementById('textEditorArea');
+            area.focus();
+            area.setSelectionRange(area.value.length, area.value.length);
+        }
+
+        function closeTextEditor() {
+            const overlay = document.getElementById('textEditorOverlay');
+            if (overlay) overlay.remove();
+        }
+
+        function confirmTextEditor(inputId) {
+            const area = document.getElementById('textEditorArea');
+            const input = document.getElementById(inputId);
+            if (area && input) {
+                input.value = area.value;
+            }
+            closeTextEditor();
         }
 
         function setLoading(btn, loading) {
