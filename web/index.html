@@ -387,14 +387,27 @@ body {
         <div class="config-header" onclick="toggleConfig(this)">▶ 筛选条件</div>
         <div class="config-body">
             <div class="config-row"><span class="config-label">最低学历</span>
-                <select class="config-input" id="cfgMinDegree"><option>博士</option><option>硕士</option><option selected>本科</option><option>大专</option></select></div>
+                <select class="config-input" id="cfgMinDegree">
+                    <option value="">不限</option>
+                    <option value="博士">博士</option>
+                    <option value="硕士">硕士</option>
+                    <option value="本科">本科</option>
+                    <option value="大专">大专</option>
+                </select></div>
             <div class="config-row"><span class="config-label">最低工作年限</span>
-                <input class="config-input" id="cfgMinYears" type="number" value="3" min="0" max="30"></div>
+                <input class="config-input" id="cfgMinYears" type="number" min="0" max="30" placeholder="3"></div>
             <div class="config-row"><span class="config-label">每日联系上限</span>
-                <input class="config-input" id="cfgDailyCap" type="number" value="80" min="10" max="200"></div>
+                <input class="config-input" id="cfgDailyCap" type="number" min="10" max="200" placeholder="80"></div>
             <div class="config-row"><span class="config-label">每日聊天轮次上限</span>
-                <input class="config-input" id="cfgChatCap" type="number" value="5" min="1" max="20"></div>
-            <div style="padding:10px 14px"><button class="btn-save" onclick="saveFilterConfig()">保存筛选配置</button></div>
+                <input class="config-input" id="cfgChatCap" type="number" min="1" max="20" placeholder="5"></div>
+            <div class="config-row"><span class="config-label">学校白名单</span>
+                <div style="flex:1;display:flex;gap:6px;align-items:center;">
+                    <input class="config-input" id="cfgSchoolWhitelist" style="flex:1" placeholder="清华大学,北京大学,浙江大学...">
+                    <button class="btn-save" onclick="openCfgTextEditor('cfgSchoolWhitelist','编辑学校白名单')" style="padding:4px 10px;font-size:12px;white-space:nowrap;">📝 展开</button>
+                </div>
+            </div>
+            <div style="padding:10px 14px"><button class="btn-save" onclick="saveFilterConfig()">保存筛选配置</button>
+                <span id="cfgSyncStatus" style="font-size:11px;color:var(--text-secondary);margin-left:8px;"></span></div>
         </div>
     </div>
     <div class="config-section">
@@ -412,6 +425,21 @@ body {
         <div class="config-body">
             <div class="config-row"><span class="config-label">模型</span><span style="color:var(--accent)">deepseek-chat</span></div>
             <div class="config-row"><span class="config-label">API 状态</span><span id="aiStatus" style="color:var(--text-muted)">未检测</span></div>
+        </div>
+    </div>
+</div>
+
+<!-- 弹出大文本编辑器 -->
+<div id="cfgTextEditorOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center;">
+    <div style="background:var(--bg-card);border-radius:12px;padding:24px;width:90%;max-width:680px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 id="cfgEditorTitle" style="margin:0;color:var(--text-primary);font-size:16px;">编辑</h3>
+            <button onclick="closeCfgTextEditor()" style="background:none;border:none;color:var(--text-secondary);font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
+        </div>
+        <textarea id="cfgEditorArea" style="flex:1;min-height:280px;width:100%;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;"></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+            <button onclick="closeCfgTextEditor()" style="padding:8px 16px;border-radius:6px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);cursor:pointer;">取消</button>
+            <button onclick="confirmCfgTextEditor()" style="padding:8px 20px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
         </div>
     </div>
 </div>
@@ -604,9 +632,10 @@ async function loadConversationList() {
         const el = document.getElementById('convList');
         if (!sessions.length) { el.innerHTML = '<div class="empty-state">无对话记录</div>'; return; }
         el.innerHTML = sessions.map(s => {
-            const enc = encodeURIComponent(s.candidate_name || '');
-            return `<div class="chat-item${_selectedConv === s.candidate_name ? ' active' : ''}" data-name="${esc(s.candidate_name)}" onclick="selectConv(decodeURIComponent(this.dataset.name))">
-            <div class="name">${esc(s.candidate_name)}</div>
+            const name = (s.candidate_name || '').slice(0, 30); // 前端兜底截断
+            const enc = encodeURIComponent(name);
+            return `<div class="chat-item${_selectedConv === name ? ' active' : ''}" data-name="${esc(name)}" onclick="selectConv(decodeURIComponent(this.dataset.name))">
+            <div class="name">${esc(name)}</div>
             <div class="meta">${s.rounds || 0} 轮 · ${(s.last_at || '').slice(0, 10)}</div></div>`;
         }).join('');
     } catch (e) { document.getElementById('convList').innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; }
@@ -630,6 +659,8 @@ async function selectConv(name) {
 }
 
 // ── Tab 4: Config ──
+let _cfgEditorTarget = null; // 当前编辑器目标input ID
+
 async function loadConfig() {
     try {
         const [filterCfg, caps, templates] = await Promise.all([
@@ -637,10 +668,35 @@ async function loadConfig() {
             apiCall('/api/config/daily-caps').catch(() => ({})),
             apiCall('/api/chat/templates').catch(() => ({templates:[]})),
         ]);
-        if (filterCfg.min_degree_default) document.getElementById('cfgMinDegree').value = filterCfg.min_degree_default;
-        if (filterCfg.min_years_default) document.getElementById('cfgMinYears').value = filterCfg.min_years_default;
-        if (caps.daily_contact_cap) document.getElementById('cfgDailyCap').value = caps.daily_contact_cap;
-        if (caps.daily_chat_rounds_cap) document.getElementById('cfgChatCap').value = caps.daily_chat_rounds_cap;
+        // 筛选条件 — 从API已保存配置同步
+        if (filterCfg.min_degree_default !== undefined) {
+            document.getElementById('cfgMinDegree').value = filterCfg.min_degree_default;
+        }
+        if (filterCfg.min_years_default !== undefined) {
+            document.getElementById('cfgMinYears').value = filterCfg.min_years_default;
+        }
+        if (caps.daily_contact_cap !== undefined) {
+            document.getElementById('cfgDailyCap').value = caps.daily_contact_cap;
+        }
+        if (caps.daily_chat_rounds_cap !== undefined) {
+            document.getElementById('cfgChatCap').value = caps.daily_chat_rounds_cap;
+        }
+        // 学校白名单 — 从saved配置读取
+        const saved = filterCfg.saved || {};
+        const schEl = document.getElementById('cfgSchoolWhitelist');
+        if (schEl) {
+            if (saved.school_whitelist && Array.isArray(saved.school_whitelist) && saved.school_whitelist.length > 0) {
+                schEl.value = saved.school_whitelist.join(',');
+            } else if (filterCfg.school_whitelist && filterCfg.school_whitelist.all) {
+                // 没有自定义白名单时显示默认名校数量
+                schEl.placeholder = `默认${filterCfg.school_whitelist.all.length}所名校（留空使用默认）`;
+            }
+        }
+        // 同步状态提示
+        const syncEl = document.getElementById('cfgSyncStatus');
+        if (syncEl) syncEl.textContent = '✅ 已同步服务端配置';
+
+        // 模板列表
         const tpls = templates.templates || [];
         document.getElementById('tplList').innerHTML = tpls.length
             ? tpls.map(t => `<div style="padding:4px 0;border-bottom:1px solid var(--border)"><b>${esc(t.name)}</b>: ${esc((t.content || '').slice(0, 80))}...</div>`).join('')
@@ -649,10 +705,13 @@ async function loadConfig() {
 }
 async function saveFilterConfig() {
     try {
+        const schVal = document.getElementById('cfgSchoolWhitelist').value;
+        const schoolList = schVal ? schVal.split(',').map(s => s.trim()).filter(s => s) : [];
         const cfg = {
             min_degree: document.getElementById('cfgMinDegree').value,
             min_years: parseInt(document.getElementById('cfgMinYears').value) || 3,
             daily_cap: parseInt(document.getElementById('cfgDailyCap').value) || 80,
+            school_whitelist: schoolList,
         };
         await apiCall('/api/filter/config', cfg, 'PUT');
         // Also save daily caps separately
@@ -660,8 +719,35 @@ async function saveFilterConfig() {
             daily_contact_cap: cfg.daily_cap,
             daily_chat_rounds_cap: parseInt(document.getElementById('cfgChatCap').value) || 5,
         }, 'PUT');
-        log('配置已保存', 'success');
+        log('✅ 配置已保存并同步到服务端', 'success');
+        const syncEl = document.getElementById('cfgSyncStatus');
+        if (syncEl) syncEl.textContent = '✅ 已保存';
     } catch (e) { log('保存失败: ' + e.message, 'error'); }
+}
+
+// ── 弹出大文本编辑器 ──
+function openCfgTextEditor(inputId, title) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    _cfgEditorTarget = inputId;
+    document.getElementById('cfgEditorTitle').textContent = title || '编辑';
+    const area = document.getElementById('cfgEditorArea');
+    area.value = input.value || '';
+    const overlay = document.getElementById('cfgTextEditorOverlay');
+    overlay.style.display = 'flex';
+    area.focus();
+}
+function closeCfgTextEditor() {
+    document.getElementById('cfgTextEditorOverlay').style.display = 'none';
+    _cfgEditorTarget = null;
+}
+function confirmCfgTextEditor() {
+    if (_cfgEditorTarget) {
+        const area = document.getElementById('cfgEditorArea');
+        const input = document.getElementById(_cfgEditorTarget);
+        if (area && input) input.value = area.value;
+    }
+    closeCfgTextEditor();
 }
 async function saveTemplate() {
     const name = document.getElementById('tplName').value;
