@@ -43,7 +43,8 @@ fi
 # Dashboard (templates/index.html → port 3000 → 外部8321)
 echo "📊 Dashboard: http://localhost:8321"
 mkdir -p /app/dashboard
-cp /app/templates/index.html /app/dashboard/index.html
+# 符号链接使 volume 挂载的模板变更实时生效
+ln -sf /app/templates/index.html /app/dashboard/index.html
 # 复制 noVNC JS（http.server 不跟踪 symlink）
 cp -r /usr/share/novnc /app/dashboard/novnc
 cd /app/dashboard
