@@ -1267,13 +1267,13 @@ async def get_filter_status(task_id: str, current_user: dict = Depends(verify_to
 @app.get("/api/filter/config")
 async def get_filter_config(current_user: dict = Depends(verify_token)):
     """
-    获取筛选配置
+    获取筛选配置（合并数据库已保存配置 + 默认值）
 
     返回:
-        默认的学校白名单（国内+海外名校）、学历选项、工作年限选项、
-        以及可扩展的筛选维度
+        学校白名单、学历选项、工作年限选项、以及当前生效的筛选参数
     """
-    return {
+    # 默认值
+    result = {
         "school_whitelist": {
             "domestic": DOMESTIC_ELITE_SCHOOLS,
             "us": US_ELITE_SCHOOLS,
@@ -1287,7 +1287,6 @@ async def get_filter_config(current_user: dict = Depends(verify_token)):
         "min_years_default": 3,
         "daily_cap_default": 80,
         "daily_cap_range": [10, 20, 50, 80, 100, 150],
-        # 可扩展的筛选维度（当前全部可选）
         "available_filters": [
             {"key": "school_whitelist", "label": "学校白名单", "type": "multi_select", "enabled": True},
             {"key": "min_degree", "label": "最低学历", "type": "select", "enabled": True},
@@ -1298,6 +1297,32 @@ async def get_filter_config(current_user: dict = Depends(verify_token)):
             {"key": "job_title_keywords", "label": "职位关键词", "type": "multi_select", "enabled": False, "note": "后续扩展"},
         ],
     }
+
+    # 从 runtime_state 读取已保存的配置，覆盖默认值
+    try:
+        conn = get_db()
+        row = conn.execute(
+            "SELECT value FROM runtime_state WHERE key = ?", ("filter_config",)
+        ).fetchone()
+        conn.close()
+        if row:
+            saved = json.loads(row[0])
+            # 用已保存的值覆盖对应默认值
+            if "min_degree" in saved:
+                result["min_degree_default"] = saved["min_degree"]
+            if "min_years" in saved:
+                result["min_years_default"] = saved["min_years"]
+            if "daily_cap" in saved:
+                result["daily_cap_default"] = saved["daily_cap"]
+            # 如果保存了自定义学校白名单，也返回
+            if "school_whitelist" in saved and isinstance(saved["school_whitelist"], list):
+                result["saved_school_whitelist"] = saved["school_whitelist"]
+            # 保留完整的 saved config 供前端同步
+            result["saved"] = saved
+    except Exception as e:
+        api_logger.warning(f"读取已保存筛选配置失败(使用默认值): {e}")
+
+    return result
 
 
 @app.put("/api/filter/config")

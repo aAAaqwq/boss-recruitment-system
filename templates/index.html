@@ -1243,6 +1243,7 @@
 
         // ── Config ──
         function loadConfig() {
+            // 1. 先从 localStorage 加载本地缓存
             try {
                 const saved = localStorage.getItem('bossConfig');
                 if (saved) {
@@ -1252,8 +1253,18 @@
                     config.templates = { ...config.templates, ...(parsed.templates || {}) };
                 }
             } catch (e) {
-                console.warn('Config load failed, using defaults:', e);
+                console.warn('Local config load failed, using defaults:', e);
             }
+
+            // 2. 从 API 加载服务端已保存的配置（覆盖本地默认值）
+            loadConfigFromAPI();
+
+            // 3. 用当前 config 填充表单
+            applyConfigToForm();
+            renderPositionList();
+        }
+
+        function applyConfigToForm() {
             document.getElementById('degreeFilter').value = config.filter.degree || '';
             document.getElementById('yearsMin').value = config.filter.yearsMin || 0;
             document.getElementById('yearsMax').value = config.filter.yearsMax || 100;
@@ -1263,7 +1274,44 @@
             document.getElementById('helloTemplate').value = config.templates.hello || '';
             document.getElementById('resumeTemplate').value = config.templates.resume || '';
             document.getElementById('followTemplate').value = config.templates.follow || '';
-            renderPositionList();
+        }
+
+        async function loadConfigFromAPI() {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                const resp = await fetch('/api/filter/config', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!resp.ok) return;
+                const apiCfg = await resp.json();
+                const saved = apiCfg.saved || {};
+
+                // 用 API 已保存的值覆盖 config（优先级: API > localStorage > 默认）
+                if (saved.min_degree !== undefined) config.filter.degree = saved.min_degree;
+                if (saved.min_years !== undefined) config.filter.yearsMin = saved.min_years;
+                if (saved.school_whitelist && Array.isArray(saved.school_whitelist) && saved.school_whitelist.length > 0) {
+                    config.filter.schoolWhitelist = saved.school_whitelist.join(',');
+                }
+                if (saved.daily_cap !== undefined) config.filter.dailyCap = saved.daily_cap;
+
+                // 也读 daily-caps
+                try {
+                    const capsResp = await fetch('/api/config/daily-caps', {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    });
+                    if (capsResp.ok) {
+                        const caps = await capsResp.json();
+                        if (caps.daily_contact_cap) config.filter.dailyCap = caps.daily_contact_cap;
+                    }
+                } catch (e) { /* ignore */ }
+
+                // 更新表单
+                applyConfigToForm();
+                log('已同步服务端筛选配置', 'info');
+            } catch (e) {
+                console.warn('API config load failed:', e);
+            }
         }
 
         function saveConfig() {
@@ -1414,9 +1462,47 @@
             config.filter.schoolWhitelist = document.getElementById('schoolWhitelist').value;
             config.filter.requireKeywords = document.getElementById('requireKeywords').value;
             config.filter.excludeKeywords = document.getElementById('excludeKeywords').value;
+            // 保存到 localStorage
             saveConfig();
+
+            // 同步保存到服务端 API
+            saveFilterConfigToAPI();
+
             log('✅ 筛选配置已保存', 'info');
             flashSave(event && event.target ? event.target.closest('.btn') : null, '已保存');
+        }
+
+        async function saveFilterConfigToAPI() {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                // 解析学校白名单: 逗号分隔 → 数组
+                let schoolList = [];
+                if (config.filter.schoolWhitelist) {
+                    schoolList = config.filter.schoolWhitelist.split(',').map(s => s.trim()).filter(s => s);
+                }
+                const payload = {
+                    min_degree: config.filter.degree || '',
+                    min_years: config.filter.yearsMin || 0,
+                    daily_cap: config.filter.dailyCap || 80,
+                    school_whitelist: schoolList,
+                };
+                const resp = await fetch('/api/filter/config', {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+                if (resp.ok) {
+                    log('✅ 筛选配置已同步到服务端', 'info');
+                } else {
+                    console.warn('API save failed:', resp.status);
+                }
+            } catch (e) {
+                console.warn('Failed to sync config to API:', e);
+            }
         }
 
         function saveTemplateConfig() {
