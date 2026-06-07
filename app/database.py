@@ -114,6 +114,19 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_resume_candidate ON resume_operations(candidate_name)"
         )
 
+        # conversations表（F7 对话记录）
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                candidate_name TEXT,
+                action TEXT,
+                ai_message TEXT,
+                candidate_message TEXT,
+                detail TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         self.conn.commit()
     
     # ========== 候选人操作 ==========

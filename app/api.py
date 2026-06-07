@@ -327,6 +327,8 @@ async def api_health():
 # ============================================================
 class WorkflowRequest(BaseModel):
     limit: int = 10
+    dry_run: bool = False
+    custom_template: Optional[str] = None
 
 
 # ============================================================
@@ -610,7 +612,7 @@ async def reply_messages(req: WorkflowRequest, current_user: dict = Depends(veri
     import threading as _th
     _th.Thread(
         target=_run_reply_in_thread,
-        args=(req.limit,),
+        args=(req.limit, req.dry_run, req.custom_template),
         daemon=True,
     ).start()
 
@@ -620,7 +622,7 @@ async def reply_messages(req: WorkflowRequest, current_user: dict = Depends(veri
     }
 
 
-def _run_reply_in_thread(max_count: int):
+def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template: Optional[str] = None):
     """在独立线程中运行批量回复工作流"""
     global _reply_task_status, _active_task_type
     import asyncio as _asyncio
@@ -647,8 +649,8 @@ def _run_reply_in_thread(max_count: int):
 
             result = await _batch_reply_impl(
                 max_count=max_count,
-                template=None,
-                dry_run=False,
+                template=custom_template,
+                dry_run=dry_run,
             )
 
             _reply_task_status["status"] = result.get("status", "completed")
@@ -1349,7 +1351,11 @@ async def batch_reply_messages(
     保留此路由以兼容前端调用，返回任务启动状态。
     """
     # 直接委托到线程执行的 F7 工作流
-    workflow_req = WorkflowRequest(limit=req.limit)
+    workflow_req = WorkflowRequest(
+        limit=req.limit,
+        dry_run=req.dry_run,
+        custom_template=req.custom_template,
+    )
     return await reply_messages(workflow_req, current_user=current_user)
 
 

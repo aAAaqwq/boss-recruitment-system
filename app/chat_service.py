@@ -6,7 +6,6 @@ import json
 import httpx
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
-from pathlib import Path
 
 from app.config import settings
 from app.database import Database
@@ -28,8 +27,9 @@ class ChatService:
         self,
         candidate_name: str,
         candidate_message: str,
-        history: List[Dict] = None,
-        template: str = None
+        history: Optional[List[Dict]] = None,
+        template: Optional[str] = None,
+        stage_context: Optional[str] = None,
     ) -> Tuple[Optional[str], str]:
         """
         使用DeepSeek生成回复
@@ -39,6 +39,7 @@ class ChatService:
             candidate_message: 候选人最新消息
             history: 对话历史 [{"role": "assistant", "content": "..."}]
             template: 自定义回复模板（优先使用）
+            stage_context: 对话阶段上下文（注入system prompt）
 
         Returns:
             (reply_content, error_message)
@@ -59,12 +60,21 @@ class ChatService:
             "5. 根据候选人问题进行针对性回复\n"
         )
 
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.append({"role": "user", "content": f"候选人({candidate_name})说：{candidate_message}"})
+        # 注入对话阶段上下文
+        if stage_context:
+            system_prompt += f"\n--- 当前对话阶段信息 ---\n{stage_context}\n"
 
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # 注入历史对话（先于当前消息，保持时序）
         if history:
             for turn in history[-10:]:
                 messages.append({"role": turn["role"], "content": turn["content"]})
+
+        messages.append({
+            "role": "user",
+            "content": f"候选人({candidate_name})说：{candidate_message}",
+        })
 
         try:
             response = await self.client.post(
@@ -153,7 +163,7 @@ class ChatService:
 
     def get_conversation_history(
         self,
-        candidate_name: str = None,
+        candidate_name: Optional[str] = None,
         limit: int = 50
     ) -> List[Dict]:
         """

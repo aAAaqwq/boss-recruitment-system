@@ -55,7 +55,7 @@
 
 - **反检测**: ✅✅✅ 完美（纯操作系统层操作，浏览器完全无感知）
 - **精确度**: ❌ 脆弱（依赖坐标和 OCR，分辨率/UI 变化就失效）
-- **已有代码**: `app/screen.py` + `app/vision.py`
+- **已有代码**: `app/screen.py` / `app/vision.py` (已归档到 _archive/)
 - **淘汰原因**: 维护成本高，BOSS 改版 UI 就需要重新调坐标
 
 #### 方案 E: CDP + X11 混合
@@ -115,10 +115,16 @@
 |--------|------|
 | 移除 Playwright 依赖 | `requirements.txt` 删除 `playwright`，Dockerfile 不再 `playwright install chromium` |
 | 移除 `app/browser_manager.py` | 基于 Playwright 的浏览器管理器，改用 nodriver 重写 |
-| 保留 `app/screen.py` + `app/vision.py` | 作为备用/调试工具，不作为主操控路径 |
+| 保留 `app/screen.py` / `app/vision.py` | 已归档到 _archive/ 作为历史参考 |
 | 保留 `app/workflows.py` | 业务逻辑不变，底层调用从 Playwright API 改为 nodriver API |
-| Dockerfile 简化 | 不需要 Playwright Chromium，使用系统 Chromium 即可 |
+| Dockerfile Stage 2 | Playwright 安装是过渡依赖 — nodriver 启动 Chrome 依赖其安装的 Chromium 二进制 |
 | `app/api.py` 浏览器端点 | `/api/browser/*` 系列端点改用 nodriver 实现 |
+
+### Cookie 持久化安全策略
+
+- Cookie 备份机制: `export_cookies()` 导出 → `import_cookies()` 恢复
+- 安全策略: 只在有认证 cookie (last_steemed_token/CL指纹) 时才覆盖 `cookies.json` 备份文件
+- 防止清空: 避免空登录态覆盖已有有效 cookie
 
 ### 未来可选增强
 
@@ -309,7 +315,7 @@ _archive/
 
 **Phase 1 完成标志**: 用户打开 Dashboard → 点击连接VNC → 看到桌面 → 点击打开Boss直聘 → VNC 里看到 Chrome 显示 zhipin.com
 
-### Phase 2: 业务自动化（F4-F6）
+### Phase 2: 业务自动化（F4-F7）
 
 > 在 Phase 1 基础上叠加自动化能力
 
@@ -317,7 +323,9 @@ _archive/
 |------|---------|------|
 | Boss直聘登录 | F4 | 点击登录按钮 → 扫码/密码登录（需人工介入） |
 | 批量主动打招呼 | F5 | 扫描候选人 → 学校白名单筛选 → 批量打招呼 |
-| 批量获取简历 + 聊天回复 | F6 | 下载简历 + AI(DeepSeek)多轮对话 |
+| 批量获取简历 + 聊天回复 | F6/F7 | F6下载简历 + F7 AI(DeepSeek)批量回复 |
+
+**Phase 2 完成标志**: F6简历收集和F7批量AI回复已开发完成并验收 (2026-06-05)
 
 ### 理由
 

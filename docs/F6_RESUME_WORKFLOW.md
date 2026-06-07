@@ -11,12 +11,17 @@
    └─ _browser_task_lock.acquire(blocking=False)
        失败 → 返回"浏览器正被 {task} 占用"
 
-2. 连接浏览器 + 登录检查
-   ├─ automation.reset_for_thread()  (线程安全重置)
-   ├─ automation.connect() → nodriver CDP (port 9222)
-   └─ check_login()
-       ├─ 已登录 → 继续
-       └─ 未登录 → 返回"请先在VNC中扫码登录"
+2. 连接浏览器 + 登录检查 (拆分为两层)
+   │
+   ├─ API层: _run_resume_in_thread 负责
+   │  ├─ automation.reset_for_thread()  (线程安全重置)
+   │  ├─ automation.connect() → nodriver CDP (port 9222)
+   │  └─ automation.import_cookies()   (恢复登录态)
+   │
+   └─ 业务层: collect_resumes() 负责
+      └─ _ensure_session() → check_login()
+          ├─ 已登录 → 继续
+          └─ 未登录 → 返回"请先在VNC中扫码登录"
 
 3. 启用 CDP 下载拦截
    └─ enable_download_interception(data/resumes/)
@@ -45,7 +50,7 @@
    │
    ├─ 6c. 查找简历按钮 (_JS_FIND_RESUME_BTNS)
    │      ├─ 选择器: 在聊天详情区域查找
-   │      ├─ 精确匹配: '在线简历' / '附件简历' / '查看简历'
+   │      ├─ 精确匹配: '在线简历' / '附件简历' / '查看简历' / '查看附件'
    │      └─ 无按钮 → 跳过 (no_resume_btn)
    │
    ├─ 6d. 点击"附件简历"按钮 → BOSS自动处理4种情况:
@@ -53,9 +58,10 @@
    │      ├─ Case-1: PDF预览弹出 → 对方已发附件简历 ✅
    │      │   ├─ 等待PDF渲染完成
    │      │   ├─ 查找下载按钮 ('下载'/'保存'/'导出')
-   │      │   ├─ 点击下载 → CDP拦截保存到 data/resumes/
-   │      │   ├─ 验证: 对比前后文件列表
-   │      │   └─ db.insert_resume_op(action="downloaded")
+   │      │   ├─ 有下载按钮 → 点击下载 → CDP拦截保存到 data/resumes/
+   │      │   │   ├─ 验证: 对比前后文件列表
+   │      │   │   └─ db.insert_resume_op(action="downloaded")
+   │      │   └─ 无下载按钮 → 记录 online_resume_viewed/action=viewed
    │      │
    │      ├─ Case-2: "向牛人请求简历"弹窗 → 已沟通未发简历 ⏳
    │      │   ├─ 点击"确认"/"确定"按钮
@@ -71,7 +77,7 @@
    ├─ 6e. 关闭简历预览
    │      └─ automation.press_key("Escape")
    │
-   └─ 6f. 每3次操作截图一次
+   └─ 6f. 每3次下载或失败后截图一次
 
 7. 释放浏览器任务锁
    └─ _browser_task_lock.release()
@@ -207,8 +213,8 @@ nodriver CDP 命令: Page.setDownloadBehavior
 
 ## 已知问题
 
+- ~~Case-3/4 未实现精确检测~~ (已修复: 精确匹配"附件简历请求中"/"双方回复后可以向TA请求"文本)
 - Case-2 确认索取后PDF可能不弹出，只能记录 "requested"
-- Case-3/4 未实现精确检测，当前仅记录为 "no_resume_btn"
 - 在线简历（无附件）只能记录为 "requested"，无法下载文件
 - Chrome 版本差异可能导致 `Page.setDownloadBehavior` 降级
 - 候选人姓名可能重复（BOSS 显示名不是唯一标识，应提取 data-id）

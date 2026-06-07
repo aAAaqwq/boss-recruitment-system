@@ -755,12 +755,12 @@ class BrowserAutomation:
         # 生成贝塞尔路径
         path = self._generate_bezier_path((current_x, current_y), (x, y))
 
-        # 沿路径移动
+        # 沿路径移动（不使用 --sync，避免在 Docker VNC 环境中超时）
         for px, py in path:
             subprocess.run(
-                ["xdotool", "mousemove", "--sync", str(px), str(py)],
+                ["xdotool", "mousemove", str(px), str(py)],
                 env={**os.environ, "DISPLAY": self._display},
-                timeout=5
+                timeout=3
             )
             # 随机延迟 10-30ms
             await asyncio.sleep(random.uniform(0.01, 0.03))
@@ -808,6 +808,76 @@ class BrowserAutomation:
             timeout=10
         )
         await asyncio.sleep(random.uniform(0.3, 0.8))
+
+    # ===== 屏幕/视口坐标偏移 =====
+
+    async def get_chrome_offset(self) -> Tuple[int, int]:
+        """计算浏览器视口坐标到屏幕坐标的偏移量。
+
+        getBoundingClientRect() 返回视口坐标，
+        xdotool 使用屏幕坐标。两者之间的差值 = 浏览器 chrome 高度 + 窗口位置偏移。
+
+        Returns:
+            (offset_x, offset_y) 屏幕坐标偏移
+        """
+        try:
+            js_result = await self.execute_js(
+                "JSON.stringify({sx: window.screenX, sy: window.screenY, "
+                "innerH: window.innerHeight, outerH: window.outerHeight})"
+            )
+            if isinstance(js_result, str):
+                js_result = json.loads(js_result)
+            offset_x = int(js_result.get("sx", 0))
+            # Y偏移 = 窗口Y位置 + (窗口高度 - 视口高度) = 窗口Y + chrome高度
+            offset_y = int(js_result.get("sy", 0)) + (
+                int(js_result.get("outerH", 720)) - int(js_result.get("innerH", 629))
+            )
+            logger.info(f"Chrome偏移: x={offset_x}, y={offset_y}")
+            return (offset_x, offset_y)
+        except Exception as e:
+            logger.warning(f"获取chrome偏移失败，使用默认值(0,118): {e}")
+            return (0, 118)  # Docker默认值
+
+    # ===== CDP 原生点击（绕过JS事件系统，直接通过浏览器输入管道） =====
+
+    async def cdp_click_viewport(self, x: float, y: float) -> bool:
+        """通过 CDP Input.dispatchMouseEvent 在视口坐标处执行真实点击。
+
+        与 JS 的 element.click() 或 dispatchEvent 不同，CDP 的
+        dispatchMouseEvent 走浏览器原生输入管道，能正确触发 React
+        等框架的事件处理器。坐标为视口坐标（getBoundingClientRect 返回的）。
+
+        Args:
+            x: 视口X坐标
+            y: 视口Y坐标
+
+        Returns:
+            True 成功，False 失败
+        """
+        if not await self._ensure_session():
+            return False
+        try:
+            from nodriver.cdp import input_ as cdp_input
+
+            # mousePressed
+            await self.page.send(cdp_input.dispatch_mouse_event(
+                type_="mousePressed",
+                x=x, y=y,
+                button=cdp_input.MouseButton.LEFT,
+                click_count=1,
+            ))
+            await asyncio.sleep(0.05)
+            # mouseReleased
+            await self.page.send(cdp_input.dispatch_mouse_event(
+                type_="mouseReleased",
+                x=x, y=y,
+                button=cdp_input.MouseButton.LEFT,
+                click_count=1,
+            ))
+            return True
+        except Exception as e:
+            logger.warning(f"CDP点击失败: {e}")
+            return False
 
     # ===== 线程安全重置 =====
 

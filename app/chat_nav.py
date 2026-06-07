@@ -3,7 +3,8 @@ BOSS直聘 Chat 页面导航辅助函数
 处理 SPA 导航（点击左侧"沟通"按钮进入聊天页）
 """
 import asyncio
-from typing import Dict
+import json
+from typing import Dict, List, Optional, Any
 
 from app.automation import automation
 from app.logging_config import logger
@@ -174,6 +175,86 @@ _JS_FIND_INPUT_AREA = """
 })()
 """
 
+# 限制弹窗关键词 — 检测 BOSS "已达上限" 等限制提示
+LIMIT_KEYWORDS = [
+    "已达上限", "次数已用完", "今日已达", "已达每日",
+    "沟通人数已达", "打招呼次数", "超出限制",
+    "明天再来", "今日上限", "已达当天",
+    "每天最多", "上限了", "用完了", "今日沟通",
+    "权益不足", "开料次数", "剩余次数", "次数不足",
+    "会员权益", "升级会员", "额度不足", "免费次数",
+    "今日剩余",
+]
+
+# JS: 检测限制弹窗 — 扫描可见弹窗/对话框/提示中的关键词
+_JS_CHECK_LIMIT_POPUP = """
+(function() {
+    var keywords = %s;
+    var texts = [];
+    document.querySelectorAll(
+        '[class*=toast], [class*=popup], [class*=modal], [class*=dialog], '
+        + '[class*=notice], [class*=tip], [class*=message], [class*=snackbar], '
+        + '[class*=alert], [class*=confirm], [class*=overlay], [class*=mask], '
+        + '[class*=backdrop], [class*=wrapper]'
+    ).forEach(function(el) {
+        var style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return;
+        var rect = el.getBoundingClientRect();
+        if (rect.width < 50 || rect.height < 10) return;
+        var t = (el.textContent || '').trim();
+        if (t.length > 2 && t.length < 200) texts.push(t);
+    });
+    for (var i = 0; i < texts.length; i++) {
+        for (var j = 0; j < keywords.length; j++) {
+            if (texts[i].indexOf(keywords[j]) >= 0) {
+                return JSON.stringify({hit: true, keyword: keywords[j], text: texts[i]});
+            }
+        }
+    }
+    return JSON.stringify({hit: false});
+})()
+""" % json.dumps(LIMIT_KEYWORDS)
+
+# JS: 关闭弹窗 — 移除 fixed 定位的遮罩层
+_JS_DISMISS_POPUP = """
+(function() {
+    var removed = 0;
+    document.querySelectorAll(
+        '.dialog-wrap, [class*=overlay], [class*=mask], [class*=backdrop], '
+        + '.boss-popup__wrapper, [class*=modal]'
+    ).forEach(function(el) {
+        var s = getComputedStyle(el);
+        if ((s.position === 'fixed' || parseInt(s.zIndex) > 100) && s.display !== 'none') {
+            el.remove(); removed++;
+        }
+    });
+    return removed;
+})()
+"""
+
+# JS: 清空输入框 — 聚焦 + 全选 + 删除，兼容 React/Vue 受控组件
+_JS_CLEAR_INPUT = """
+(function() {
+    var el = document.querySelector(
+        'textarea, [contenteditable="true"], [class*="chat-input"], [class*="input-box"]'
+    );
+    if (!el) return JSON.stringify({ok: false, reason: 'not_found'});
+    el.focus();
+    el.dispatchEvent(new Event('focus', {bubbles: true}));
+    // Select all
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+        el.setSelectionRange(0, el.value.length);
+    } else if (el.contentEditable === 'true') {
+        var range = document.createRange();
+        range.selectNodeContents(el);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+    return JSON.stringify({ok: true});
+})()
+"""
+
 
 async def navigate_to_chat() -> Dict:
     """导航到BOSS直聘聊天页（通过点击左侧"沟通"按钮）
@@ -197,7 +278,7 @@ async def navigate_to_chat() -> Dict:
         clicked = None
     if not clicked or not clicked.get("found"):
         # 备用: 导航到推荐的页面（可能自动跳转到聊天）
-        await automation.navigate("https://www.zhipin.com/web/geek/chat")
+        await automation.navigate("https://www.zhipin.com/web/chat/index")
         await asyncio.sleep(3)
         clicked = await automation.execute_js(_JS_CLICK_CHAT_NAV)
         if not isinstance(clicked, dict):
@@ -218,28 +299,100 @@ async def navigate_to_chat() -> Dict:
         return {"status": "ok", "message": "已在聊天页(或无法确认)", "contact_count": contact_count}
 
 
-async def get_contacts() -> list:
+async def get_contacts() -> List[Dict[str, Any]]:
     """获取左侧联系人列表"""
     result = await automation.execute_js(_JS_GET_CONTACTS)
     return result if isinstance(result, list) else []
 
 
-async def get_messages() -> list:
+async def get_messages() -> List[Dict[str, Any]]:
     """获取当前聊天消息"""
     result = await automation.execute_js(_JS_GET_MESSAGES)
     return result if isinstance(result, list) else []
 
 
-async def find_input() -> dict:
+async def find_input() -> Dict[str, Any]:
     """查找输入框和发送按钮位置"""
     result = await automation.execute_js(_JS_FIND_INPUT_AREA)
     return result if isinstance(result, dict) else {"input": None, "send": None}
 
 
-async def has_unread() -> dict:
+async def has_unread() -> Dict[str, Any]:
     """检查是否有未读消息"""
     result = await automation.execute_js(_JS_HAS_UNREAD)
     return result if isinstance(result, dict) else {"hasUnread": False, "count": 0}
+
+
+async def check_limit_popup() -> Optional[str]:
+    """检测限制弹窗（BOSS "已达上限" 等提示）
+
+    扫描页面中所有可见弹窗/对话框/提示，匹配 20+ 限制关键词。
+
+    Returns:
+        匹配到的关键词，或 None 表示无限制弹窗
+    """
+    raw = await automation.execute_js(_JS_CHECK_LIMIT_POPUP)
+    if isinstance(raw, str):
+        try:
+            result = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    elif isinstance(raw, dict):
+        result = raw
+    else:
+        return None
+
+    if result.get("hit"):
+        keyword = result.get("keyword", "")
+        logger.warning(f"[ChatNav] 检测到限制弹窗: {keyword}")
+        return keyword
+    return None
+
+
+async def dismiss_popup() -> None:
+    """关闭弹窗 — 移除 fixed 定位的遮罩层 + 按 Escape"""
+    try:
+        await automation.execute_js(_JS_DISMISS_POPUP)
+        await asyncio.sleep(0.3)
+        await automation.press_key("Escape")
+        await asyncio.sleep(0.3)
+    except Exception as e:
+        logger.warning(f"[ChatNav] 关闭弹窗失败: {e}")
+
+
+async def clear_input() -> bool:
+    """清空聊天输入框（兼容 React/Vue 受控组件）
+
+    先用 JS 聚焦输入框并全选内容，再用 Cmd+A + Delete 删除。
+    比 el.value='' 更可靠，能触发框架内部状态更新。
+
+    Returns:
+        True 表示清空成功
+    """
+    try:
+        # JS 层面聚焦 + 全选
+        raw = await automation.execute_js(_JS_CLEAR_INPUT)
+        if isinstance(raw, str):
+            try:
+                result = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                result = {}
+        elif isinstance(raw, dict):
+            result = raw
+        else:
+            result = {}
+
+        if not result.get("ok"):
+            logger.debug(f"[ChatNav] 清空输入框: {result.get('reason', 'unknown')}")
+            return False
+
+        # 系统级删除（JS已全选，BackSpace清空选中内容）
+        await automation.press_key("BackSpace")
+        await asyncio.sleep(0.2)
+        return True
+    except Exception as e:
+        logger.warning(f"[ChatNav] 清空输入框失败: {e}")
+        return False
 
 
 async def click_contact(name: str, x: float, y: float) -> bool:
@@ -254,7 +407,7 @@ async def click_contact(name: str, x: float, y: float) -> bool:
 
 
 async def type_and_send(message: str) -> Dict:
-    """在输入框中输入消息并点击发送"""
+    """在输入框中输入消息并点击发送（先清空残留文本）"""
     input_info = await find_input()
     send_info = input_info.get("send")
     input_pos = input_info.get("input")
@@ -265,9 +418,13 @@ async def type_and_send(message: str) -> Dict:
     try:
         # 点击输入框
         await automation.click(int(input_pos["x"]), int(input_pos["y"]))
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
-        # 清空并输入消息
+        # 清空残留文本（兼容 React/Vue 受控组件）
+        await clear_input()
+        await asyncio.sleep(0.2)
+
+        # 输入消息
         await automation.type_text(message)
         await asyncio.sleep(0.5)
 
