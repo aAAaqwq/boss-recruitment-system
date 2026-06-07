@@ -22,7 +22,7 @@
 
         --text: #e8eaed;
         --text-secondary: #bdc1c6;
-        --text-muted: #8b9097;
+        --text-muted: #92979e;
 
         --accent: #8ab4f8;
         --accent-light: #aecbfa;
@@ -59,6 +59,24 @@
 
     /* ── Reset ── */
     *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    /* ── Focus Visible (Accessibility) ── */
+    :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+    .btn:focus-visible { outline-offset: 1px; }
+
+    /* ── Deep Space Glow ── */
+    body::before {
+        content: '';
+        position: fixed;
+        top: -20%; left: -10%;
+        width: 60%; height: 60%;
+        background: radial-gradient(ellipse at center, rgba(138,180,248,.03) 0%, transparent 70%);
+        pointer-events: none;
+        z-index: 0;
+    }
 
     /* ── Layout Grid ── */
     body {
@@ -132,7 +150,7 @@
         color: var(--text);
     }
     .logo-sub {
-        font-size: 11px;
+        font-size: 12px;
         color: var(--text-secondary);
         letter-spacing: .3px;
     }
@@ -190,7 +208,7 @@
         gap: 5px;
     }
     .h-input {
-        width: 80px;
+        width: 100px;
         padding: 5px 8px;
         background: var(--bg-elevated);
         border: 1px solid var(--border-default);
@@ -295,6 +313,10 @@
         opacity: 1;
         padding-top: 8px;
         padding-bottom: 8px;
+    }
+
+    .task-bar:not(.active) .task-bar-fill::after {
+        animation: none;
     }
     .task-bar-info {
         display: flex;
@@ -415,7 +437,7 @@
         color: var(--text-muted);
         gap: 12px;
     }
-    .vnc-placeholder svg { width: 64px; height: 64px; opacity: .35; }
+    .vnc-placeholder svg { width: 72px; height: 64px; opacity: .35; }
     .vnc-placeholder p { font-size: 13px; }
     .vnc-iframe {
         width: 100%; height: 100%;
@@ -547,7 +569,7 @@
         margin-bottom: 6px;
     }
     .input-row input[type="number"] {
-        width: 64px;
+        width: 72px;
         padding: 8px 8px;
         background: var(--bg-elevated);
         border: 1px solid var(--border-default);
@@ -606,7 +628,7 @@
         background: var(--bg-base);
         border: 1px solid var(--border-default);
         border-radius: var(--radius-sm);
-        padding: 8px 10px;
+        padding: 10px 12px;
         color: var(--text);
         font-size: 12px;
         font-family: var(--font-sans);
@@ -618,6 +640,10 @@
     .form-group textarea:focus {
         border-color: var(--accent);
         box-shadow: 0 0 0 2px var(--accent-bg);
+    }
+
+    .form-group select:hover {
+        border-color: var(--border-hover);
     }
     .form-group textarea {
         min-height: 64px;
@@ -727,7 +753,7 @@
         color: var(--text-muted);
     }
     .log-count {
-        font-size: 11px;
+        font-size: 12px;
         background: var(--bg-elevated);
         color: var(--text-secondary);
         padding: 1px 6px;
@@ -739,7 +765,7 @@
         background: none;
         border: 1px solid var(--border);
         color: var(--text-secondary);
-        font-size: 11px;
+        font-size: 12px;
         padding: 2px 8px;
         border-radius: 4px;
         cursor: pointer;
@@ -756,9 +782,9 @@
         overflow-y: auto;
         padding: 6px 14px 10px;
     }
-    .log-body::-webkit-scrollbar { width: 4px; }
+    .log-body::-webkit-scrollbar { width: 5px; }
     .log-body::-webkit-scrollbar-track { background: transparent; }
-    .log-body::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 2px; }
+    .log-body::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
 
     .log-line {
         margin: 2px 0;
@@ -766,6 +792,8 @@
         font-family: var(--font-mono);
         font-size: 12px;
         animation: logIn .15s var(--ease-out);
+        word-break: break-word;
+        overflow-wrap: break-word;
     }
     @keyframes logIn {
         from { opacity: 0; transform: translateX(-4px); }
