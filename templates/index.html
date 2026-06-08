@@ -838,6 +838,22 @@
         }
         body::before { display: none; }
     }
+
+    /* ── Tab Editor Styles ── */
+    .tab-btn.active {
+        color: var(--text) !important;
+        border-bottom-color: var(--accent) !important;
+    }
+    .tab-btn:hover {
+        color: var(--text) !important;
+    }
+    .tab-content {
+        animation: fadeIn 0.2s var(--ease-out);
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
     </style>
 </head>
 <body>
@@ -1141,7 +1157,16 @@
          JAVASCRIPT — All backend integration preserved
          ═══════════════════════════════════════════ -->
     <script>
-        const API_BASE = 'http://localhost:8002';
+        // API_BASE: 自动检测当前来源，兼容多端口访问 (8000/8001/3101/8321)
+        const API_BASE = (() => {
+            const origin = window.location.origin;
+            if (origin.includes('localhost')) {
+                const port = parseInt(new URL(origin).port) || 80;
+                if (port === 8001) return origin;  // 直连API
+                return 'http://localhost:8002';     // 通过API隧道
+            }
+            return 'http://localhost:8002';         // 默认
+        })();
         let vncConnected = false;
         let vncScale = 1;
         let authToken = localStorage.getItem('auth_token') || null;
@@ -1150,7 +1175,7 @@
                 degree: '',
                 yearsMin: 0,
                 yearsMax: 100,
-                schoolWhitelist: '',
+                schoolWhitelist: { domestic: [], international: [] },
                 requireKeywords: '',
                 excludeKeywords: ''
             },
@@ -1286,7 +1311,19 @@
             if (degEl) degEl.value = config.filter.degree || '';
             if (yrsMinEl) yrsMinEl.value = config.filter.yearsMin || 0;
             if (yrsMaxEl) yrsMaxEl.value = config.filter.yearsMax || 100;
-            if (schEl) schEl.value = config.filter.schoolWhitelist || '';
+            if (schEl) {
+                // 将分类对象合并为逗号分隔字符串显示
+                const sw = config.filter.schoolWhitelist;
+                if (sw && typeof sw === 'object') {
+                    const all = [
+                        ...(sw.domestic || []),
+                        ...(sw.international || [])
+                    ];
+                    schEl.value = all.join(',');
+                } else {
+                    schEl.value = sw || '';
+                }
+            }
             if (reqKwEl) reqKwEl.value = config.filter.requireKeywords || '';
             if (excKwEl) excKwEl.value = config.filter.excludeKeywords || '';
             if (helloEl) helloEl.value = config.templates.hello || '';
@@ -1300,37 +1337,100 @@
 
         async function loadConfigFromAPI() {
             try {
+                console.log('[DEBUG] 开始加载配置, API_BASE:', API_BASE);
                 const token = getAuthToken();
-                if (!token) return;
-                const resp = await fetch('/api/filter/config', {
-                    headers: { 'Authorization': 'Bearer ' + token }
-                });
-                if (!resp.ok) return;
-                const apiCfg = await resp.json();
-                const saved = apiCfg.saved || {};
+                console.log('[DEBUG] Token:', token ? '存在' : '不存在');
+                let apiCfg, saved;
 
-                // 用 API 已保存的值覆盖 config（优先级: API > localStorage > 默认）
-                if (saved.min_degree !== undefined && saved.min_degree !== '') config.filter.degree = saved.min_degree;
-                if (saved.min_years !== undefined) config.filter.yearsMin = saved.min_years;
-                if (saved.school_whitelist && Array.isArray(saved.school_whitelist) && saved.school_whitelist.length > 0) {
-                    config.filter.schoolWhitelist = saved.school_whitelist.join(',');
-                }
-                if (saved.daily_cap !== undefined) config.filter.dailyCap = saved.daily_cap;
-
-                // 也读 daily-caps
-                try {
-                    const capsResp = await fetch('/api/config/daily-caps', {
+                if (token) {
+                    // 已登录：获取用户已保存的配置
+                    console.log('[DEBUG] 发起请求:', `${API_BASE}/api/filter/config`);
+                    const resp = await fetch(`${API_BASE}/api/filter/config`, {
                         headers: { 'Authorization': 'Bearer ' + token }
                     });
-                    if (capsResp.ok) {
-                        const caps = await capsResp.json();
-                        if (caps.daily_contact_cap) config.filter.dailyCap = caps.daily_contact_cap;
+                    console.log('[DEBUG] 响应状态:', resp.status);
+                    if (!resp.ok) {
+                        console.error('[DEBUG] API请求失败:', resp.status, resp.statusText);
+                        return;
                     }
-                } catch (e) { /* ignore */ }
+                    apiCfg = await resp.json();
+                    saved = apiCfg.saved || {};
+
+                    // DEBUG: 诊断数据
+                    console.log('[DEBUG] API返回:', { saved, apiDefaultSchools: apiCfg.school_whitelist?.all?.length });
+
+                    // 用 API 已保存的值覆盖 config（优先级: API > localStorage > 默认）
+                    if (saved.min_degree !== undefined && saved.min_degree !== '') config.filter.degree = saved.min_degree;
+                    if (saved.min_years !== undefined) config.filter.yearsMin = saved.min_years;
+                    // 学校白名单：优先使用用户保存的，否则使用 API 返回的默认名校列表
+                    // 修复：即使 saved.school_whitelist 存在但为空，也使用 API 默认值
+                    // 学校白名单：保留分类结构，不合并
+                    if (saved.school_whitelist) {
+                        // 支持新旧两种格式
+                        if (typeof saved.school_whitelist === 'object') {
+                            // 向后兼容：旧4分类 → 合并 us/uk/other 到 international
+                            let intl = saved.school_whitelist.international || [];
+                            if (intl.length === 0 && (saved.school_whitelist.us || saved.school_whitelist.uk || saved.school_whitelist.other)) {
+                                intl = [
+                                    ...(saved.school_whitelist.us || []),
+                                    ...(saved.school_whitelist.uk || []),
+                                    ...(saved.school_whitelist.other || [])
+                                ];
+                            }
+                            config.filter.schoolWhitelist = {
+                                domestic: saved.school_whitelist.domestic || [],
+                                international: intl
+                            };
+                            console.log('[DEBUG] 使用已保存的分类学校白名单 (2分类, 国内:' + config.filter.schoolWhitelist.domestic.length + ' 国外:' + config.filter.schoolWhitelist.international.length + ')');
+                        } else if (Array.isArray(saved.school_whitelist)) {
+                            // 兼容旧格式：单数组，放入domestic
+                            config.filter.schoolWhitelist = {
+                                domestic: saved.school_whitelist,
+                                international: []
+                            };
+                            console.log('[DEBUG] 使用旧格式学校白名单，已迁移到domestic分类');
+                        }
+                    } else if (apiCfg.school_whitelist) {
+                        // 使用API默认分类白名单 + 向后兼容旧API格式
+                        let internationalSchools = apiCfg.school_whitelist.international || [];
+                        if (internationalSchools.length === 0 && (apiCfg.school_whitelist.us || apiCfg.school_whitelist.uk || apiCfg.school_whitelist.other)) {
+                            internationalSchools = [
+                                ...(apiCfg.school_whitelist.us || []),
+                                ...(apiCfg.school_whitelist.uk || []),
+                                ...(apiCfg.school_whitelist.other || [])
+                            ];
+                            console.log('[DEBUG] 旧API格式兼容: us+uk+other → international (' + internationalSchools.length + '所)');
+                        }
+                        config.filter.schoolWhitelist = {
+                            domestic: apiCfg.school_whitelist.domestic || [],
+                            international: internationalSchools
+                        };
+                        console.log('[DEBUG] 使用API默认2分类学校白名单 (国内:' + config.filter.schoolWhitelist.domestic.length + ' 国外:' + config.filter.schoolWhitelist.international.length + ')');
+                    } else {
+                        console.warn('[DEBUG] 无学校白名单数据可用');
+                    }
+                    if (saved.daily_cap !== undefined) config.filter.dailyCap = saved.daily_cap;
+
+                    // 也读 daily-caps
+                    try {
+                        const capsResp = await fetch(`${API_BASE}/api/config/daily-caps`, {
+                            headers: { 'Authorization': 'Bearer ' + token }
+                        });
+                        if (capsResp.ok) {
+                            const caps = await capsResp.json();
+                            if (caps.daily_contact_cap) config.filter.dailyCap = caps.daily_contact_cap;
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    log('✅ 已同步服务端筛选配置', 'info');
+                } else {
+                    // 未登录：只使用 localStorage 数据，不拉取 API 默认值（避免覆盖用户已保存配置）
+                    console.log('[DEBUG] 未登录，使用本地缓存配置');
+                    log('ℹ️ 未登录，使用本地配置（登录后可同步到服务端）', 'info');
+                }
 
                 // 更新表单
                 applyConfigToForm();
-                log('✅ 已同步服务端筛选配置', 'info');
             } catch (e) {
                 console.warn('API config load failed:', e);
             }
@@ -1345,37 +1445,165 @@
             const input = document.getElementById(inputId);
             if (!input) return;
 
-            // 创建遮罩和编辑器
             let overlay = document.getElementById('textEditorOverlay');
             if (overlay) overlay.remove();
+
+            // 检测是否为学校白名单编辑器
+            if (inputId === 'schoolWhitelist') {
+                // 学校白名单2分类编辑器（国内/国外）
+                const sw = config.filter.schoolWhitelist || { domestic: [], international: [] };
+                const domesticValue = Array.isArray(sw.domestic) ? sw.domestic.join(',') : '';
+                const internationalValue = Array.isArray(sw.international) ? sw.international.join(',') : '';
+
+                overlay = document.createElement('div');
+                overlay.id = 'textEditorOverlay';
+                overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+                overlay.innerHTML = `
+                    <div style="background:var(--bg-surface);border-radius:12px;padding:24px;width:90%;max-width:720px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                            <h3 style="margin:0;color:var(--text);font-size:16px;">${title}</h3>
+                            <button onclick="closeTextEditor()" style="background:none;border:none;color:var(--text-secondary);font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
+                        </div>
+
+                        <!-- Tab 切换：国内 / 国外 -->
+                        <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border-default);">
+                            <button class="tab-btn active" data-tab="domestic" onclick="switchTab('domestic')" style="padding:8px 16px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;font-size:13px;">🇨🇳 国内高校</button>
+                            <button class="tab-btn" data-tab="international" onclick="switchTab('international')" style="padding:8px 16px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;font-size:13px;">🌍 国外高校</button>
+                        </div>
+
+                        <!-- Tab 内容：国内 -->
+                        <div id="tab-domestic" class="tab-content" style="flex:1;display:block;">
+                            <div style="margin-bottom:8px;color:var(--text-secondary);font-size:12px;">国内高校列表（逗号分隔，如：清华大学,北京大学,浙江大学）</div>
+                            <textarea class="tab-textarea" data-category="domestic" style="flex:1;min-height:200px;width:100%;background:var(--bg-elevated);color:var(--text);border:1px solid var(--border-default);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${domesticValue.replace(/</g,'&lt;')}</textarea>
+                        </div>
+                        <!-- Tab 内容：国外 -->
+                        <div id="tab-international" class="tab-content" style="flex:1;display:none;">
+                            <div style="margin-bottom:8px;color:var(--text-secondary);font-size:12px;">国外高校列表（逗号分隔，如：Harvard University,MIT,Oxford）</div>
+                            <textarea class="tab-textarea" data-category="international" style="flex:1;min-height:200px;width:100%;background:var(--bg-elevated);color:var(--text);border:1px solid var(--border-default);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${internationalValue.replace(/</g,'&lt;')}</textarea>
+                        </div>
+
+                        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+                            <button onclick="closeTextEditor()" style="padding:8px 16px;border-radius:6px;background:var(--bg-elevated);color:var(--text-secondary);border:1px solid var(--border-default);cursor:pointer;">取消</button>
+                            <button onclick="confirmSchoolEditor()" style="padding:8px 20px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+
+                // 点击遮罩关闭
+                overlay.addEventListener('click', function(e) {
+                    if (e.target === overlay) closeTextEditor();
+                });
+
+                // 聚焦第一个文本框
+                const firstArea = overlay.querySelector('.tab-textarea');
+                if (firstArea) {
+                    firstArea.focus();
+                    firstArea.setSelectionRange(firstArea.value.length, firstArea.value.length);
+                }
+                return;
+            }
+
+            // 普通文本编辑器（原有逻辑）
+            let value = '';
+            if (inputId === 'requireKeywords' && config.filter.requireKeywords) {
+                value = config.filter.requireKeywords;
+            } else if (inputId === 'excludeKeywords' && config.filter.excludeKeywords) {
+                value = config.filter.excludeKeywords;
+            } else if (inputId === 'helloTemplate' && config.templates.hello) {
+                value = config.templates.hello;
+            } else if (inputId === 'resumeTemplate' && config.templates.resume) {
+                value = config.templates.resume;
+            } else if (inputId === 'followTemplate' && config.templates.follow) {
+                value = config.templates.follow;
+            } else {
+                value = input.value || '';
+            }
 
             overlay = document.createElement('div');
             overlay.id = 'textEditorOverlay';
             overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
             overlay.innerHTML = `
-                <div style="background:var(--bg-card,#1e1e2e);border-radius:12px;padding:24px;width:90%;max-width:680px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                <div style="background:var(--bg-surface);border-radius:12px;padding:24px;width:90%;max-width:680px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                        <h3 style="margin:0;color:var(--text-primary,#e0e0e0);font-size:16px;">${title}</h3>
-                        <button onclick="closeTextEditor()" style="background:none;border:none;color:var(--text-secondary,#888);font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
+                        <h3 style="margin:0;color:var(--text);font-size:16px;">${title}</h3>
+                        <button onclick="closeTextEditor()" style="background:none;border:none;color:var(--text-secondary);font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
                     </div>
-                    <textarea id="textEditorArea" style="flex:1;min-height:280px;width:100%;background:var(--bg-input,#2a2a3e);color:var(--text-primary,#e0e0e0);border:1px solid var(--border,#3a3a4e);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${(input.value || '').replace(/</g,'&lt;')}</textarea>
+                    <textarea id="textEditorArea" style="flex:1;min-height:280px;width:100%;background:var(--bg-elevated);color:var(--text);border:1px solid var(--border-default);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${value.replace(/</g,'&lt;')}</textarea>
                     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
-                        <button onclick="closeTextEditor()" style="padding:8px 16px;border-radius:6px;background:var(--bg-input,#2a2a3e);color:var(--text-secondary,#888);border:1px solid var(--border,#3a3a4e);cursor:pointer;">取消</button>
-                        <button onclick="confirmTextEditor('${inputId}')" style="padding:8px 20px;border-radius:6px;background:var(--accent,#6c5ce7);color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
+                        <button onclick="closeTextEditor()" style="padding:8px 16px;border-radius:6px;background:var(--bg-elevated);color:var(--text-secondary);border:1px solid var(--border-default);cursor:pointer;">取消</button>
+                        <button onclick="confirmTextEditor('${inputId}')" style="padding:8px 20px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
                     </div>
                 </div>
             `;
             document.body.appendChild(overlay);
 
-            // 点击遮罩关闭
             overlay.addEventListener('click', function(e) {
                 if (e.target === overlay) closeTextEditor();
             });
 
-            // 聚焦文本框
             const area = document.getElementById('textEditorArea');
             area.focus();
             area.setSelectionRange(area.value.length, area.value.length);
+        }
+
+        // Tab 切换函数
+        function switchTab(tabName) {
+            // 隐藏所有tab内容
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.style.display = 'none';
+            });
+            // 显示选中的tab内容
+            document.getElementById('tab-' + tabName).style.display = 'block';
+
+            // 更新按钮状态
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+                btn.style.borderBottomColor = 'transparent';
+                btn.style.color = 'var(--text-secondary)';
+            });
+            const activeBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+            activeBtn.classList.add('active');
+            activeBtn.style.borderBottomColor = 'var(--accent)';
+            activeBtn.style.color = 'var(--text)';
+
+            // 聚焦对应文本框
+            const textarea = document.querySelector(`.tab-textarea[data-category="${tabName}"]`);
+            if (textarea) {
+                textarea.focus();
+                textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+            }
+        }
+
+        // 学校白名单2分类编辑器确认函数
+        function confirmSchoolEditor() {
+            const domesticTextarea = document.querySelector('.tab-textarea[data-category="domestic"]');
+            const internationalTextarea = document.querySelector('.tab-textarea[data-category="international"]');
+
+            if (domesticTextarea && internationalTextarea) {
+                // 解析各分类的值
+                const parseList = (val) => val ? val.split(',').map(s => s.trim()).filter(s => s) : [];
+
+                config.filter.schoolWhitelist = {
+                    domestic: parseList(domesticTextarea.value),
+                    international: parseList(internationalTextarea.value)
+                };
+
+                // 更新表单显示（合并两个分类）
+                const allSchools = [
+                    ...config.filter.schoolWhitelist.domestic,
+                    ...config.filter.schoolWhitelist.international
+                ];
+                const input = document.getElementById('schoolWhitelist');
+                if (input) input.value = allSchools.join(',');
+            }
+
+            // 自动保存到 localStorage + 同步 API
+            saveConfig();
+            saveFilterConfigToAPI();
+            closeTextEditor();
+            const total = config.filter.schoolWhitelist.domestic.length + config.filter.schoolWhitelist.international.length;
+            log('✅ 学校白名单已保存（国内:' + config.filter.schoolWhitelist.domestic.length + '所 + 国外:' + config.filter.schoolWhitelist.international.length + '所 = ' + total + '所）', 'info');
         }
 
         function closeTextEditor() {
@@ -1456,6 +1684,7 @@
         async function login() {
             const username = document.getElementById('login-user')?.value || 'admin';
             const password = document.getElementById('login-pass')?.value || '';
+            log(`🔑 正在登录 ${API_BASE} ...`, 'info');
             try {
                 const resp = await fetch(`${API_BASE}/api/auth/login`, {
                     method: 'POST',
@@ -1477,7 +1706,11 @@
                 }
             } catch (e) {
                 updateAuthUI(false);
-                log(`登录异常: ${e.message}`, 'error');
+                if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+                    log(`❌ 无法连接API服务器 (${API_BASE})，请检查API服务是否启动`, 'error');
+                } else {
+                    log(`登录异常: ${e.message}`, 'error');
+                }
                 return false;
             }
         }
@@ -1530,19 +1763,16 @@
         }
 
         function saveFilterConfig() {
+            // 学历 + 工作年限 — 这两个才是"筛选条件"部分的配置
             config.filter.degree = document.getElementById('degreeFilter').value;
             config.filter.yearsMin = parseInt(document.getElementById('yearsMin').value);
             config.filter.yearsMax = parseInt(document.getElementById('yearsMax').value);
-            config.filter.schoolWhitelist = document.getElementById('schoolWhitelist').value;
             config.filter.requireKeywords = document.getElementById('requireKeywords').value;
             config.filter.excludeKeywords = document.getElementById('excludeKeywords').value;
-            // 保存到 localStorage
+            // 学校白名单由弹出编辑器独立管理（confirmSchoolEditor 已自动保存），此处不再重复处理
             saveConfig();
-
-            // 同步保存到服务端 API
             saveFilterConfigToAPI();
-
-            log('✅ 筛选配置已保存', 'info');
+            log('✅ 筛选配置已保存（学历+年限+关键词）', 'info');
             flashSave(event && event.target ? event.target.closest('.btn') : null, '已保存');
         }
 
@@ -1550,18 +1780,30 @@
             try {
                 const token = localStorage.getItem('token');
                 if (!token) return;
-                // 解析学校白名单: 逗号分隔 → 数组
-                let schoolList = [];
-                if (config.filter.schoolWhitelist) {
-                    schoolList = config.filter.schoolWhitelist.split(',').map(s => s.trim()).filter(s => s);
+                // 学校白名单：保持分类结构 {domestic, international} 发送给API
+                let schoolPayload;
+                const sw = config.filter.schoolWhitelist;
+                if (sw && typeof sw === 'object') {
+                    schoolPayload = {
+                        domestic: sw.domestic || [],
+                        international: sw.international || []
+                    };
+                } else if (typeof sw === 'string' && sw) {
+                    // 兼容旧格式：逗号分隔字符串 → 归入 domestic
+                    schoolPayload = {
+                        domestic: sw.split(',').map(s => s.trim()).filter(s => s),
+                        international: []
+                    };
+                } else {
+                    schoolPayload = { domestic: [], international: [] };
                 }
                 const payload = {
                     min_degree: config.filter.degree || '',
                     min_years: config.filter.yearsMin || 0,
                     daily_cap: config.filter.dailyCap || 80,
-                    school_whitelist: schoolList,
+                    school_whitelist: schoolPayload,
                 };
-                const resp = await fetch('/api/filter/config', {
+                const resp = await fetch(`${API_BASE}/api/filter/config`, {
                     method: 'PUT',
                     headers: {
                         'Authorization': 'Bearer ' + token,
@@ -1938,7 +2180,18 @@
             setLoading(btn, true);
             log(`👋 开始筛选+打招呼，上限 ${limit} 人...`, 'info');
             if (_filterPollTimer) { clearInterval(_filterPollTimer); _filterPollTimer = null; }
-            const schoolList = (config.filter.schoolWhitelist || '').split(',').map(s => s.trim()).filter(s => s.length > 0);
+            let schoolList = [];
+            const sw = config.filter.schoolWhitelist;
+            if (sw && typeof sw === 'object') {
+                // 分类格式：合并国内+国外
+                schoolList = [
+                    ...(sw.domestic || []),
+                    ...(sw.international || [])
+                ];
+            } else if (typeof sw === 'string' && sw) {
+                // 兼容旧格式：逗号分隔字符串
+                schoolList = sw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            }
             const requestBody = {
                 daily_cap: limit,
                 min_degree: config.filter.degree || '本科',

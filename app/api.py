@@ -29,6 +29,9 @@ from app.automation import automation
 # Import school whitelists for filter config (lightweight, no heavy deps)
 from app.filter_criteria import DOMESTIC_ELITE_SCHOOLS, US_ELITE_SCHOOLS, UK_ELITE_SCHOOLS, OTHER_ELITE_SCHOOLS, FilterCriteria
 
+# 海外名校合并（美国+英国+其他）
+INTERNATIONAL_ELITE_SCHOOLS = US_ELITE_SCHOOLS + UK_ELITE_SCHOOLS + OTHER_ELITE_SCHOOLS
+
 # ============================================================
 # 配置
 # ============================================================
@@ -52,7 +55,7 @@ app = FastAPI(
 )
 
 # CORS配置：从环境变量读取允许的来源
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8001,http://localhost:8321,http://localhost:3101").split(",")
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000,http://localhost:8001,http://localhost:8321,http://localhost:3101").split(",")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1076,7 +1079,7 @@ async def start_filter_contact(
 
         # 设置默认学校白名单（国内+海外名校）
         if req.school_whitelist is None:
-            req.school_whitelist = DOMESTIC_ELITE_SCHOOLS + US_ELITE_SCHOOLS + UK_ELITE_SCHOOLS
+            req.school_whitelist = DOMESTIC_ELITE_SCHOOLS + INTERNATIONAL_ELITE_SCHOOLS
 
         # 构建可扩展筛选条件
         criteria = FilterCriteria(
@@ -1264,10 +1267,32 @@ async def get_filter_status(task_id: str, current_user: dict = Depends(verify_to
     }
 
 
+@app.get("/api/filter/config/defaults")
+async def get_filter_config_defaults():
+    """
+    获取筛选配置的默认值（不需要认证）
+
+    返回:
+        学校白名单、学历选项、工作年限选项等默认值
+    """
+    return {
+        "school_whitelist": {
+            "domestic": DOMESTIC_ELITE_SCHOOLS,
+            "international": INTERNATIONAL_ELITE_SCHOOLS,
+        },
+        "degree_options": ["博士", "硕士", "本科", "大专"],
+        "min_degree_default": "本科",
+        "years_options": [1, 2, 3, 5, 10],
+        "min_years_default": 3,
+        "daily_cap_default": 80,
+        "daily_cap_range": [10, 20, 50, 80, 100, 150],
+    }
+
+
 @app.get("/api/filter/config")
 async def get_filter_config(current_user: dict = Depends(verify_token)):
     """
-    获取筛选配置（合并数据库已保存配置 + 默认值）
+    获取筛选配置（合并数据库已保存配置 + 默认值）【需要认证】
 
     返回:
         学校白名单、学历选项、工作年限选项、以及当前生效的筛选参数
@@ -1276,10 +1301,7 @@ async def get_filter_config(current_user: dict = Depends(verify_token)):
     result = {
         "school_whitelist": {
             "domestic": DOMESTIC_ELITE_SCHOOLS,
-            "us": US_ELITE_SCHOOLS,
-            "uk": UK_ELITE_SCHOOLS,
-            "other": OTHER_ELITE_SCHOOLS,
-            "all": DOMESTIC_ELITE_SCHOOLS + US_ELITE_SCHOOLS + UK_ELITE_SCHOOLS + OTHER_ELITE_SCHOOLS,
+            "international": INTERNATIONAL_ELITE_SCHOOLS,
         },
         "degree_options": ["博士", "硕士", "本科", "大专"],
         "min_degree_default": "本科",
@@ -1676,6 +1698,141 @@ async def get_daily_caps(current_user: dict = Depends(verify_token)):
         return {"status": "success", "caps": caps}
     except Exception as e:
         api_logger.error(f"获取每日上限失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+# ============================================================
+# 3101 数据总控平台专用端点
+# ============================================================
+
+@app.get("/api/tasks/status")
+async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
+    """统一任务状态 — 聚合 F5/F6/F7 + 浏览器 + 登录状态
+
+    返回:
+        f5_filter: 最新筛选任务状态
+        f6_resume: 简历收集任务状态
+        f7_reply: AI回复任务状态
+        browser: 浏览器连接状态
+        login: BOSS登录状态
+    """
+    # F5 筛选任务状态（获取最新一条）
+    f5_status = {"status": "idle"}
+    if _filter_tasks:
+        latest_task = max(_filter_tasks.values(), key=lambda x: x.get("started_at", ""))
+        f5_status = {
+            "status": latest_task.get("status", "unknown"),
+            "progress": latest_task.get("progress", 0),
+            "task_id": latest_task.get("task_id"),
+            "result": latest_task.get("result"),
+            "error": latest_task.get("error"),
+        }
+
+    # F6 简历收集状态
+    f6_status = {
+        "status": resume_task_status.get("status", "idle"),
+        "processed": resume_task_status.get("processed", 0),
+        "total": resume_task_status.get("total", 0),
+        "message": resume_task_status.get("message", ""),
+    }
+
+    # F7 AI回复状态
+    f7_status = {
+        "status": _reply_task_status.get("status", "idle"),
+        "replied": _reply_task_status.get("replied", 0),
+        "failed": _reply_task_status.get("failed", 0),
+        "skipped": _reply_task_status.get("skipped", 0),
+        "total": _reply_task_status.get("total", 0),
+        "message": _reply_task_status.get("message", ""),
+    }
+
+    # 浏览器连接状态
+    browser_status = {
+        "connected": automation._connected,
+    }
+
+    # 登录状态（仅当浏览器已连接时检测）
+    login_status = {"logged_in": False}
+    if automation._connected:
+        try:
+            login_result = await automation.check_login()
+            login_status["logged_in"] = login_result.get("logged_in", False)
+        except Exception:
+            login_status["logged_in"] = False
+
+    return {
+        "f5_filter": f5_status,
+        "f6_resume": f6_status,
+        "f7_reply": f7_status,
+        "browser": browser_status,
+        "login": login_status,
+    }
+
+
+@app.get("/api/stats/daily-trend")
+async def get_daily_trend(
+    days: int = Query(default=7, ge=1, le=30),
+    current_user: dict = Depends(verify_token)
+):
+    """7日趋势数据 — 按日聚合联系/简历/对话统计
+
+    参数:
+        days: 查询天数（默认7天，最大30天）
+
+    返回:
+        List of {date, contacted, resumes, replies, reply_rate}
+    """
+    conn = get_db()
+    try:
+        trend = []
+        from datetime import date, timedelta
+
+        for i in range(days):
+            d = (date.today() - timedelta(days=i)).strftime("%Y-%m-%d")
+
+            # 联系人数（优先 contact_records，回退 processed_candidates）
+            contacted = 0
+            cr_count = conn.execute("SELECT COUNT(*) FROM contact_records").fetchone()[0]
+            if cr_count > 0:
+                contacted = conn.execute(
+                    "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE date(action_date) = ?",
+                    (d,)
+                ).fetchone()[0]
+            else:
+                contacted = conn.execute(
+                    "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = ?",
+                    (d,)
+                ).fetchone()[0]
+
+            # 简历下载数
+            resumes = conn.execute(
+                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1 AND date(created_at) = ?",
+                (d,)
+            ).fetchone()[0]
+
+            # AI回复数（conversations 中 ai_message 非空）
+            replies = conn.execute(
+                "SELECT COUNT(*) FROM conversations WHERE date(created_at) = ? AND ai_message IS NOT NULL AND ai_message != ''",
+                (d,)
+            ).fetchone()[0]
+
+            # 回复率 = 回复数 / 联系人数
+            reply_rate = round(replies / contacted * 100, 1) if contacted > 0 else 0
+
+            trend.append({
+                "date": d,
+                "contacted": contacted,
+                "resumes": resumes,
+                "replies": replies,
+                "reply_rate": reply_rate,
+            })
+
+        return trend[::-1]  # 按日期正序返回
+
+    except Exception as e:
+        api_logger.error(f"查询趋势数据失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()

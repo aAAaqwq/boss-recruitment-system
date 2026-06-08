@@ -71,9 +71,8 @@ async def _batch_reply_impl(
     """
     logger.info(f"[F7] 启动 | max={max_count} dry={dry_run} template={bool(template)}")
 
-    # 1. 连接浏览器 + 检查登录
-    # 线程安全: 重置连接状态，防止 ThreadPoolExecutor 复用陈旧会话
-    automation.reset_for_thread()
+    # 1. 检查浏览器会话（连接由调用方 _run_reply_in_thread 统一管理）
+    # 注意: 不在此处调用 reset_for_thread()，避免破坏调用方已建立的连接
     if not await automation._ensure_session():
         return {"status": "error", "message": "浏览器未连接或会话失效，请先打开BOSS直聘"}
 

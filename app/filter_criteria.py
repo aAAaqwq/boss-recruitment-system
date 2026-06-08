@@ -26,6 +26,7 @@ DOMESTIC_ELITE_SCHOOLS = [
 
 # 海外名校 - 美国
 US_ELITE_SCHOOLS = [
+    # English names
     "Harvard University", "Massachusetts Institute of Technology", "MIT",
     "Stanford University", "University of California, Berkeley", "UC Berkeley", "UCB",
     "California Institute of Technology", "Caltech",
@@ -43,10 +44,22 @@ US_ELITE_SCHOOLS = [
     "University of Texas at Austin", "UT Austin",
     "University of Wisconsin-Madison", "Brown University",
     "Dartmouth College", "Rice University", "Vanderbilt University",
+    # 中文翻译名
+    "哈佛大学", "麻省理工学院", "斯坦福大学",
+    "加州大学伯克利分校", "伯克利", "加州理工学院",
+    "普林斯顿大学", "耶鲁大学", "哥伦比亚大学",
+    "宾夕法尼亚大学", "康奈尔大学", "芝加哥大学",
+    "杜克大学", "西北大学", "约翰霍普金斯大学",
+    "加州大学洛杉矶分校", "卡内基梅隆大学",
+    "密歇根大学", "纽约大学", "华盛顿大学",
+    "佐治亚理工学院", "伊利诺伊大学香槟分校",
+    "德克萨斯大学奥斯汀分校", "威斯康星大学麦迪逊分校",
+    "布朗大学", "达特茅斯学院", "莱斯大学", "范德堡大学",
 ]
 
 # 海外名校 - 英国
 UK_ELITE_SCHOOLS = [
+    # English names
     "University of Oxford", "Oxford University", "Oxford",
     "University of Cambridge", "Cambridge University", "Cambridge",
     "Imperial College London", "Imperial College",
@@ -55,10 +68,16 @@ UK_ELITE_SCHOOLS = [
     "University of Edinburgh", "University of Manchester",
     "King's College London", "University of Bristol",
     "University of Warwick",
+    # 中文翻译名
+    "牛津大学", "剑桥大学", "帝国理工学院",
+    "伦敦政治经济学院", "伦敦大学学院",
+    "爱丁堡大学", "曼彻斯特大学",
+    "伦敦国王学院", "布里斯托大学", "华威大学",
 ]
 
 # 海外名校 - 其他地区
 OTHER_ELITE_SCHOOLS = [
+    # English names
     # 瑞士
     "ETH Zurich", "EPFL",
     # 加拿大
@@ -86,6 +105,18 @@ OTHER_ELITE_SCHOOLS = [
     # 韩国
     "Seoul National University", "KAIST",
     "Yonsei University", "Korea University",
+    # 中文翻译名
+    "苏黎世联邦理工学院", "洛桑联邦理工学院",
+    "多伦多大学", "不列颠哥伦比亚大学", "麦吉尔大学", "滑铁卢大学",
+    "新加坡国立大学", "南洋理工大学",
+    "东京大学", "京都大学", "东京工业大学",
+    "香港大学", "香港中文大学", "香港科技大学",
+    "墨尔本大学", "澳大利亚国立大学", "悉尼大学", "新南威尔士大学",
+    "阿姆斯特丹大学", "慕尼黑工业大学", "慕尼黑大学", "海德堡大学",
+    "索邦大学", "巴黎文理研究大学",
+    "鲁汶大学", "代尔夫特理工大学",
+    "哥本哈根大学", "卡罗林斯卡学院",
+    "首尔大学", "韩国科学技术院", "延世大学", "高丽大学",
 ]
 
 # 合并全部名校

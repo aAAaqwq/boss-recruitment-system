@@ -198,9 +198,13 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
                 logger.info(f"[F6] 跳过 {contact_name}: 已下载")
                 continue
 
-        # 点击联系人
+        # 点击联系人（使用 CDP viewport 点击，更可靠）
         try:
-            await automation.click(int(contact["x"]), int(contact["y"]))
+            ok = await automation.cdp_click_viewport(float(contact["x"]), float(contact["y"]))
+            if not ok:
+                logger.warning(f"[F6] CDP点击联系人失败: ({contact['x']}, {contact['y']})")
+                failed += 1
+                continue
             await asyncio.sleep(2)
         except Exception as e:
             logger.warning(f"[F6] 点击失败: {e}")
@@ -224,10 +228,14 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             skipped += 1
             continue
 
-        # 点击第一个简历按钮
+        # 点击第一个简历按钮（使用 CDP viewport 点击）
         btn = btns[0]
         try:
-            await automation.click(int(btn["x"]), int(btn["y"]))
+            ok = await automation.cdp_click_viewport(float(btn["x"]), float(btn["y"]))
+            if not ok:
+                logger.warning(f"[F6] CDP点击简历按钮失败: ({btn['x']}, {btn['y']})")
+                failed += 1
+                continue
             await asyncio.sleep(3)
         except Exception as e:
             logger.warning(f"[F6] 点击简历按钮失败: {e}")
@@ -355,7 +363,9 @@ async def _handle_case1_download(
 
     if dl and dl.get("found"):
         try:
-            await automation.click(int(dl["x"]), int(dl["y"]))
+            ok = await automation.cdp_click_viewport(float(dl["x"]), float(dl["y"]))
+            if not ok:
+                logger.warning(f"[F6] CDP点击下载按钮失败")
             await asyncio.sleep(4)
 
             new_files = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
@@ -421,7 +431,9 @@ async def _handle_case2_confirm(
 
     if confirm_x is not None and confirm_y is not None:
         try:
-            await automation.click(int(confirm_x), int(confirm_y))
+            ok = await automation.cdp_click_viewport(float(confirm_x), float(confirm_y))
+            if not ok:
+                logger.warning(f"[F6] CDP点击确认按钮失败")
             await asyncio.sleep(3)
         except Exception as e:
             logger.warning(f"[F6] 确认按钮点击失败: {e}")
@@ -433,7 +445,9 @@ async def _handle_case2_confirm(
             try:
                 dl = await automation.execute_js(_JS_FIND_DOWNLOAD_BTN)
                 if dl and dl.get("found"):
-                    await automation.click(int(dl["x"]), int(dl["y"]))
+                    ok = await automation.cdp_click_viewport(float(dl["x"]), float(dl["y"]))
+                    if not ok:
+                        logger.warning(f"[F6] CDP点击下载按钮(confirm后)失败")
                     await asyncio.sleep(4)
                     details.append({
                         "name": contact_name,

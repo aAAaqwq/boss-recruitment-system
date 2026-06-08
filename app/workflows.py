@@ -229,8 +229,21 @@ async def _auto_contact_impl(
                 new_cards.append(c)
         if not new_cards:
             no_new += 1
-            if no_new >= 5:
+            # 连续 3 次无新卡片 → 刷新推荐页面获取新一批候选人
+            if no_new >= 3 and contacted < remaining:
+                logger.info(f"[F5] 连续{no_new}次无新卡片，刷新推荐页面获取新候选人...")
+                nav = await automation.navigate("https://www.zhipin.com/web/chat/recommend")
+                if nav.get("status") == "error":
+                    logger.warning(f"[F5] 刷新导航失败: {nav.get('message')}")
+                await asyncio.sleep(8)  # 等待页面+iframe 重新加载
+                await automation.execute_js(_JS_SCROLL_TOP)
+                await asyncio.sleep(2)
+                no_new = 0  # 重置计数器
+                continue
+            if no_new >= 10:
+                logger.error(f"[F5] 连续{no_new}次无新卡片（含刷新重试），退出")
                 break
+            # 先滚动尝试加载更多
             await automation.execute_js(_JS_SCROLL_IFRAME)
             await asyncio.sleep(2)
             continue
