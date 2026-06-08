@@ -454,7 +454,15 @@ body {
 
 <script>
 // ── Config ──
-const API = 'http://localhost:8002';
+// API: 自动检测当前来源，兼容多端口访问 (8000/3101/8321)
+const API = (() => {
+    const origin = window.location.origin;
+    if (origin.includes('localhost')) {
+        const port = parseInt(new URL(origin).port) || 80;
+        if (port === 8000 || port === 8001) return origin;
+    }
+    return 'http://localhost:8000';  // 直连本地API
+})();
 let token = localStorage.getItem('auth_token') || '';
 
 // ── Shared Utils ──
@@ -494,6 +502,7 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s || 
 async function doLogin() {
     const u = document.getElementById('authUser').value;
     const p = document.getElementById('authPass').value;
+    log(`正在连接 ${API} ...`, 'info');
     try {
         const res = await fetch(API + '/api/auth/login', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -506,7 +515,13 @@ async function doLogin() {
         updateAuthUI(true, u);
         log('登录成功', 'success');
         loadAll();
-    } catch (e) { log('登录失败: ' + e.message, 'error'); }
+    } catch (e) {
+        if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+            log(`无法连接API (${API})，请检查服务器是否启动`, 'error');
+        } else {
+            log('登录失败: ' + e.message, 'error');
+        }
+    }
 }
 function updateAuthUI(ok, user) {
     const s = document.getElementById('authSection');

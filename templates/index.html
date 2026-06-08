@@ -1162,10 +1162,10 @@
             const origin = window.location.origin;
             if (origin.includes('localhost')) {
                 const port = parseInt(new URL(origin).port) || 80;
-                if (port === 8001) return origin;  // 直连API
-                return 'http://localhost:8002';     // 通过API隧道
+                if (port === 8000 || port === 8001) return origin;  // 直连API（本地服务）
+                return 'http://localhost:8000';     // 回退到本地API
             }
-            return 'http://localhost:8002';         // 默认
+            return 'http://localhost:8000';         // 默认
         })();
         let vncConnected = false;
         let vncScale = 1;
