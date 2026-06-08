@@ -15,6 +15,7 @@ import httpx
 from app.filter_criteria import (
     ALL_ELITE_SCHOOLS, FilterCriteria, match_school as _match_school,
 )
+from app.chat_nav import check_limit_popup, dismiss_popup
 
 
 # ========== 3.1 主动筛选沟通流程 ==========
@@ -179,11 +180,20 @@ async def _auto_contact_impl(
     start_time = _time.monotonic()
     TIMEOUT_SECONDS = 600  # 10 分钟全局超时
     last_screenshot_at = 0  # 上次截图时的 total 数
+    limit_reached = False  # BOSS 限制弹窗标记
 
-    while contacted < remaining:
+    while contacted < remaining and not limit_reached:
         # 全局超时保护
         if _time.monotonic() - start_time > TIMEOUT_SECONDS:
             logger.warning(f"[F5] 超时退出 ({TIMEOUT_SECONDS}s)")
+            break
+
+        # 限制弹窗检测 — BOSS "已达上限" 等提示
+        limit_kw = await check_limit_popup()
+        if limit_kw:
+            logger.warning(f"[F5] 检测到限制弹窗: {limit_kw}，终止打招呼")
+            await dismiss_popup()
+            limit_reached = True
             break
 
         # 提取可见卡片（JS 已过滤：只返回按钮在视口内的卡片）
@@ -294,6 +304,14 @@ async def _auto_contact_impl(
                 except Exception as db_err:
                     logger.warning(f"[F5] DB写入失败: {db_err}")
                 logger.info(f"[F5] 成功({contacted}/{remaining}): {boss_id[:1]}**")
+
+                # 点击后检测——BOSS可能在打招呼后弹限制弹窗
+                limit_kw2 = await check_limit_popup()
+                if limit_kw2:
+                    logger.warning(f"[F5] 点击后检测到限制弹窗: {limit_kw2}，终止打招呼")
+                    await dismiss_popup()
+                    limit_reached = True
+                    break
             else:
                 failed += 1
                 logger.warning(f"[F5] 点击失败: {boss_id[:1]}**")
@@ -323,9 +341,11 @@ async def _auto_contact_impl(
         pass
 
     return {
-        "status": "completed", "contacted": contacted, "skipped": skipped,
+        "status": "completed" if not limit_reached else "limit_reached",
+        "contacted": contacted, "skipped": skipped,
         "failed": failed, "total_scanned": contacted + skipped + failed,
         "dry_run": dry_run, "cap_used": f"{already + contacted}/{daily_cap}",
+        "limit_reached": limit_reached,
     }
 
 

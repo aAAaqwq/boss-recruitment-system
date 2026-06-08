@@ -1157,16 +1157,8 @@
          JAVASCRIPT — All backend integration preserved
          ═══════════════════════════════════════════ -->
     <script>
-        // API_BASE: 自动检测当前来源，兼容多端口访问 (8000/8001/3101/8321)
-        const API_BASE = (() => {
-            const origin = window.location.origin;
-            if (origin.includes('localhost')) {
-                const port = parseInt(new URL(origin).port) || 80;
-                if (port === 8000 || port === 8001) return origin;  // 直连API（本地服务）
-                return 'http://localhost:8000';     // 回退到本地API
-            }
-            return 'http://localhost:8000';         // 默认
-        })();
+        // API_BASE: Docker 容器服务 (8002→容器内8001)
+        const API_BASE = 'http://localhost:8002';
         let vncConnected = false;
         let vncScale = 1;
         let authToken = localStorage.getItem('auth_token') || null;

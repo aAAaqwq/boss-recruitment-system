@@ -454,15 +454,8 @@ body {
 
 <script>
 // ── Config ──
-// API: 自动检测当前来源，兼容多端口访问 (8000/3101/8321)
-const API = (() => {
-    const origin = window.location.origin;
-    if (origin.includes('localhost')) {
-        const port = parseInt(new URL(origin).port) || 80;
-        if (port === 8000 || port === 8001) return origin;
-    }
-    return 'http://localhost:8000';  // 直连本地API
-})();
+// API: Docker 容器服务 (8002→容器内8001)
+const API = 'http://localhost:8002';
 let token = localStorage.getItem('auth_token') || '';
 
 // ── Shared Utils ──
