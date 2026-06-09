@@ -14,7 +14,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from app.automation import automation
 from app.chat_nav import navigate_to_chat, get_contacts
@@ -117,6 +117,58 @@ _JS_DETECT_RESUME_CASE = """
 })()
 """
 
+# 逐次提取单个联系人坐标 — 解决一次性提取坐标过期问题
+# 注意: 调用方需要将 targetName 内联到脚本中（execute_js 不支持传参）
+_JS_FIND_CONTACT_BY_NAME = """
+(function() {
+    var targetName = {NAME_PLACEHOLDER};
+    var items = document.querySelectorAll(
+        '[class*="chat-item"], [class*="contact-item"], [class*="conversation"], '
+        + '[class*="dialog"], [class*="user-item"], [class*="list-item"]'
+    );
+    var candidates = [];
+    for (var i = 0; i < items.length; i++) {
+        var r = items[i].getBoundingClientRect();
+        var t = (items[i].innerText || '').trim();
+        if (r.x < 450 && r.width > 120 && r.height > 40 && t.indexOf(targetName) >= 0) {
+            var hasUnread = t.indexOf('\\u25cf') >= 0 || t.indexOf('未读') >= 0
+                || items[i].querySelector('[class*="unread"], [class*="red"], [class*="badge"]') !== null;
+            candidates.push({
+                name: (t.split('\\n')[0] || '').trim(),
+                text: t,
+                x: r.x + r.width / 2,
+                y: r.y + r.height / 2,
+                hasUnread: hasUnread,
+                visible: r.y > 0 && r.y < window.innerHeight
+            });
+        }
+    }
+    var exact = candidates.filter(function(c) { return c.name === targetName; });
+    return exact.length > 0 ? exact[0] : (candidates.length > 0 ? candidates[0] : null);
+})()
+"""
+
+# 验证右侧聊天面板是否已切换
+_JS_VERIFY_CHAT_PANEL = """
+(function() {
+    var expectedName = {NAME_PLACEHOLDER};
+    var panels = document.querySelectorAll(
+        '[class*="chat-detail"], [class*="chat-content"], [class*="message-panel"], '
+        + '[class*="dialog-content"], [class*="right-panel"]'
+    );
+    for (var i = 0; i < panels.length; i++) {
+        var t = (panels[i].innerText || '').trim();
+        if (t.length > 20 && t.indexOf(expectedName) >= 0) {
+            return {switched: true, panelIndex: i};
+        }
+    }
+    if (window.location.href.indexOf('/chat') >= 0) {
+        return {switched: true, method: 'url_match'};
+    }
+    return {switched: false};
+})()
+"""
+
 
 async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
     """收集简历主流程
@@ -176,11 +228,15 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         except Exception as e:
             logger.warning(f"[F6] 备用联系人提取失败: {e}")
 
-    logger.info(f"[F6] 找到 {len(contacts)} 个联系人，上限 {max_count}")
+    # Fix 3: 按 hasUnread 排序 — 未读优先（最可能发了简历）
+    contacts.sort(key=lambda c: (c.get("hasUnread", False), len(c.get("text", ""))), reverse=True)
+    unread_count = sum(1 for c in contacts if c.get("hasUnread"))
+    logger.info(f"[F6] 找到 {len(contacts)} 个联系人（{unread_count} 未读），上限 {max_count}")
 
     for i, contact in enumerate(contacts[:max_count]):
         contact_name = (contact.get("name", "") or contact.get("text", "") or f"contact_{i}").strip()
-        logger.info(f"[F6] 处理 ({i+1}/{min(len(contacts), max_count)}): {contact_name}")
+        logger.info(f"[F6] 处理 ({i+1}/{min(len(contacts), max_count)}): {contact_name}"
+                    f" {'[未读]' if contact.get('hasUnread') else ''}")
 
         # 检查去重
         try:
@@ -198,14 +254,42 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
                 logger.info(f"[F6] 跳过 {contact_name}: 已下载")
                 continue
 
-        # 点击联系人（使用 CDP viewport 点击，更可靠）
+        # Fix 2: 逐次提取坐标 — 每次点击前重新查找联系人位置
+        fresh_contact = await _refind_contact(contact_name)
+        if not fresh_contact:
+            logger.warning(f"[F6] 逐次查找联系人失败: {contact_name}, 回退到原始坐标")
+            fresh_contact = contact
+
+        if not fresh_contact.get("visible", True):
+            logger.warning(f"[F6] {contact_name} 不在可视区域，跳过（坐标: {fresh_contact.get('y')})")
+            details.append({"name": contact_name, "action": "not_visible"})
+            skipped += 1
+            continue
+
+        # 点击联系人
         try:
-            ok = await automation.cdp_click_viewport(float(contact["x"]), float(contact["y"]))
+            ok = await automation.cdp_click_viewport(
+                float(fresh_contact["x"]), float(fresh_contact["y"])
+            )
             if not ok:
-                logger.warning(f"[F6] CDP点击联系人失败: ({contact['x']}, {contact['y']})")
+                logger.warning(f"[F6] CDP点击联系人失败: ({fresh_contact['x']}, {fresh_contact['y']})")
                 failed += 1
                 continue
             await asyncio.sleep(2)
+
+            # 验证右侧面板是否切换
+            safe_name = json.dumps(contact_name)
+            verify_script = _JS_VERIFY_CHAT_PANEL.replace("{NAME_PLACEHOLDER}", safe_name)
+            verify = await automation.execute_js(verify_script)
+            if isinstance(verify, dict) and not verify.get("switched"):
+                logger.warning(f"[F6] 点击后右侧面板未切换到 {contact_name}，重试一次")
+                ok2 = await automation.cdp_click_viewport(
+                    float(fresh_contact["x"]), float(fresh_contact["y"])
+                )
+                if not ok2:
+                    failed += 1
+                    continue
+                await asyncio.sleep(2)
         except Exception as e:
             logger.warning(f"[F6] 点击失败: {e}")
             failed += 1
@@ -296,10 +380,9 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
                 _record_resume_op(db, contact_name, "requested",
                                   btn_text=btn.get("text"))
 
-        # 关闭预览
+        # 关闭预览 + 返回聊天列表
         try:
-            await automation.press_key("Escape")
-            await asyncio.sleep(1)
+            await _close_resume_and_return()
         except Exception:
             pass
 
@@ -326,6 +409,37 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
     }
 
 
+async def _refind_contact(contact_name: str) -> Optional[Dict]:
+    """逐次提取单个联系人的最新坐标（解决一次性提取过期问题）。
+
+    每次点击前调用，通过姓名在聊天列表中重新查找，返回视口坐标。
+    """
+    try:
+        safe_name = json.dumps(contact_name)  # JSON 编码防止 JS 注入
+        script = _JS_FIND_CONTACT_BY_NAME.replace("{NAME_PLACEHOLDER}", safe_name)
+        result = await automation.execute_js(script)
+        if isinstance(result, dict) and result.get("x") is not None:
+            return result
+    except Exception as e:
+        logger.debug(f"[F6] _refind_contact({contact_name}) 失败: {e}")
+    return None
+
+
+async def _close_resume_and_return() -> None:
+    """关闭简历预览并等待聊天列表恢复稳定。
+
+    多次 Escape + 等待 DOM 稳定，确保下一个联系人的坐标有效。
+    """
+    for _ in range(2):
+        try:
+            await automation.press_key("Escape")
+            await asyncio.sleep(0.5)
+        except Exception:
+            break
+    # 等待 React/Vue 重渲染完成
+    await asyncio.sleep(1.5)
+
+
 async def _detect_resume_case() -> Dict:
     """检测点击"附件简历"后的弹出内容类型。
 
@@ -349,13 +463,11 @@ async def _handle_case1_download(
     details: list,
     current_downloaded: int,
 ) -> bool:
-    """Case-1: PDF预览弹出 → 查找下载按钮 → 下载文件。
+    """Case-1: PDF预览弹出 → 查找下载按钮 → CDP事件确认下载。
 
     Returns:
-        True 表示下载成功（或按钮已点击），False 表示失败。
+        True 表示下载成功（CDP事件或目录轮询确认），False 表示失败。
     """
-    existing_files = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
-
     try:
         dl = await automation.execute_js(_JS_FIND_DOWNLOAD_BTN)
     except Exception:
@@ -363,34 +475,49 @@ async def _handle_case1_download(
 
     if dl and dl.get("found"):
         try:
+            # 点击下载按钮
             ok = await automation.cdp_click_viewport(float(dl["x"]), float(dl["y"]))
             if not ok:
                 logger.warning(f"[F6] CDP点击下载按钮失败")
-            await asyncio.sleep(4)
 
-            new_files = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
-            file_appeared = bool(new_files - existing_files)
+            # Fix 1: 使用 CDP事件+目录轮询双重确认下载
+            dl_result = await automation.wait_for_download(
+                str(RESUMES_DIR), timeout=30.0
+            )
+            file_verified = dl_result.get("status") == "downloaded"
+            verify_method = dl_result.get("method", "unknown")
 
-            if file_appeared:
-                logger.info(f"[F6] {contact_name} 简历下载成功（新文件检测）")
+            if file_verified:
+                logger.info(
+                    f"[F6] {contact_name} 简历下载成功 "
+                    f"({dl_result.get('size', 0)} bytes, method={verify_method})"
+                )
             else:
-                logger.info(f"[F6] {contact_name} 下载按钮已点击（文件可能在Chrome默认目录）")
+                logger.warning(
+                    f"[F6] {contact_name} 下载未确认: "
+                    f"{dl_result.get('message', 'unknown')} (method={verify_method})"
+                )
 
             details.append({
                 "name": contact_name, "action": "downloaded",
-                "btn_type": btn.get("text"), "file_verified": file_appeared,
+                "btn_type": btn.get("text"),
+                "file_verified": file_verified,
+                "verify_method": verify_method,
             })
             db.insert_resume_op(
                 candidate_name=contact_name,
                 action="downloaded",
-                resume_downloaded=True,
+                resume_downloaded=file_verified,
                 detail=json.dumps({
                     "case": "pdf_preview",
                     "btn": btn.get("text"),
-                    "file_verified": file_appeared,
+                    "file_verified": file_verified,
+                    "verify_method": verify_method,
+                    "download_result": dl_result,
                     "time": datetime.now().isoformat(),
                 }),
             )
+            return file_verified
         except Exception as e:
             logger.warning(f"[F6] 下载失败: {e}")
             details.append({"name": contact_name, "action": "download_failed"})
@@ -399,7 +526,6 @@ async def _handle_case1_download(
                 resume_downloaded=False, detail=str(e),
             )
             return False
-        return True
     else:
         # PDF预览但没有下载按钮 — 可能是在线简历渲染
         details.append({

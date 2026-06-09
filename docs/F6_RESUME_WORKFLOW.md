@@ -1,220 +1,304 @@
-# F6 批量获取简历流程
+# F6 批量获取简历 — 完整流程 & Grill
 
 ## 触发入口
 
-`POST /api/resume/batch` → API 线程池 → `_run_resume_in_thread()` → `collect_resumes()`
+`POST /api/resume/batch` → API线程池 → `_run_resume_in_thread()` → `collect_resumes()`
 
-## 完整步骤
+## 完整步骤 (当前实现)
 
 ```
 1. 获取浏览器任务锁
    └─ _browser_task_lock.acquire(blocking=False)
        失败 → 返回"浏览器正被 {task} 占用"
 
-2. 连接浏览器 + 登录检查 (拆分为两层)
-   │
-   ├─ API层: _run_resume_in_thread 负责
-   │  ├─ automation.reset_for_thread()  (线程安全重置)
-   │  ├─ automation.connect() → nodriver CDP (port 9222)
-   │  └─ automation.import_cookies()   (恢复登录态)
-   │
-   └─ 业务层: collect_resumes() 负责
-      └─ _ensure_session() → check_login()
-          ├─ 已登录 → 继续
-          └─ 未登录 → 返回"请先在VNC中扫码登录"
+2. 连接浏览器 + 登录检查 (两层)
+   ├─ API层 _run_resume_in_thread:
+   │  ├─ automation.reset_for_thread()
+   │  ├─ automation.connect() → nodriver CDP :9222
+   │  └─ automation.check_login()
+   └─ 业务层 collect_resumes():
+      └─ _ensure_session() → check_login() (再次检查)
 
-3. 启用 CDP 下载拦截
-   └─ enable_download_interception(data/resumes/)
-       ├─ Page.setDownloadBehavior(behavior="allow", download_path=...)
-       └─ Chrome 自动保存到 data/resumes/，不弹对话框
-       失败 → 降级模式（依赖Chrome默认下载目录）
+3. CDP下载拦截
+   └─ Page.setDownloadBehavior(behavior="allow", downloadPath=data/resumes/)
+       ├─ 成功 → Chrome 自动保存到 data/resumes/
+       └─ 失败 → 降级（文件落入Chrome默认目录，追踪不到）
 
 4. 导航到聊天页
-   └─ 目标URL: https://www.zhipin.com/web/chat/index
-       ├─ navigate_to_chat() 点击左侧"沟通"导航
-       ├─ 备用: 直接导航 /web/chat/index
-       └─ 获取联系人列表 (get_contacts)
+   └─ navigate_to_chat() → /web/chat/index
+       失败 → 备用: automation.navigate("/web/chat/index")
 
-5. 联系人列表为空
-   └─ 备用导航 /web/chat/index → 重试 get_contacts
-       仍为空 → 返回 completed (downloaded=0)
+5. 提取联系人列表 (⚠️ 一次性提取)
+   └─ get_contacts() → _JS_GET_CONTACTS
+       提取左侧面板 (x<450) 所有聊天项
+       每项含: {name, text, x, y, w, h, hasUnread}
 
-6. 主循环 (遍历 contacts[:max_count])
+6. 主循环 for contact in contacts[:max_count]:
    │
-   ├─ 6a. 点击联系人
-   │      └─ automation.click(contact.x, contact.y)
+   ├─ 6a. 去重检查
+   │      └─ db.get_resume_ops(name) → 有 "downloaded" 记录 → skip
    │
-   ├─ 6b. 去重检查
-   │      ├─ db.get_resume_ops(contact_name)
-   │      └─ 已有 downloaded 记录 → 跳过
+   ├─ 6b. CDP点击联系人 ← 🔴 使用步骤5的一次性坐标
+   │      └─ cdp_click_viewport(contact.x, contact.y) → sleep 2s
    │
-   ├─ 6c. 查找简历按钮 (_JS_FIND_RESUME_BTNS)
-   │      ├─ 选择器: 在聊天详情区域查找
-   │      ├─ 精确匹配: '在线简历' / '附件简历' / '查看简历' / '查看附件'
-   │      └─ 无按钮 → 跳过 (no_resume_btn)
+   ├─ 6c. 查找简历按钮
+   │      └─ _JS_FIND_RESUME_BTNS: 精确匹配 4 种文本
+   │         '在线简历'/'附件简历'/'查看简历'/'查看附件'
    │
-   ├─ 6d. 点击"附件简历"按钮 → BOSS自动处理4种情况:
-   │      │
-   │      ├─ Case-1: PDF预览弹出 → 对方已发附件简历 ✅
-   │      │   ├─ 等待PDF渲染完成
-   │      │   ├─ 查找下载按钮 ('下载'/'保存'/'导出')
-   │      │   ├─ 有下载按钮 → 点击下载 → CDP拦截保存到 data/resumes/
-   │      │   │   ├─ 验证: 对比前后文件列表
-   │      │   │   └─ db.insert_resume_op(action="downloaded")
-   │      │   └─ 无下载按钮 → 记录 online_resume_viewed/action=viewed
-   │      │
-   │      ├─ Case-2: "向牛人请求简历"弹窗 → 已沟通未发简历 ⏳
-   │      │   ├─ 点击"确认"/"确定"按钮
-   │      │   ├─ 等待: 确认后PDF可能弹出 → 走Case-1流程
-   │      │   └─ 无PDF → db.insert_resume_op(action="requested")
-   │      │
-   │      ├─ Case-3: "附件简历请求中" → 已请求待处理 ⏭
-   │      │   └─ 跳过, db.insert_resume_op(action="requested_pending")
-   │      │
-   │      └─ Case-4: "双方回复后可以向TA请求" → 未充分沟通 ❌
-   │          └─ 跳过, db.insert_resume_op(action="need_reply")
+   ├─ 6d. 点击简历按钮 → 检测4种Case
+   │      ├─ pdf_preview → 找下载按钮 → 目录diff验证
+   │      ├─ request_popup → 点确认 → 再检PDF
+   │      ├─ request_pending → 跳过
+   │      ├─ need_reply → 跳过
+   │      └─ unknown → 旧逻辑兜底
    │
-   ├─ 6e. 关闭简历预览
-   │      └─ automation.press_key("Escape")
-   │
-   └─ 6f. 每3次下载或失败后截图一次
-
-7. 释放浏览器任务锁
-   └─ _browser_task_lock.release()
-
-8. 返回结果
-   └─ {downloaded, skipped, failed, total_scanned, details: [...]}
+   └─ 6e. Escape 关闭预览 → 下一个
 ```
 
-## "附件简历"按钮的4种返回状态
+---
 
-点击"附件简历"后，BOSS 系统会根据沟通状态返回不同结果：
+## 🔴 关键问题 1: 未读判断 — hasUnread 提取了但从未使用
 
-```
-click("附件简历")
-     │
-     ├─ 等待 2-3 秒
-     │
-     ├─ 检测到 PDF 预览 (AXWebArea + PDF) ──────── Case-1 ✅
-     │   └─ 对方已上传附件 → 直接提取/下载
-     │
-     ├─ 检测到 "向牛人请求简历" 弹窗 ────────── Case-2 ⏳
-     │   └─ 已沟通但对方未发 → 点确认索取
-     │   └─ 确认后PDF弹出 → 升级为Case-1
-     │
-     ├─ 检测到 "附件简历请求中" ─────────────── Case-3 ⏭
-     │   └─ 之前已请求，等待对方处理
-     │
-     ├─ 检测到 "双方回复后可以向TA请求" ──────── Case-4 ❌
-     │   └─ 双方沟通不够，无法索取
-     │
-     └─ 其他: "简历请求已发送" / 无反应 ─────── unknown ⏭
-         └─ 对方未上传附件 或 未沟通
+### 现状
+
+`_JS_GET_CONTACTS` (chat_nav.py:55-82) **确实提取了 hasUnread 字段**:
+
+```javascript
+hasUnread: t.indexOf('●') >= 0 || t.indexOf('未读') >= 0
 ```
 
-| Case | 页面特征 | 含义 | 动作 | 记录 |
-|------|----------|------|------|------|
-| Case-1 | PDF预览弹出 | 对方已发附件 | 下载/提取 | `action="downloaded"` |
-| Case-2 | "向牛人请求简历"弹窗 | 已沟通未发 | 点确认索取 | `action="requested"` |
-| Case-3 | "附件简历请求中" | 已请求待处理 | 跳过 | `action="requested_pending"` |
-| Case-4 | "双方回复后可以向TA请求" | 未充分沟通 | 跳过 | `action="need_reply"` |
+但在 `collect_resumes()` (resume_collector.py:181) **完全被忽略**:
 
-## BOSS DOM 结构
-
-```
-聊天页 /web/chat/index (左右分栏)
-├── 左侧: 联系人列表
-│   └── .chat-item / .contact-item / .conversation
-│       └── innerText → name / subtitle / hasUnread
-│
-└── 右侧: 聊天详情 (x > 450px)
-    ├── 候选人信息行: 姓名 · 学历 · 学校 · 工作年限
-    ├── 简历按钮区:
-    │   ├── "在线简历"  → 打开在线简历页面 (HTML渲染)
-    │   └── "附件简历"  → 触发上述4种情况
-    │
-    └── 底部操作栏:
-        ├── "求简历" / "换电话" / "查看微信"
-        └── "约面试" / "不合适"
-
-附件简历预览 (Case-1 PDF弹出时)
-├── AXWebArea (PDF)
-│   └── 简历文本内容 (可提取)
-└── 下载按钮: "下载" / "保存" / "导出"
-    或 a[download] 链接
-
-索取确认弹窗 (Case-2)
-└── "向牛人请求简历"
-    └── "确认" / "取消" 按钮
+```python
+for i, contact in enumerate(contacts[:max_count]):
+    # ❌ 没有 if contact.get("hasUnread") 过滤
+    # ❌ 没有按 hasUnread 排序
+    # ❌ 没有按时间/最新消息排序
 ```
 
-## CDP 下载拦截
+### 问题
 
-```
-nodriver CDP 命令: Page.setDownloadBehavior
-参数:
-  behavior: "allow"
-  downloadPath: "/app/data/resumes/"
-  eventsEnabled: true
+| 场景 | 当前行为 | 预期行为 |
+|------|---------|---------|
+| 200个联系人，10个有未读（对方发了简历） | 取前10个（可能是最老的） | 优先取有未读的10个 |
+| 联系人列表中夹杂已读/未读 | 按DOM顺序盲目遍历 | 未读优先→已沟通→其他 |
+| 刚打过招呼的人（F5后）还没出现在聊天列表 | F6找不到 | F6应从筛选结果页操作 |
 
-效果:
-  Chrome 跳过"保存到..."对话框
-  文件直接写入 downloadPath 目录
-  通过前后文件列表对比验证下载成功
-```
+### 严重性: 🔴 致命
 
-## 去重机制
+**F6的核心价值是"获取对方发来的简历"，而有未读消息的联系人才是真正可能发了简历的人。** 不过滤 hasUnread 导致 F6 在处理无关联系人的同时错过了真正有简历的人。
 
-```
-表: resume_operations
-字段: candidate_name, action, resume_downloaded, detail, created_at
+### 修复方向
 
-逻辑:
-  1. 查询: SELECT * FROM resume_operations WHERE candidate_name = ?
-  2. 检查: any(row.resume_downloaded or row.action == "downloaded")
-  3. 已下载 → 跳过 (计入 skipped)
-  4. 未下载 → 继续操作
+```python
+# 1. 优先处理有未读消息的联系人
+contacts = await get_contacts()
+contacts.sort(key=lambda c: (c.get("hasUnread", False), c.get("timestamp", "")), reverse=True)
+
+# 2. 或：严格模式 — 只处理未读
+unread_contacts = [c for c in contacts if c.get("hasUnread")]
 ```
 
-## 参考: cua-boss-system 实现
+### hasUnread 检测本身的可靠性
 
-原始CUA实现位于 `../cua-boss-system/scripts/cua_collect.py`，核心差异：
+当前依赖 `innerText.indexOf('●')` 或 `indexOf('未读')` — 这在BOSS UI中：
+- `●` 是红点标记，不一定在所有版本中出现
+- `未读` 文本可能被CSS截断或不在innerText中
+- 更好的方案：检测特定class名 `[class*="unread"]`, `[class*="red-dot"]`，或检查DOM中是否有未读标记元素
 
-| 对比项 | CUA版本 (cua_collect.py) | 当前版本 (resume_collector.py) |
-|--------|--------------------------|-------------------------------|
-| 访问方式 | Apple AX树 + cua-driver | nodriver CDP + xdotool |
-| 聊天页 | `/web/chat/index` | `/web/chat/index` (已对齐) |
-| 4种Case处理 | 完整实现 (Case-1/2/3/4) | 需完善 (当前仅处理PDF和下载) |
-| 简历提取 | PDF文本提取 → 存入DB | CDP下载到文件 |
-| 候选人UID | data-id属性提取 | 用姓名(非唯一) |
-| 附加操作 | 不合适→点"不合适"+ 换微信 | 仅处理简历 |
+---
 
-## 本次修复 (2026-06-07)
+## 🔴 关键问题 2: 下载的简历是否真的获取到？
 
-| 修复点 | 旧行为 | 新行为 |
-|--------|--------|--------|
-| 聊天页URL | /web/geek/chat | /web/chat/index |
-| 文件下载 | 点击按钮但无CDP拦截，文件不保存 | `enable_download_interception()` + 文件验证 |
-| 登录检查 | 无，直接操作 → 登录页误操作 | `check_login()` 前置检查 |
-| JS选择器 | 匹配所有含"简历"文本的元素 | 精确匹配: '在线简历'/'附件简历'/'查看简历' |
-| 导航 | 每次先跳首页→导入cookie→再跳聊天 | 直接 navigate_to_chat() |
-| resume_operations表 | 仅在api.py init_db()创建 | Database.init_tables() 也创建（双保险） |
-| 线程安全 | 直接设置 `automation._connected=False` | `reset_for_thread()` + `_browser_task_lock` |
+### 当前下载链
 
-## API 端点
+```
+CDP setDownloadBehavior("allow", data/resumes/)
+  → 点击下载按钮 (cdp_click_viewport)
+    → sleep 4s
+      → 目录 diff (new_files - existing_files)
+```
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/resume/batch` | 启动批量简历下载（需认证） |
-| GET | `/api/resume/status` | 查询任务进度 |
-| GET | `/api/resume/list` | 已下载简历列表 |
-| GET | `/api/resume/stats` | 简历统计 |
-| GET | `/api/resume/download/{id}` | 下载指定简历文件 |
+### 验证证据
 
-## 已知问题
+data/resumes/ 目录现状:
+```
+张三.pdf  19 bytes  ← 仅1个测试占位文件
+```
 
-- ~~Case-3/4 未实现精确检测~~ (已修复: 精确匹配"附件简历请求中"/"双方回复后可以向TA请求"文本)
-- Case-2 确认索取后PDF可能不弹出，只能记录 "requested"
-- 在线简历（无附件）只能记录为 "requested"，无法下载文件
-- Chrome 版本差异可能导致 `Page.setDownloadBehavior` 降级
-- 候选人姓名可能重复（BOSS 显示名不是唯一标识，应提取 data-id）
+### 逐层分析
+
+**Layer 1: CDP下载拦截是否生效？**
+
+```python
+# automation.py:1088-1093
+await self.page.send(cdp_page.set_download_behavior(
+    behavior="allow",
+    download_path=download_dir,
+    events_enabled=True,  # ← 启用了事件，但从未监听!
+))
+```
+
+- `events_enabled=True` — CDP 会发送 `Browser.downloadProgress` 和 `Browser.downloadWillBegin` 事件
+- **但代码中没有任何地方监听这些事件!** (没有 `page.on(...)` 或事件handler)
+- 如果 `setDownloadBehavior` 本身失败 → 降级到 `status: "fallback"` → 文件去Chrome默认目录
+
+**Layer 2: 下载按钮点击是否触发下载？**
+
+```python
+# resume_collector.py:366-367
+ok = await automation.cdp_click_viewport(float(dl["x"]), float(dl["y"]))
+await asyncio.sleep(4)  # ← 硬等4秒，没有事件驱动确认
+```
+
+- `cdp_click_viewport` 只保证鼠标事件发送了，不保证按钮响应了
+- BOSS的下载按钮可能是 `<a download>` 链接、blob URL生成、或异步请求 — 每种触发机制不同
+- 4秒固定等待对大PDF或慢网络不够
+
+**Layer 3: 目录diff验证是否可靠？**
+
+```python
+existing_files = set(RESUMES_DIR.iterdir())
+# ... click + sleep ...
+new_files = set(RESUMES_DIR.iterdir())
+file_appeared = bool(new_files - existing_files)
+```
+
+- 如果 CDP 拦截生效：文件出现在 data/resumes/ → diff 检测到 ✅
+- 如果 CDP 拦截失效：文件去了 Chrome 默认下载目录 (~/Downloads 或容器内 /home/user/Downloads) → diff 检测不到 ❌
+- 如果在处理联系人A时，联系人B的下载也完成了 → diff 会包含B的文件 → 误归属给A
+- 如果下载在4秒后才完成 → diff 检测不到 → 误报失败
+
+### 缺失的验证机制
+
+应该通过 CDP 事件确认下载:
+
+```python
+# 缺少的代码模式:
+download_completed = asyncio.Event()
+download_path = None
+
+async def on_download_progress(event):
+    if event.get("state") == "completed":
+        download_path = event.get("path")
+        download_completed.set()
+
+# 注册事件监听
+await self.page.on("Browser.downloadProgress", on_download_progress)
+# ... 点击下载按钮 ...
+await asyncio.wait_for(download_completed.wait(), timeout=30)
+```
+
+### 严重性: 🔴 致命
+
+**当前无法确认任何一份简历真正下载成功了。** 目录diff只能算"乐观估计"，在降级模式下（CDP拦截失效时）完全失效。
+
+---
+
+## 🔴 关键问题 3: 为什么没有点击到联系人？
+
+### 根因1: 坐标一次性提取、循环中使用
+
+```python
+# resume_collector.py:168 — 一次性提取所有坐标
+contacts = await get_contacts()  # ← 此时坐标有效
+
+# resume_collector.py:181 — 在循环中使用可能已失效的坐标
+for i, contact in enumerate(contacts[:max_count]):
+    ok = await automation.cdp_click_viewport(
+        float(contact["x"]), float(contact["y"])  # ← 坐标可能已偏移
+    )
+```
+
+每次处理完一个联系人后:
+1. Escape 关闭预览 → 回到聊天列表
+2. 聊天列表 DOM 被 React 重渲染 → 元素位置变化
+3. 新消息的人会冒到顶部 → 排序变化
+4. 滚动位置可能变了 → 后续坐标偏出视口
+
+### 根因2: 点击没有效果验证
+
+```python
+# cdp_click_viewport 只确认CDP消息发送成功
+# 不验证点击后的页面状态
+ok = await automation.cdp_click_viewport(x, y)
+if not ok:
+    failed += 1
+    continue
+await asyncio.sleep(2)  # 等2秒后直接找简历按钮
+```
+
+缺失的验证:
+- 右侧聊天面板是否切换到了目标联系人？
+- 联系人是否高亮了（表示选中）？
+- URL 是否变化了（BOSS聊天切换通常伴随URL参数变化）？
+
+如果点击落在了空白区域或被遮挡的元素上，`cdp_click_viewport` 仍然返回 True，但什么都没发生。2秒后找简历按钮会在旧的聊天面板里找。
+
+### 根因3: 返回导航缺失
+
+```python
+# resume_collector.py:300-304
+try:
+    await automation.press_key("Escape")
+    await asyncio.sleep(1)
+except Exception:
+    pass
+# 直接进入下一个循环 — 假设已回到聊天列表
+```
+
+但 Escape 不一定能完全关闭简历预览:
+- PDF预览可能是新标签页 → Escape无效
+- 弹窗可能有多层 → 需要多次Escape
+- 如果Escape没关掉预览 → 下一个 `cdp_click_viewport` 点在了PDF查看器上
+
+### 根因4: JS提取的联系人坐标是 `getBoundingClientRect`
+
+```javascript
+// getBoundingClientRect 返回的是相对视口的坐标
+var r = items[i].getBoundingClientRect();
+x: r.x + r.width / 2,
+y: r.y + r.height / 2,
+```
+
+CDP `dispatchMouseEvent` 使用的也是视口坐标（x, y参数是viewport坐标），所以这本身没问题。但如果:
+- 页面有CSS transform/scale → 坐标对应不上
+- 容器内有滚动 → 被滚动隐藏的联系人坐标在视口外（y可能为负数或超过视口高度）
+
+### 严重性: 🔴 致命
+
+点击成功率可能非常低，尤其是处理超过5-10个联系人时。每处理一个人就积累误差。
+
+---
+
+## 附加问题: 与 F5 完全脱节
+
+```
+用户预期流程:
+  筛选 → F5 打招呼 → 对方回复 → F6 获取简历
+
+当前实现:
+  F5: 在搜索结果页操作，打完招呼就结束
+  F6: 在聊天列表操作，独立运行，不知道谁刚被F5联系过
+```
+
+F5打完招呼的人可能：
+- 还没出现在聊天列表（对方还没回复）
+- 被埋在第3页（不在 contacts[:max_count] 范围内）
+- 已经回复了但 hasUnread 没被用于过滤
+
+---
+
+## 总结矩阵
+
+| # | 问题 | 文件:行号 | 严重性 | 症状 |
+|---|------|----------|--------|------|
+| 1 | hasUnread 提取但未使用 | resume_collector.py:181 | 🔴 致命 | 处理无关联系人，错过有简历的 |
+| 2 | 下载无CDP事件确认 | resume_collector.py:366-372 | 🔴 致命 | 不知道文件是否真的下载了 |
+| 3 | 坐标一次性提取后循环使用 | resume_collector.py:168→203 | 🔴 致命 | 第N个联系人坐标失效 |
+| 4 | 点击后无效果验证 | resume_collector.py:203-208 | 🔴 致命 | 点击落空但继续执行 |
+| 5 | 无返回导航确认 | resume_collector.py:300-304 | 🟠 高 | Escape后状态不确定 |
+| 6 | F5→F6无衔接 | 架构层面 | 🟠 高 | 两个任务完全独立 |
+| 7 | 固定sleep等待 | resume_collector.py:208,239 | 🟡 中 | 网络波动时不可靠 |
+| 8 | 目录diff验证下载 | resume_collector.py:370-372 | 🟡 中 | 降级模式下完全失效 |
+| 9 | 联系人无排序/优先级 | resume_collector.py:181 | 🟡 中 | 按DOM顺序而非业务优先级 |

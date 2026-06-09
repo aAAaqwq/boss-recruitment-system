@@ -1099,6 +1099,129 @@ class BrowserAutomation:
             # 降级：不拦截下载，依赖Chrome默认行为
             return {"status": "fallback", "message": str(e)}
 
+    # ===== CDP 下载事件监听 =====
+
+    async def wait_for_download(
+        self, download_dir: str, timeout: float = 30.0, poll_interval: float = 0.5
+    ) -> Dict:
+        """等待下载完成 — CDP事件 + 目录轮询双重保障。
+
+        点击下载按钮后调用此方法。优先通过 CDP Browser.downloadProgress
+        事件确认下载，失败时回退到目录轮询（检测新文件且大小稳定）。
+
+        Args:
+            download_dir: 下载目录绝对路径
+            timeout: 最大等待秒数
+            poll_interval: 目录轮询间隔秒数
+
+        Returns:
+            {status: "downloaded"|"timeout"|"error", path?: str, size?: int, method: str}
+        """
+        dl_dir = Path(download_dir)
+        before = set(dl_dir.iterdir()) if dl_dir.exists() else set()
+
+        # 方法1: 尝试 CDP 事件监听 (Browser.downloadProgress)
+        cdp_result = None
+        try:
+            cdp_result = await self._wait_download_cdp(timeout)
+        except Exception as e:
+            logger.debug(f"[CDP] 下载事件监听失败，回退到目录轮询: {e}")
+
+        if cdp_result and cdp_result.get("status") == "downloaded":
+            return {**cdp_result, "method": "cdp_event"}
+
+        # 方法2: 目录轮询 — 等待新文件出现且大小稳定
+        deadline = asyncio.get_event_loop().time() + timeout
+        checked_files = {}  # path -> (size, stable_count)
+
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(poll_interval)
+            if not dl_dir.exists():
+                continue
+            after = set(dl_dir.iterdir())
+            new_files = after - before
+
+            for f in new_files:
+                if not f.is_file():
+                    continue
+                try:
+                    current_size = f.stat().st_size
+                except OSError:
+                    continue
+                if current_size == 0:
+                    continue  # 文件还在写入中
+
+                prev = checked_files.get(str(f))
+                if prev is not None and prev[0] == current_size:
+                    # 大小连续两次检查不变 → 下载完成
+                    logger.info(f"[CDP] 目录轮询确认下载: {f.name} ({current_size} bytes)")
+                    return {
+                        "status": "downloaded",
+                        "path": str(f),
+                        "size": current_size,
+                        "method": "poll",
+                    }
+                checked_files[str(f)] = (current_size, (prev[1] + 1) if prev else 1)
+
+        return {"status": "timeout", "message": f"下载未在 {timeout}s 内完成", "method": "timeout"}
+
+    async def _wait_download_cdp(self, timeout: float = 30.0) -> Optional[Dict]:
+        """通过 CDP Browser.downloadProgress 事件等待下载。
+
+        nodriver 的 CDP 事件通过底层 websocket 分发。我们利用 page.send()
+        后浏览器的响应流来捕获 downloadProgress 事件。
+        """
+        if not await self._ensure_session():
+            return None
+        try:
+            # 注册一次性事件处理器
+            # nodriver 内部使用 cdp.util.event_listener 或类似机制
+            # 我们使用 page 的底层事件处理
+            from nodriver.cdp import browser as cdp_browser
+
+            download_event = asyncio.Event()
+            download_state = {}
+
+            # nodriver Tab 支持通过 add_handler 订阅 CDP 事件
+            async def on_download_progress(event):
+                try:
+                    state = event.get("state", "")
+                    if state == "completed":
+                        download_state["status"] = "downloaded"
+                        download_state["path"] = event.get("path", "")
+                        download_event.set()
+                    elif state in ("canceled", "interrupted"):
+                        download_state["status"] = state
+                        download_event.set()
+                except Exception:
+                    pass
+
+            # 尝试通过 page 的 CDP 客户端注册事件处理器
+            if hasattr(self.page, "_client") and hasattr(self.page._client, "on"):
+                self.page._client.on("Browser.downloadProgress", on_download_progress)
+            elif hasattr(self.page, "add_handler"):
+                self.page.add_handler("Browser.downloadProgress", on_download_progress)
+            else:
+                return None  # 无法注册事件，回退到轮询
+
+            # 等待下载事件或超时
+            try:
+                await asyncio.wait_for(download_event.wait(), timeout=timeout)
+                if download_state.get("status") == "downloaded":
+                    return {
+                        "status": "downloaded",
+                        "path": download_state.get("path", ""),
+                        "method": "cdp_event",
+                    }
+                return {"status": download_state.get("status", "unknown")}
+            except asyncio.TimeoutError:
+                return {"status": "timeout"}
+        except ImportError:
+            return None
+        except Exception as e:
+            logger.debug(f"[CDP] _wait_download_cdp 异常: {e}")
+            return None
+
     # ===== 复合操作 =====
 
     async def click_element(self, selector: str, timeout: int = 10) -> bool:
