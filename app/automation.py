@@ -41,7 +41,7 @@ def _cdp_deserialize(obj: Any) -> Any:
     if isinstance(obj, dict):
         # 单个值描述符: {'type': '...', 'value': ...}
         if 'type' in obj and 'value' in obj:
-            return obj.get('value')
+            return _cdp_deserialize(obj.get('value'))
         # 普通字典，递归处理
         return {k: _cdp_deserialize(v) for k, v in obj.items()}
 
@@ -1089,7 +1089,6 @@ class BrowserAutomation:
                 cdp_page.set_download_behavior(
                     behavior="allow",
                     download_path=download_dir,
-                    events_enabled=True,
                 )
             )
             logger.info(f"[CDP] 下载拦截已启用，目标目录: {download_dir}")

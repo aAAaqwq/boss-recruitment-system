@@ -9,7 +9,23 @@ from typing import List, Dict, Optional, Tuple
 
 from app.config import settings
 from app.database import Database
-from app.logging_config import api_logger
+from app.logging_config import logger
+
+
+_COMPANY_PROFILE_CACHE: Optional[str] = None
+
+
+def _load_company_profile() -> str:
+    """加载公司/岗位背景信息（缓存避免反复读盘）"""
+    global _COMPANY_PROFILE_CACHE
+    if _COMPANY_PROFILE_CACHE is not None:
+        return _COMPANY_PROFILE_CACHE
+    try:
+        with open('/app/job_info/company_profile.txt', encoding='utf-8') as f:
+            _COMPANY_PROFILE_CACHE = f.read().strip()
+    except Exception:
+        _COMPANY_PROFILE_CACHE = ""
+    return _COMPANY_PROFILE_CACHE
 
 
 class ChatService:
@@ -17,11 +33,10 @@ class ChatService:
 
     def __init__(self):
         self.db = Database()
-        self.client = httpx.AsyncClient(timeout=30.0)
 
     async def close(self):
-        """关闭HTTP客户端"""
-        await self.client.aclose()
+        """关闭HTTP客户端（已改为按请求创建，无需持久连接）"""
+        pass
 
     async def generate_reply(
         self,
@@ -45,24 +60,24 @@ class ChatService:
             (reply_content, error_message)
         """
         if template:
+            logger.info(f"[ChatService] 使用自定义模板，跳过AI")
             return template, ""
 
         if not settings.DEEPSEEK_API_KEY:
             return None, "DEEPSEEK_API_KEY未配置"
 
+        # 与 test_llm.py 完全一致：先加载岗位信息作为前提注入
+        company_context = _load_company_profile()
         system_prompt = (
-            "你是一名专业的招聘官，正在通过BOSS直聘与候选人交流。\n"
-            "要求：\n"
-            "1. 回复简洁自然，不超过80字\n"
-            "2. 语气友好、专业，像真人对话\n"
-            "3. 严禁向候选人索要微信、电话、转账或任何敏感联系方式\n"
-            "4. 不承诺offer录用\n"
-            "5. 根据候选人问题进行针对性回复\n"
+            (company_context + '\n\n' if company_context else '') +
+            '你是一名专业的招聘官，正在通过BOSS直聘与候选人交流。'
+            '要求：'
+            '1. 回复简洁自然，不超过80字'
+            '2. 语气友好、专业，像真人对话'
+            '3. 严禁向候选人索要微信、电话、转账或任何敏感联系方式'
+            '4. 不承诺offer录用'
+            '5. 回复时结合公司和岗位背景信息，根据候选人问题进行针对性回复'
         )
-
-        # 注入对话阶段上下文
-        if stage_context:
-            system_prompt += f"\n--- 当前对话阶段信息 ---\n{stage_context}\n"
 
         messages = [{"role": "system", "content": system_prompt}]
 
@@ -73,23 +88,29 @@ class ChatService:
 
         messages.append({
             "role": "user",
-            "content": f"候选人({candidate_name})说：{candidate_message}",
+            "content": f"候选人说：{candidate_message}",
         })
 
+        # 临时验证日志：与 test_llm.py 输出对比
+        logger.info(f"[ChatService] LLM_INPUT ({len(messages)} msgs):")
+        for im, _m in enumerate(messages):
+            logger.info(f"[ChatService]   [{im}] [{_m['role']}] {_m['content'][:200]}")
+
         try:
-            response = await self.client.post(
-                f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": settings.DEEPSEEK_MODEL,
-                    "messages": messages,
-                    "temperature": 0.7,
-                    "max_tokens": 150
-                }
-            )
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": settings.DEEPSEEK_MODEL,
+                        "messages": messages,
+                        "temperature": 0.7,
+                        "max_tokens": 150
+                    }
+                )
 
             if response.status_code == 200:
                 data = response.json()
@@ -100,7 +121,7 @@ class ChatService:
                 return None, f"API调用失败: {error_msg}"
 
         except Exception as e:
-            api_logger.error(f"DeepSeek API调用异常: {e}")
+            logger.error(f"DeepSeek API调用异常: {e}")
             return None, f"API调用异常: {str(e)}"
 
     async def send_to_boss(self, boss_id: str, message: str) -> Tuple[bool, str]:
@@ -117,11 +138,11 @@ class ChatService:
         try:
             # 这里需要调用实际的BOSS直聘发送接口
             # 目前返回模拟状态
-            api_logger.info(f"模拟发送消息到 {boss_id}: {message}")
+            logger.info(f"模拟发送消息到 {boss_id}: {message}")
             return True, ""
 
         except Exception as e:
-            api_logger.error(f"发送消息失败: {e}")
+            logger.error(f"发送消息失败: {e}")
             return False, str(e)
 
     def save_conversation(
@@ -145,7 +166,7 @@ class ChatService:
         Returns:
             conversation_id
         """
-        with self.db.connect() as db:
+        with self.db as db:
             db.cursor.execute("""
                 INSERT INTO conversations
                 (candidate_name, action, ai_message, candidate_message, detail, created_at)
@@ -176,7 +197,7 @@ class ChatService:
         Returns:
             对话历史列表
         """
-        with self.db.connect() as db:
+        with self.db as db:
             if candidate_name:
                 rows = db.cursor.execute("""
                     SELECT * FROM conversations
@@ -200,7 +221,7 @@ class ChatService:
         Returns:
             未读消息列表 [{boss_id, candidate_name, message, ...}]
         """
-        with self.db.connect() as db:
+        with self.db as db:
             # 从candidates表获取需要回复的候选人
             rows = db.cursor.execute("""
                 SELECT c.* FROM candidates c
@@ -223,7 +244,7 @@ class ChatService:
         Returns:
             template_id
         """
-        with self.db.connect() as db:
+        with self.db as db:
             # 确保reply_templates表存在
             db.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS reply_templates (
@@ -247,7 +268,7 @@ class ChatService:
 
     def get_templates(self, user_id: str = "default") -> List[Dict]:
         """获取所有回复模板"""
-        with self.db.connect() as db:
+        with self.db as db:
             db.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS reply_templates (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

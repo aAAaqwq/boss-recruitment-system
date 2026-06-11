@@ -114,6 +114,7 @@ def workflow_3_1_auto_contact(
     min_years: int = 3,
     dry_run: bool = True,
     criteria: Optional[FilterCriteria] = None,
+    batch_limit: int = 20,
 ) -> Dict:
     """3.1 主动筛选沟通流程 - 批量打招呼(同步入口)"""
     import concurrent.futures
@@ -121,7 +122,7 @@ def workflow_3_1_auto_contact(
     coro = _auto_contact_impl(
         daily_cap=daily_cap, school_whitelist=school_whitelist,
         min_degree=min_degree, min_years=min_years,
-        dry_run=dry_run, criteria=criteria,
+        dry_run=dry_run, criteria=criteria, batch_limit=batch_limit,
     )
     try:
         loop = asyncio.get_running_loop()
@@ -137,14 +138,19 @@ def workflow_3_1_auto_contact(
 async def _auto_contact_impl(
     daily_cap: int, school_whitelist: List[str], min_degree: str,
     min_years: int, dry_run: bool, criteria: Optional[FilterCriteria],
+    batch_limit: int = 20,
 ) -> Dict:
-    """批量打招呼核心逻辑 (async)"""
+    """批量打招呼核心逻辑 (async)
+
+    daily_cap:  每日封顶上限（硬限制）
+    batch_limit: 单次处理数量（本次最多联系多少人）
+    """
     if criteria is None:
         criteria = FilterCriteria(
             school_whitelist=school_whitelist or None,
             min_degree=min_degree, min_years=min_years,
         )
-    logger.info(f"[F5] 启动 | cap={daily_cap} dry={dry_run} filters={criteria.get_active_filters()}")
+    logger.info(f"[F5] 启动 | 每日上限={daily_cap} 本次={batch_limit} dry={dry_run} filters={criteria.get_active_filters()}")
 
     # 检查浏览器(使用 _ensure_session 进行健康探测)
     if not await automation._ensure_session():
@@ -155,11 +161,13 @@ async def _auto_contact_impl(
         db.init_tables()
         already = db.count_contacted_today()
         contacted_ids = set(db.get_contacted_today())
-    remaining = max(0, daily_cap - already)
-    if remaining <= 0:
+    daily_remaining = max(0, daily_cap - already)
+    if daily_remaining <= 0:
         return {"status": "completed", "message": f"今日已达上限({already}/{daily_cap})",
                 "contacted": 0, "skipped": 0, "failed": 0, "total_scanned": 0}
-    logger.info(f"[F5] 今日已联系{already}人, 剩余{remaining}")
+    # 本次实际目标 = min(单次数量, 每日剩余)
+    target = min(batch_limit, daily_remaining)
+    logger.info(f"[F5] 今日已联系{already}人, 每日剩余{daily_remaining}, 本次目标{target}")
 
     # 导航到招聘者推荐牛人页面
     nav = await automation.navigate("https://www.zhipin.com/web/chat/recommend")
@@ -182,7 +190,7 @@ async def _auto_contact_impl(
     last_screenshot_at = 0  # 上次截图时的 total 数
     limit_reached = False  # BOSS 限制弹窗标记
 
-    while contacted < remaining and not limit_reached:
+    while contacted < target and not limit_reached:
         # 全局超时保护
         if _time.monotonic() - start_time > TIMEOUT_SECONDS:
             logger.warning(f"[F5] 超时退出 ({TIMEOUT_SECONDS}s)")
@@ -240,7 +248,7 @@ async def _auto_contact_impl(
         if not new_cards:
             no_new += 1
             # 连续 3 次无新卡片 → 刷新推荐页面获取新一批候选人
-            if no_new >= 3 and contacted < remaining:
+            if no_new >= 3 and contacted < target:
                 logger.info(f"[F5] 连续{no_new}次无新卡片，刷新推荐页面获取新候选人...")
                 nav = await automation.navigate("https://www.zhipin.com/web/chat/recommend")
                 if nav.get("status") == "error":
@@ -261,7 +269,7 @@ async def _auto_contact_impl(
         logger.info(f"[F5] 发现{len(new_cards)}个可见卡片 (按钮在视口内)")
 
         for card in new_cards:
-            if contacted >= remaining:
+            if contacted >= target:
                 break
             txt = card.get("text", "")
             cand = {
@@ -301,9 +309,14 @@ async def _auto_contact_impl(
                         db.insert_contact_record(
                             boss_id=boss_id, action="contacted", success=True,
                         )
+                        db.insert_candidate(
+                            boss_id=boss_id, candidate_name=cand["name"],
+                            school=cand["school"], degree=cand["degree"],
+                            years=cand["years"], status="contacted",
+                        )
                 except Exception as db_err:
                     logger.warning(f"[F5] DB写入失败: {db_err}")
-                logger.info(f"[F5] 成功({contacted}/{remaining}): {boss_id[:1]}**")
+                logger.info(f"[F5] 成功({contacted}/{target}): {boss_id[:1]}**")
 
                 # 点击后检测——BOSS可能在打招呼后弹限制弹窗
                 limit_kw2 = await check_limit_popup()

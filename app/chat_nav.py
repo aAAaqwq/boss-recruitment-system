@@ -1,6 +1,7 @@
 """
 BOSS直聘 Chat 页面导航辅助函数
-处理 SPA 导航（点击左侧"沟通"按钮进入聊天页）
+处理 SPA 导航（通过 URL 直达 + iframe 穿透）
+BOSS直聘 /web/chat/ 页面内容在 iframe 内，所有 JS 需穿透
 """
 import asyncio
 import json
@@ -8,6 +9,12 @@ from typing import Dict, List, Optional, Any
 
 from app.automation import automation
 from app.logging_config import logger
+
+# iframe 穿透前缀 — 聊天页内容在 .frame-box iframe 内
+_GET_DOC = """
+var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+var doc = iframe && iframe.contentDocument ? iframe.contentDocument : document;
+"""
 
 # 左侧导航栏 "沟通" 按钮的 CSS 选择器（多种fallback）
 _CHAT_NAV_SELECTORS = [
@@ -52,126 +59,196 @@ _JS_CLICK_CHAT_NAV = """
 """
 
 # JS: 获取左侧联系人列表（已聊过的候选人）
+# 聊天页内容在主文档中（非iframe），使用 .geek-item-wrap 选择器
 _JS_GET_CONTACTS = """
 (function() {
-    var items = document.querySelectorAll(
-        '[class*="chat-item"], [class*="contact-item"], [class*="conversation"], '
-        + '[class*="dialog"], [class*="user-item"], [class*="list-item"]'
-    );
-    var contacts = [];
-    for (var i = 0; i < items.length; i++) {
-        var r = items[i].getBoundingClientRect();
-        var t = (items[i].innerText || '').trim();
-        // 只取左侧面板（x < 450px)且合理的项目
-        if (r.x < 450 && r.width > 120 && r.height > 40 && t.length > 0) {
-            var lines = t.split('\\n').filter(function(l) { return l.trim().length > 0; });
-            contacts.push({
-                name: lines[0] || '',
-                subtitle: lines[1] || '',
-                text: t,
-                x: r.x + r.width / 2,
-                y: r.y + r.height / 2,
-                w: r.width,
-                h: r.height,
-                hasUnread: t.indexOf('●') >= 0 || t.indexOf('未读') >= 0
-            });
+    try {
+        var contacts = [];
+        var items = document.querySelectorAll('.geek-item-wrap');
+        for (var i = 0; i < items.length; i++) {
+            try {
+                var r = items[i].getBoundingClientRect();
+                var t = (items[i].innerText || '').trim();
+                if (r.width > 80 && r.height > 30 && t.length > 0) {
+                    var parts = t.split(/[\\n]+/).filter(function(l) { return l.trim().length > 0; });
+                    var name = parts[0] || '';
+                    var subtitle = parts.length > 1 ? parts[parts.length - 1] : '';
+                    var topEl = items[i].querySelector('.geek-item-top');
+                    if (topEl) {
+                        var topText = (topEl.innerText || '').trim();
+                        var topParts = topText.split(/[\\n]+/);
+                        if (topParts[0]) name = topParts[0].trim();
+                        if (topParts.length > 1) subtitle = topParts.slice(1).join(' ').trim();
+                    }
+                    contacts.push({
+                        name: name,
+                        subtitle: subtitle,
+                        text: t,
+                        x: r.x + r.width / 2,
+                        y: r.y + r.height / 2,
+                        w: r.width,
+                        h: r.height,
+                        hasUnread: t.indexOf('\\u25cf') >= 0 || t.indexOf('未读') >= 0
+                    });
+                }
+            } catch(e2) {}
         }
+        return JSON.stringify(contacts);
+    } catch(e) {
+        return JSON.stringify({error: 'JS_EXCEPTION', message: e.message || String(e), line: e.lineNumber});
     }
-    return contacts;
 })()
 """
 
-# JS: 检查是否有未读消息
+# JS: 检查是否有未读消息 — 在主文档和iframe中搜索
 _JS_HAS_UNREAD = """
 (function() {
+    // 策略1: 主文档中搜索
     var badges = document.querySelectorAll(
         '[class*="badge"], [class*="unread"], [class*="dot"], [class*="count"], '
-        + '[class*="notification"], [class*="new-msg"]'
+        + '[class*="notification"], [class*="new-msg"], [class*="red"]'
     );
     for (var i = 0; i < badges.length; i++) {
         var t = (badges[i].innerText || '').trim();
         if (t && t !== '0') {
             var r = badges[i].getBoundingClientRect();
-            return {hasUnread: true, count: t, x: r.x, y: r.y};
-        }
-    }
-    // 检查是否有红点元素
-    var redDots = document.querySelectorAll('[class*="red"], [style*="red"], [style*="ff0000"]');
-    return {hasUnread: redDots.length > 0, count: redDots.length};
-})()
-"""
-
-# JS: 获取当前聊天消息（改进版：相对定位判断发送方）
-_JS_GET_MESSAGES = """
-(function() {
-    // 找到聊天消息容器以确定面板宽度
-    var containers = document.querySelectorAll(
-        '[class*="chat-content"], [class*="message-list"], [class*="msg-list"], '
-        + '[class*="dialog-body"], [class*="chat-body"]'
-    );
-    var panelWidth = 1000; // 默认宽度
-    for (var c = 0; c < containers.length; c++) {
-        var cr = containers[c].getBoundingClientRect();
-        if (cr.width > 300) {
-            panelWidth = cr.width;
-            break;
-        }
-    }
-
-    var msgs = document.querySelectorAll(
-        '[class*="message"], [class*="msg"], [class*="bubble"], [class*="chat-content"]'
-    );
-    var result = [];
-    for (var i = 0; i < msgs.length; i++) {
-        var t = (msgs[i].innerText || '').trim();
-        var r = msgs[i].getBoundingClientRect();
-        if (t.length > 3 && r.width > 50) {
-            // 相对定位: 如果消息气泡在面板右半部分 → 是"我"发的
-            // 同时检查 CSS class 中是否有 "self"/"mine"/"right" 等标识
-            var cls = (msgs[i].className || '').toLowerCase();
-            var isMeByClass = cls.indexOf('self') >= 0 || cls.indexOf('mine') >= 0
-                || cls.indexOf('right') >= 0 || cls.indexOf('send') >= 0;
-            var isMeByPos = r.x > panelWidth * 0.5;
-            var isMe = isMeByClass || isMeByPos;
-            result.push({text: t, isMe: isMe, x: r.x, y: r.y});
-        }
-    }
-    return result;
-})()
-"""
-
-# JS: 查找输入框和发送按钮
-_JS_FIND_INPUT_AREA = """
-(function() {
-    // 输入框
-    var inputs = document.querySelectorAll(
-        'textarea, [contenteditable="true"], [class*="input"] textarea, '
-        + '[class*="editor"], [class*="chat-input"]'
-    );
-    var inputInfo = null;
-    for (var i = 0; i < inputs.length; i++) {
-        var r = inputs[i].getBoundingClientRect();
-        if (r.width > 100 && r.height > 20) {
-            inputInfo = {x: r.x + r.width/2, y: r.y + r.height/2};
-            break;
-        }
-    }
-    // 发送按钮
-    var btns = document.querySelectorAll(
-        'button, [class*="send"], [class*="submit"], [class*="btn-send"]'
-    );
-    var sendBtn = null;
-    for (var j = 0; j < btns.length; j++) {
-        var t = (btns[j].innerText || '').trim();
-        if (t === '发送' || t === '发 送' || t.indexOf('发送') >= 0 || t.indexOf('Send') >= 0) {
-            var br = btns[j].getBoundingClientRect();
-            if (br.width > 0 && br.height > 0) {
-                sendBtn = {x: br.x + br.width/2, y: br.y + br.height/2, text: t};
-                break;
+            if (r.width > 0 && r.height > 0) {
+                return {hasUnread: true, count: t, x: Math.round(r.x), y: Math.round(r.y)};
             }
         }
     }
-    return {input: inputInfo, send: sendBtn};
+    // 策略2: iframe中搜索
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) {
+        var doc = iframe.contentDocument;
+        var ibadges = doc.querySelectorAll('[class*="badge"], [class*="unread"], [class*="dot"], [class*="red"]');
+        for (var j = 0; j < ibadges.length; j++) {
+            var it = (ibadges[j].innerText || '').trim();
+            if (it && it !== '0') {
+                var ir = ibadges[j].getBoundingClientRect();
+                if (ir.width > 0 && ir.height > 0) {
+                    return {hasUnread: true, count: it, x: Math.round(ir.x), y: Math.round(ir.y)};
+                }
+            }
+        }
+    }
+    return {hasUnread: false, count: 0};
+})()
+"""
+
+# JS: 获取当前聊天消息 — 精准定位 .chat-conversation 消息容器
+# BOSS直聘聊天页结构: .chat-user(左侧联系人,x=444-804) + .chat-conversation(右侧消息,x=804+)
+_JS_GET_MESSAGES = """
+(function() {
+    var vw = Math.max(window.innerWidth, 1000);
+    var result = [];
+    var seen = {};
+
+    function isMe(el, r, cls) {
+        if (cls.indexOf('self') >= 0 || cls.indexOf('mine') >= 0
+            || cls.indexOf('right') >= 0 || cls.indexOf('send') >= 0
+            || cls.indexOf('boss') >= 0) return true;
+        if (r.x > vw * 0.58) return true;
+        return false;
+    }
+
+    // 精准定位消息容器
+    var chatBox = document.querySelector('.chat-conversation');
+    if (!chatBox) {
+        return JSON.stringify([]);
+    }
+    // 排除空状态
+    if (chatBox.querySelector('.conversation-no-data')) {
+        return JSON.stringify([]);
+    }
+
+    function tryCapture(el, text) {
+        if (text.length < 2 || text.length > 600) return;
+        var r = el.getBoundingClientRect();
+        if (r.width < 10 || r.height < 10 || r.width > 650) return;
+        var cls = (el.className || '').toString().toLowerCase();
+        if (cls.indexOf('input') >= 0 || cls.indexOf('editor') >= 0) return;
+        if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return;
+        var key = text.substring(0, 40) + '@' + Math.round(r.y / 5);
+        if (seen[key]) return;
+        seen[key] = true;
+        result.push({
+            text: text, isMe: isMe(el, r, cls),
+            x: Math.round(r.x), y: Math.round(r.y)
+        });
+    }
+
+    function walk(el) {
+        // 先捕获文本节点
+        for (var i = 0; i < el.childNodes.length; i++) {
+            var node = el.childNodes[i];
+            if (node.nodeType === 3) {
+                var t = (node.textContent || '').trim();
+                if (t) tryCapture(el, t);
+            }
+        }
+        // 叶子元素：捕获完整文本
+        if (el.children.length === 0) {
+            var full = (el.textContent || '').trim();
+            if (full) tryCapture(el, full);
+            return;
+        }
+        // 递归子元素
+        for (var j = 0; j < el.children.length; j++) {
+            walk(el.children[j]);
+        }
+    }
+    walk(chatBox);
+
+    // 按Y排序
+    result.sort(function(a, b) { return a.y - b.y; });
+    return JSON.stringify(result);
+})()
+"""
+
+# JS: 查找输入框和发送按钮 — 优先主文档，回退iframe
+_JS_FIND_INPUT_AREA = """
+(function() {
+    function findInDoc(doc) {
+        var inputs = doc.querySelectorAll(
+            'textarea, [contenteditable="true"], [class*="input"] textarea, '
+            + '[class*="editor"], [class*="chat-input"], [class*="input-area"], '
+            + '[class*="send-area"], [class*="type-area"]'
+        );
+        var inputInfo = null;
+        for (var i = 0; i < inputs.length; i++) {
+            var r = inputs[i].getBoundingClientRect();
+            if (r.width > 100 && r.height > 20) {
+                inputInfo = {x: r.x + r.width/2, y: r.y + r.height/2}; break;
+            }
+        }
+        var btns = doc.querySelectorAll(
+            'button, [class*="send"], [class*="submit"], [class*="btn-send"]'
+        );
+        var sendBtn = null;
+        for (var j = 0; j < btns.length; j++) {
+            var t = (btns[j].innerText || '').trim();
+            if (t === '发送' || t === '发 送' || t.indexOf('发送') >= 0 || t.indexOf('Send') >= 0) {
+                var br = btns[j].getBoundingClientRect();
+                if (br.width > 0 && br.height > 0) {
+                    sendBtn = {x: br.x + br.width/2, y: br.y + br.height/2, text: t}; break;
+                }
+            }
+        }
+        return {input: inputInfo, send: sendBtn};
+    }
+
+    // 先搜索主文档
+    var result = findInDoc(document);
+    if (result.input || result.send) return result;
+
+    // 回退: iframe
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) {
+        var ifResult = findInDoc(iframe.contentDocument);
+        if (ifResult.input || ifResult.send) return ifResult;
+    }
+    return result;
 })()
 """
 
@@ -179,7 +256,7 @@ _JS_FIND_INPUT_AREA = """
 LIMIT_KEYWORDS = [
     "已达上限", "次数已用完", "今日已达", "已达每日",
     "沟通人数已达", "打招呼次数", "超出限制",
-    "明天再来", "今日上限", "已达当天",
+    "今日上限", "已达当天",
     "每天最多", "上限了", "用完了", "今日沟通",
     "权益不足", "开料次数", "剩余次数", "次数不足",
     "会员权益", "升级会员", "额度不足", "免费次数",
@@ -232,82 +309,403 @@ _JS_DISMISS_POPUP = """
 })()
 """
 
-# JS: 清空输入框 — 聚焦 + 全选 + 删除，兼容 React/Vue 受控组件
+# JS: 清空输入框 — 聚焦 + 全选 + 删除，优先主文档，兼容 React/Vue
 _JS_CLEAR_INPUT = """
 (function() {
-    var el = document.querySelector(
-        'textarea, [contenteditable="true"], [class*="chat-input"], [class*="input-box"]'
-    );
-    if (!el) return JSON.stringify({ok: false, reason: 'not_found'});
-    el.focus();
-    el.dispatchEvent(new Event('focus', {bubbles: true}));
-    // Select all
-    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-        el.setSelectionRange(0, el.value.length);
-    } else if (el.contentEditable === 'true') {
-        var range = document.createRange();
-        range.selectNodeContents(el);
-        var sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+    function clearInDoc(doc) {
+        var el = doc.querySelector(
+            'textarea, [contenteditable="true"], [class*="chat-input"], [class*="input-box"]'
+        );
+        if (!el) return false;
+        el.focus();
+        el.dispatchEvent(new Event('focus', {bubbles: true}));
+        if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+            el.setSelectionRange(0, el.value.length);
+        } else if (el.contentEditable === 'true') {
+            var range = document.createRange();
+            range.selectNodeContents(el);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        return true;
     }
-    return JSON.stringify({ok: true});
+
+    if (clearInDoc(document)) return JSON.stringify({ok: true});
+
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument && clearInDoc(iframe.contentDocument)) {
+        return JSON.stringify({ok: true});
+    }
+    return JSON.stringify({ok: false, reason: 'not_found'});
 })()
 """
 
 
-async def navigate_to_chat() -> Dict:
-    """导航到BOSS直聘聊天页（通过点击左侧"沟通"按钮）
+# JS: 点击"未读"筛选标签 — 聊天页在主文档中，.chat-message-filter-left 内的 span
+_JS_CLICK_UNREAD = """
+(function() {
+    // 策略1: 直接找 .chat-message-filter-left 内的"未读"文本
+    var filterArea = document.querySelector('.chat-message-filter-left');
+    if (filterArea) {
+        var spans = filterArea.querySelectorAll('span');
+        for (var i = 0; i < spans.length; i++) {
+            var t = (spans[i].innerText || '').trim();
+            if (t === '未读') {
+                var r = spans[i].getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    spans[i].click();
+                    return {found: true, text: t, x: r.x + r.width/2, y: r.y + r.height/2};
+                }
+            }
+        }
+        // 可能"未读"直接在filterArea文本中
+        var ft = (filterArea.innerText || '').trim();
+        if (ft.indexOf('未读') >= 0) {
+            var fr = filterArea.getBoundingClientRect();
+            filterArea.click();
+            return {found: true, text: 'filter-click', x: fr.x + fr.width/2, y: fr.y + fr.height/2};
+        }
+    }
+
+    // 策略2: 全局搜索"未读"文本的span
+    var allSpans = document.querySelectorAll('span');
+    for (var j = 0; j < allSpans.length; j++) {
+        var st = (allSpans[j].innerText || '').trim();
+        if (st === '未读') {
+            var sr = allSpans[j].getBoundingClientRect();
+            if (sr.width > 0 && sr.height > 0 && sr.y < 300) {
+                allSpans[j].click();
+                return {found: true, text: st, x: sr.x + sr.width/2, y: sr.y + sr.height/2};
+            }
+        }
+    }
+
+    // 策略3: 在iframe中搜索(回退)
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) {
+        var idoc = iframe.contentDocument;
+        var ispans = idoc.querySelectorAll('span');
+        for (var k = 0; k < ispans.length; k++) {
+            if ((ispans[k].innerText || '').trim() === '未读') {
+                var ir = ispans[k].getBoundingClientRect();
+                if (ir.width > 0 && ir.height > 0) {
+                    ispans[k].click();
+                    return {found: true, text: 'iframe-未读', x: ir.x + ir.width/2, y: ir.y + ir.height/2};
+                }
+            }
+        }
+    }
+
+    return {found: false};
+})()
+"""
+
+
+# JS: 综合DOM诊断 — 扫描聊天页所有关键元素的class/结构/文本
+_JS_DUMP_CHAT_DOM = """
+(function() {
+    var report = {};
+
+    // 1. 所有iframe
+    var iframes = document.querySelectorAll('iframe');
+    report.iframes = [];
+    for (var i = 0; i < iframes.length; i++) {
+        var f = iframes[i];
+        var r = f.getBoundingClientRect();
+        report.iframes.push({
+            index: i,
+            src: (f.src || '').substring(0, 120),
+            className: f.className || '',
+            id: f.id || '',
+            width: r.width, height: r.height,
+            visible: r.width > 0 && r.height > 0
+        });
+    }
+
+    // 2. 主文档和iframe内的结构扫描
+    var targets = [{label: 'main', doc: document}];
+    for (var j = 0; j < iframes.length; j++) {
+        try {
+            var d = iframes[j].contentDocument;
+            if (d) targets.push({label: 'iframe[' + j + ']', doc: d});
+        } catch(e) {}
+    }
+
+    report.panels = [];
+    for (var t = 0; t < targets.length; t++) {
+        var doc = targets[t].doc;
+        var label = targets[t].label;
+
+        // 扫描所有有className的可见div/section/ul/li
+        var all = doc.querySelectorAll('div, section, ul, li, nav, aside, a, span, button');
+        for (var k = 0; k < all.length; k++) {
+            var el = all[k];
+            var rect = el.getBoundingClientRect();
+            var cls = el.className || '';
+            var tag = el.tagName.toLowerCase();
+            var text = (el.innerText || '').trim().substring(0, 80);
+            // 只收集有意义的元素: 有class且可见
+            if (cls && rect.width > 60 && rect.height > 15 && text.length > 0) {
+                report.panels.push({
+                    source: label,
+                    tag: tag,
+                    cls: typeof cls === 'string' ? cls.substring(0, 100) : '',
+                    x: Math.round(rect.x), y: Math.round(rect.y),
+                    w: Math.round(rect.width), h: Math.round(rect.height),
+                    text: text.replace(/\\n/g, ' | ')
+                });
+            }
+        }
+    }
+
+    // 3. 扫描包含"未读"文字的元素
+    report.unreadElements = [];
+    for (var t2 = 0; t2 < targets.length; t2++) {
+        var doc2 = targets[t2].doc;
+        var items = doc2.querySelectorAll('*');
+        for (var m = 0; m < items.length; m++) {
+            var txt = (items[m].innerText || '').trim();
+            if (txt === '未读' || txt.indexOf('未读') === 0) {
+                var r2 = items[m].getBoundingClientRect();
+                report.unreadElements.push({
+                    source: targets[t2].label,
+                    tag: items[m].tagName.toLowerCase(),
+                    cls: (items[m].className || '').toString().substring(0, 100),
+                    x: Math.round(r2.x), y: Math.round(r2.y),
+                    w: Math.round(r2.width), h: Math.round(r2.height),
+                    text: txt.substring(0, 60)
+                });
+            }
+        }
+    }
+
+    // 4. 扫描左侧区域(x<500)的列表项
+    report.leftSideItems = [];
+    for (var t3 = 0; t3 < targets.length; t3++) {
+        var doc3 = targets[t3].doc;
+        var leftItems = doc3.querySelectorAll('li, div, a');
+        for (var n = 0; n < leftItems.length; n++) {
+            var el3 = leftItems[n];
+            var r3 = el3.getBoundingClientRect();
+            var txt3 = (el3.innerText || '').trim();
+            if (r3.x < 500 && r3.width > 100 && r3.height > 40 && txt3.length > 2) {
+                report.leftSideItems.push({
+                    source: targets[t3].label,
+                    tag: el3.tagName.toLowerCase(),
+                    cls: (el3.className || '').toString().substring(0, 100),
+                    x: Math.round(r3.x), y: Math.round(r3.y),
+                    w: Math.round(r3.width), h: Math.round(r3.height),
+                    text: txt3.substring(0, 100).replace(/\\n/g, ' | ')
+                });
+            }
+        }
+    }
+
+    // 5. 页面URL
+    report.url = window.location.href;
+
+    // 限制每个数组最大条目数，避免返回过大
+    report.panels = report.panels.slice(0, 80);
+    report.leftSideItems = report.leftSideItems.slice(0, 40);
+
+    return JSON.stringify(report);
+})()
+"""
+
+
+async def dump_chat_dom() -> Dict:
+    """诊断工具: 扫描聊天页DOM结构，返回关键元素的class/text/位置。
+
+    用于调试JS选择器不匹配的问题。返回JSON报告包含:
+      - iframes: 所有iframe信息
+      - panels: 所有有className的可见容器
+      - unreadElements: 包含"未读"文字的元素
+      - leftSideItems: 左侧区域(x<500)的列表项
+      - url: 当前页面URL
+    """
+    raw = await automation.execute_js(_JS_DUMP_CHAT_DOM)
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {"error": "parse_failed", "raw": raw[:500]}
+    return raw if isinstance(raw, dict) else {"error": "unexpected_type", "raw": str(raw)[:500]}
+
+
+async def click_unread_filter() -> Dict:
+    """点击聊天页"未读"筛选标签，过滤出有未读消息的会话。
 
     Returns:
-        {status: "ok"|"error", message: str, contact_count: int}
+        {status: "ok"|"not_found", message: str}
     """
-    # 先确保在 zhipin.com 上
+    result = await automation.execute_js(_JS_CLICK_UNREAD)
+    if not isinstance(result, dict):
+        result = {}
+    if result.get("found"):
+        await asyncio.sleep(1.5)  # 等待列表刷新
+        logger.info(f"[ChatNav] 已点击'未读'筛选: {result.get('text')}")
+        return {"status": "ok", "message": f"已筛选未读消息"}
+    else:
+        logger.warning("[ChatNav] 未找到'未读'筛选按钮")
+        return {"status": "not_found", "message": "未找到未读筛选按钮"}
+
+
+# JS: 点击"沟通中"筛选标签 — 只显示有沟通记录的联系人（才有简历权限）
+_JS_CLICK_COMMUNICATING = """
+(function() {
+    // 策略1: .chat-message-filter-left 内找"沟通中"
+    var filterArea = document.querySelector('.chat-message-filter-left');
+    if (filterArea) {
+        var spans = filterArea.querySelectorAll('span');
+        for (var i = 0; i < spans.length; i++) {
+            var t = (spans[i].innerText || '').trim();
+            if (t === '沟通中') {
+                var r = spans[i].getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    spans[i].click();
+                    return {found: true, text: t, x: r.x + r.width/2, y: r.y + r.height/2};
+                }
+            }
+        }
+        var ft = (filterArea.innerText || '').trim();
+        if (ft.indexOf('沟通中') >= 0) {
+            var fr = filterArea.getBoundingClientRect();
+            filterArea.click();
+            return {found: true, text: 'filter-click', x: fr.x + fr.width/2, y: fr.y + fr.height/2};
+        }
+    }
+    // 策略2: 全局搜索
+    var allSpans = document.querySelectorAll('span');
+    for (var j = 0; j < allSpans.length; j++) {
+        var st = (allSpans[j].innerText || '').trim();
+        if (st === '沟通中') {
+            var sr = allSpans[j].getBoundingClientRect();
+            if (sr.width > 0 && sr.height > 0 && sr.y < 300) {
+                allSpans[j].click();
+                return {found: true, text: st, x: sr.x + sr.width/2, y: sr.y + sr.height/2};
+            }
+        }
+    }
+    // 策略3: iframe回退
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) {
+        var idoc = iframe.contentDocument;
+        var ispans = idoc.querySelectorAll('span');
+        for (var k = 0; k < ispans.length; k++) {
+            if ((ispans[k].innerText || '').trim() === '沟通中') {
+                var ir = ispans[k].getBoundingClientRect();
+                if (ir.width > 0 && ir.height > 0) {
+                    ispans[k].click();
+                    return {found: true, text: 'iframe-沟通中', x: ir.x + ir.width/2, y: ir.y + ir.height/2};
+                }
+            }
+        }
+    }
+    return {found: false};
+})()
+"""
+
+
+async def click_communicating_filter() -> Dict:
+    """点击聊天页"沟通中"筛选标签，只显示有沟通记录的联系人。
+
+    只有"沟通中"的联系人才能请求/下载简历。
+
+    Returns:
+        {status: "ok"|"not_found", message: str}
+    """
+    result = await automation.execute_js(_JS_CLICK_COMMUNICATING)
+    if not isinstance(result, dict):
+        result = {}
+    if result.get("found"):
+        await asyncio.sleep(2)  # 等待列表刷新
+        logger.info(f"[ChatNav] 已点击'沟通中'筛选: {result.get('text')}")
+        return {"status": "ok", "message": f"已筛选沟通中"}
+    else:
+        logger.warning("[ChatNav] 未找到'沟通中'筛选按钮")
+        return {"status": "not_found", "message": "未找到沟通中筛选按钮"}
+
+
+async def navigate_to_chat(filter_unread: bool = False) -> Dict:
+    """导航到BOSS直聘聊天页。
+
+    必须先加载 SPA shell (/web/chat/recommend)，再点击"沟通"导航。
+    聊天页内容在 MAIN document 中（非 iframe），使用 .geek-item-wrap 选择器。
+
+    Args:
+        filter_unread: True=先点"未读"筛选再拉取联系人，F7批量回复使用
+
+    Returns:
+        {status: "ok"|"error", message: str, contact_count: int, contacts: list}
+    """
     if not await automation._ensure_session():
         return {"status": "error", "message": "浏览器未连接"}
 
-    # 先导航到首页确保左侧导航栏可见
+    # 1. 加载 SPA shell（推荐页）
     await automation.navigate("https://www.zhipin.com/web/chat/recommend")
-    await asyncio.sleep(3)
+    await asyncio.sleep(4)
 
-    # 尝试点击"沟通"导航按钮
+    # 2. 点击左侧"沟通"导航（JS DOM点击，触发SPA路由）
     clicked = await automation.execute_js(_JS_CLICK_CHAT_NAV)
-    # 防御: 确保返回值是 dict 而非 list
     if not isinstance(clicked, dict):
-        logger.warning(f"[ChatNav] JS返回了非dict类型: {type(clicked).__name__} = {clicked!r}")
+        logger.warning(f"[ChatNav] JS返回了非dict类型: {type(clicked).__name__}")
         clicked = None
-    if not clicked or not clicked.get("found"):
-        # 备用: 导航到推荐的页面（可能自动跳转到聊天）
-        await automation.navigate("https://www.zhipin.com/web/chat/index")
-        await asyncio.sleep(3)
-        clicked = await automation.execute_js(_JS_CLICK_CHAT_NAV)
-        if not isinstance(clicked, dict):
-            logger.warning(f"[ChatNav] JS重试也返回了非dict类型: {type(clicked).__name__}")
-            clicked = None
-
-    await asyncio.sleep(2)
-
-    # 获取联系人列表
-    contacts = await automation.execute_js(_JS_GET_CONTACTS)
-    contact_count = len(contacts) if isinstance(contacts, list) else 0
 
     if clicked and clicked.get("found"):
-        logger.info(f"[ChatNav] 已点击'沟通'，找到 {contact_count} 个联系人")
-        return {"status": "ok", "message": f"已进入聊天页，{contact_count}个联系人", "contact_count": contact_count}
+        logger.info(f"[ChatNav] 已点击'沟通': {clicked.get('text')}")
     else:
-        logger.warning("[ChatNav] 未找到'沟通'按钮，可能已在聊天页")
-        return {"status": "ok", "message": "已在聊天页(或无法确认)", "contact_count": contact_count}
+        logger.warning("[ChatNav] 未找到'沟通'按钮，尝试直接导航到index")
+        await automation.navigate("https://www.zhipin.com/web/chat/index")
+        await asyncio.sleep(4)
+
+    # 3. 等待联系人列表渲染（BOSS直聘异步加载，需要充足时间）
+    await asyncio.sleep(5)
+
+    # 4. 如果筛选未读，先点"未读"再等待列表刷新
+    if filter_unread:
+        await click_unread_filter()
+        await asyncio.sleep(3)
+
+    # 5. 获取联系人列表
+    contacts = await get_contacts()
+    contact_count = len(contacts) if contacts else 0
+    logger.info(f"[ChatNav] 找到 {contact_count} 个联系人{' (未读筛选)' if filter_unread else ''}")
+    return {
+        "status": "ok",
+        "message": f"已进入聊天页",
+        "contact_count": contact_count,
+        "contacts": contacts,
+    }
 
 
 async def get_contacts() -> List[Dict[str, Any]]:
     """获取左侧联系人列表"""
     result = await automation.execute_js(_JS_GET_CONTACTS)
-    return result if isinstance(result, list) else []
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, list):
+                return parsed
+            if isinstance(parsed, dict) and parsed.get("error"):
+                logger.error(f"[ChatNav] get_contacts JS异常: {parsed.get('message')} at line {parsed.get('line')}")
+            return []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    if isinstance(result, list):
+        return result
+    return []
 
 
 async def get_messages() -> List[Dict[str, Any]]:
     """获取当前聊天消息"""
     result = await automation.execute_js(_JS_GET_MESSAGES)
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            pass
     return result if isinstance(result, list) else []
 
 
@@ -396,11 +794,11 @@ async def clear_input() -> bool:
 
 
 async def click_contact(name: str, x: float, y: float) -> bool:
-    """点击指定联系人"""
+    """点击指定联系人（CDP视口坐标，不受Chrome窗口偏移影响）"""
     try:
-        await automation.click(int(x), int(y))
+        ok = await automation.cdp_click_viewport(float(x), float(y))
         await asyncio.sleep(2)
-        return True
+        return ok
     except Exception as e:
         logger.warning(f"[ChatNav] 点击联系人失败: {e}")
         return False
@@ -428,11 +826,8 @@ async def type_and_send(message: str) -> Dict:
         await automation.type_text(message)
         await asyncio.sleep(0.5)
 
-        # 点击发送或按Enter
-        if send_info:
-            await automation.click(int(send_info["x"]), int(send_info["y"]))
-        else:
-            await automation.press_key("Return")
+        # 按Enter发送
+        await automation.press_key("Return")
 
         await asyncio.sleep(1)
         return {"status": "ok", "message": "已发送"}

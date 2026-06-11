@@ -24,6 +24,7 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./config:/app/config
+      - ./job_info:/app/job_info
       - ./.env:/app/.env
       - ./app:/app/app
       - ./templates:/app/templates
