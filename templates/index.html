@@ -1158,7 +1158,17 @@
          ═══════════════════════════════════════════ -->
     <script>
         // API_BASE: Docker 容器服务 (8002→容器内8001)
-        const API_BASE = 'http://localhost:8002';
+        // 自动检测 API 地址: Docker 环境用 8002，本地用 8001
+        const API_BASE = (() => {
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                // 优先尝试当前 host 的端口推断
+                const p = window.location.port;
+                if (p === '8321' || p === '3000' || p === '3101') return 'http://localhost:8002'; // Docker
+                if (p === '8002') return 'http://localhost:8002';
+                return 'http://localhost:8001'; // 本地
+            }
+            return window.location.origin; // 同源部署
+        })();
         let vncConnected = false;
         let vncScale = 1;
         let authToken = localStorage.getItem('auth_token') || null;
@@ -1921,8 +1931,10 @@
                 setLoading(btn, false);
                 if (data && data.status === 'ok') {
                     log('✅ Chrome已启动，BOSS直聘已打开', 'info');
-                    log('正在连接VNC桌面以查看浏览器...', 'info');
-                    await connectVNC({});
+                    if (!vncConnected) {
+                        log('正在连接VNC桌面以查看浏览器...', 'info');
+                        await connectVNC({});
+                    }
                 } else if (data && data.status === 'error') {
                     log(`❌ 启动失败: ${data.message}`, 'error');
                 } else {
@@ -2185,7 +2197,8 @@
                 schoolList = sw.split(',').map(s => s.trim()).filter(s => s.length > 0);
             }
             const requestBody = {
-                daily_cap: limit,
+                daily_cap: 80,
+                batch_limit: limit,
                 min_degree: config.filter.degree || '本科',
                 min_years: config.filter.yearsMin || 0,
                 school_whitelist: schoolList.length > 0 ? schoolList : undefined,
@@ -2317,7 +2330,7 @@
             apiCall('/api/chat/batch', {
                 limit: limit,
                 dry_run: false,
-                custom_template: config.templates.follow
+                custom_template: ''  // 空则走AI生成，填入话术则用模板
             }).then(data => {
                 if (data && (data.status === 'started' || data.status === 'queued')) {
                     log(`✅ 任务已启动，预计回复 ${limit} 人`, 'info');
@@ -2354,8 +2367,10 @@
                     if (!data) return;
                     if (data.status === 'completed') {
                         clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null;
-                        log(`✅ 回复完成! 成功:${data.success||0} 失败:${data.failed||0}`, 'info');
-                        updateStats(null, null, (data.success||0));
+                        // API 返回 replied/failed/skipped 三个字段
+                        const replySuccess = data.replied || data.success || 0;
+                        log(`✅ 回复完成! 成功:${replySuccess} 失败:${data.failed||0} 跳过:${data.skipped||0}`, 'info');
+                        updateStats(null, null, replySuccess);
                         clearTaskStatus();
                         setLoading(btn, false);
                     } else if (data.status === 'error' || data.status === 'failed') {
@@ -2364,11 +2379,11 @@
                         clearTaskStatus();
                         setLoading(btn, false);
                     } else if (data.status === 'running') {
-                        const processed = data.processed || 0;
+                        const done = (data.replied || 0) + (data.failed || 0) + (data.skipped || 0);
                         const total = data.total || limit;
-                        const progress = total > 0 ? Math.round((processed / total) * 100) : 0;
-                        updateTaskStatus(true, '批量回复未读', progress, `已处理 ${processed}/${total} 人`);
-                        if (count % 10 === 0) log(`⏳ 回复中... (${processed}/${total})`, 'info');
+                        const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+                        updateTaskStatus(true, '批量回复未读', progress, `已回复 ${data.replied||0}, 总 ${total} 人`);
+                        if (count % 10 === 0) log(`⏳ 回复中... (${done}/${total})`, 'info');
                     }
                 });
             }, 3000);

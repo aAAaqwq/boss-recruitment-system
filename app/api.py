@@ -230,23 +230,58 @@ def get_db():
     return conn
 
 def init_db():
+    """初始化数据库表 — 与 database.py 中 Database.init_tables() 保持一致"""
     conn = get_db()
     # 候选人表
     conn.execute('''CREATE TABLE IF NOT EXISTS candidates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, boss_id TEXT UNIQUE, name TEXT,
-        school TEXT, degree TEXT, years INTEGER, position TEXT, company TEXT,
-        status TEXT DEFAULT 'new', created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-    # 对话记录表
-    conn.execute('''CREATE TABLE IF NOT EXISTS conversations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, candidate_name TEXT, round_index INTEGER DEFAULT 0,
-        action TEXT, ai_message TEXT, candidate_message TEXT, detail TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-    # 运行时状态表
-    conn.execute('''CREATE TABLE IF NOT EXISTS runtime_state (
-        key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-    # 已处理候选人表
-    conn.execute('''CREATE TABLE IF NOT EXISTS processed_candidates (
-        candidate_key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        boss_id TEXT NOT NULL UNIQUE,
+        candidate_name TEXT,
+        school TEXT,
+        degree TEXT,
+        years INTEGER,
+        current_role TEXT,
+        expected_role TEXT,
+        expected_city TEXT,
+        skills TEXT,
+        status TEXT DEFAULT 'discovered',
+        contacted_at TEXT,
+        resume_path TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id ON candidates(boss_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON candidates(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_school ON candidates(school)")
+
+    # 联系记录表
+    conn.execute('''CREATE TABLE IF NOT EXISTS contact_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        boss_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        action_date TEXT NOT NULL,
+        success BOOLEAN DEFAULT 1,
+        error_message TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id_action ON contact_records(boss_id, action)")
+
+    # 聊天会话表
+    conn.execute('''CREATE TABLE IF NOT EXISTS chat_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        boss_id TEXT NOT NULL UNIQUE,
+        candidate_name TEXT,
+        current_round_id TEXT,
+        round_index INTEGER DEFAULT 0,
+        history TEXT,
+        last_screen_text TEXT,
+        rounds_sent_today INTEGER DEFAULT 0,
+        last_sent_date TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id_chat ON chat_sessions(boss_id)")
+
     # 简历操作表
     conn.execute('''CREATE TABLE IF NOT EXISTS resume_operations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,6 +292,36 @@ def init_db():
         detail TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_resume_candidate ON resume_operations(candidate_name)")
+
+    # 对话记录表
+    conn.execute('''CREATE TABLE IF NOT EXISTS conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        candidate_name TEXT,
+        action TEXT,
+        ai_message TEXT,
+        candidate_message TEXT,
+        detail TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # 运行时状态表
+    conn.execute('''CREATE TABLE IF NOT EXISTS runtime_state (
+        key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+    # 已处理候选人表 (去重用)
+    conn.execute('''CREATE TABLE IF NOT EXISTS processed_candidates (
+        candidate_key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+    # 回复模板表 (岗位话术库)
+    conn.execute('''CREATE TABLE IF NOT EXISTS reply_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        content TEXT NOT NULL,
+        user_id TEXT DEFAULT 'default',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(name, user_id)
+    )''')
+
     conn.commit()
     conn.close()
 
@@ -291,41 +356,120 @@ async def get_candidates(
     limit: int = 100,
     current_user: dict = Depends(verify_token)
 ):
-    """获取候选人列表 — 优先 contact_records，回退 processed_candidates"""
+    """获取候选人列表 — 聚合 candidates + contact_records + resume_operations
+
+    Returns:
+        candidates 列表，每项包含: name, school, degree, years, position, status, resume_path, contacted_at
+    """
     conn = get_db()
     try:
-        # 优先查 contact_records（F5 正式运行后会有数据）
-        cr_count = conn.execute("SELECT COUNT(*) FROM contact_records").fetchone()[0]
-        if cr_count > 0:
-            query = "SELECT boss_id, action as status, action_date as contacted_at, created_at FROM contact_records"
-            params: list = []
-            if status:
-                query += " WHERE action = ?"
-                params.append(status)
-            query += " ORDER BY created_at DESC LIMIT ?"
-            params.append(limit)
-            rows = conn.execute(query, params).fetchall()
-            return {"candidates": [dict(row) for row in rows], "source": "contact_records"}
+        # 主查询: candidates 关联 contact_records 和 resume_operations
+        query = """
+            SELECT
+                c.boss_id,
+                c.candidate_name,
+                c.school,
+                c.degree,
+                c.years,
+                c.expected_role,
+                c.status as candidate_status,
+                c.resume_path as candidate_resume_path,
+                cr.action as contact_status,
+                cr.action_date as contacted_at,
+                cr.created_at,
+                ro.candidate_name as resume_name,
+                ro.resume_downloaded,
+                ro.action as resume_action,
+                ro.detail,
+                ro.created_at as resume_at
+            FROM candidates c
+            LEFT JOIN (
+                SELECT boss_id, action, action_date, created_at,
+                       ROW_NUMBER() OVER (PARTITION BY boss_id ORDER BY created_at DESC) as rn
+                FROM contact_records
+            ) cr ON (cr.boss_id = c.boss_id AND cr.rn = 1)
+            LEFT JOIN (
+                SELECT candidate_name, resume_downloaded, action, detail, created_at, id,
+                       ROW_NUMBER() OVER (PARTITION BY candidate_name ORDER BY id DESC) as rn
+                FROM resume_operations
+            ) ro ON (ro.candidate_name = c.boss_id AND ro.rn = 1)
+            ORDER BY c.updated_at DESC
+            LIMIT ?
+        """
+        rows = conn.execute(query, (limit,)).fetchall()
 
-        # 回退: processed_candidates（含 OCR 数据，需清洗）
-        rows = conn.execute(
-            "SELECT candidate_key, created_at FROM processed_candidates ORDER BY created_at DESC LIMIT ?",
-            (limit * 3,),
-        ).fetchall()
-        cleaned = []
+        candidates = []
         for row in rows:
-            key = row["candidate_key"] or ""
-            # 过滤 OCR 乱码
-            if key.startswith("g:") or "--no-sandbox" in key or len(key) > 100:
-                continue
-            cleaned.append({
-                "name": key[:30],
-                "status": "contacted",
-                "created_at": row["created_at"],
+            row_dict = dict(row)
+            detail = {}
+            try:
+                if row_dict.get("detail"):
+                    detail = json.loads(row_dict["detail"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            # 从 detail JSON 中提取简历文件名
+            resume_filename = ""
+            dl_result = detail.get("download_result", {})
+            if isinstance(dl_result, dict):
+                resume_filename = Path(dl_result.get("path", "")).name or ""
+
+            # resume_path 优先从 candidates 表取，其次从 detail 中取
+            resume_path = row_dict.get("candidate_resume_path") or detail.get("path", "") or ""
+
+            candidates.append({
+                "boss_id": row_dict["boss_id"] or "",
+                "name": row_dict["candidate_name"] or row_dict["boss_id"] or "",
+                "school": row_dict.get("school") or "",
+                "degree": row_dict.get("degree") or "",
+                "years": row_dict.get("years") or 0,
+                "position": row_dict.get("expected_role") or "",
+                "status": row_dict.get("candidate_status") or row_dict.get("contact_status") or "unknown",
+                "resume_downloaded": bool(row_dict["resume_downloaded"]),
+                "resume_path": resume_path,
+                "resume_filename": resume_filename,
+                "resume_action": row_dict["resume_action"] or "",
+                "contacted_at": row_dict["contacted_at"],
+                "created_at": row_dict["created_at"],
             })
-            if len(cleaned) >= limit:
-                break
-        return {"candidates": cleaned, "source": "processed_candidates"}
+
+        # 回退: 如果 candidates 表为空，从 contact_records + resume_operations 获取
+        if not candidates:
+            rows = conn.execute(
+                "SELECT candidate_name as boss_id, candidate_name, action, resume_downloaded, detail, created_at "
+                "FROM resume_operations ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            for row in rows:
+                row_dict = dict(row)
+                detail = {}
+                try:
+                    if row_dict.get("detail"):
+                        detail = json.loads(row_dict["detail"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                dl_result = detail.get("download_result", {})
+                resume_filename = ""
+                if isinstance(dl_result, dict):
+                    resume_filename = Path(dl_result.get("path", "")).name or ""
+
+                candidates.append({
+                    "boss_id": row_dict["boss_id"] or row_dict["candidate_name"] or "",
+                    "name": row_dict["candidate_name"] or "",
+                    "school": "",
+                    "degree": "",
+                    "years": 0,
+                    "position": "",
+                    "status": row_dict["action"] or "unknown",
+                    "resume_downloaded": bool(row_dict["resume_downloaded"]),
+                    "resume_path": detail.get("path", resume_filename) if detail else "",
+                    "resume_filename": resume_filename,
+                    "resume_action": row_dict["action"] or "",
+                    "contacted_at": row_dict["created_at"],
+                    "created_at": row_dict["created_at"],
+                })
+
+        return {"candidates": candidates, "source": "candidates" if rows else "resume_operations", "total": len(candidates)}
     finally:
         conn.close()
 
@@ -502,6 +646,13 @@ class ExecuteScriptRequest(BaseModel):
 async def browser_execute_script(req: ExecuteScriptRequest):
     """在页面中执行JavaScript"""
     return await automation.execute_js(req.script)
+
+
+@app.post("/api/browser/type-send")
+async def browser_type_send(req: ExecuteScriptRequest):
+    """输入文本并按Enter发送 — 用于测试AI回复"""
+    from app.chat_nav import type_and_send
+    return await type_and_send(req.script)
 
 
 @app.post("/api/browser/open-boss")
@@ -1019,7 +1170,8 @@ class FilterContactRequest(BaseModel):
     当前支持: school_whitelist, min_degree, min_years
     后续可扩展: age_range, tech_stack, industry, job_title_keywords
     """
-    daily_cap: Optional[int] = 80
+    daily_cap: Optional[int] = 80        # 每日封顶上限
+    batch_limit: Optional[int] = 20      # 单次处理数量
     school_whitelist: Optional[List[str]] = None
     min_degree: Optional[str] = "本科"
     min_years: Optional[int] = 3
@@ -1108,7 +1260,7 @@ async def start_filter_contact(
         import threading
         thread = threading.Thread(
             target=_run_filter_contact_in_thread,
-            args=(task_id, req.daily_cap, criteria, req.dry_run),
+            args=(task_id, req.daily_cap, req.batch_limit, criteria, req.dry_run),
             daemon=True
         )
 
@@ -1137,6 +1289,7 @@ async def start_filter_contact(
 def _run_filter_contact_in_thread(
     task_id: str,
     daily_cap: int,
+    batch_limit: int,
     criteria: "FilterCriteria",
     dry_run: bool
 ):
@@ -1208,6 +1361,7 @@ def _run_filter_contact_in_thread(
 
         result = await _auto_contact_impl(
             daily_cap=daily_cap,
+            batch_limit=batch_limit,
             school_whitelist=criteria.school_whitelist,
             min_degree=criteria.min_degree,
             min_years=criteria.min_years,
@@ -1447,11 +1601,20 @@ async def get_chat_history(
     limit: int = Query(50, ge=1, le=200),
     current_user: dict = Depends(verify_token)
 ):
-    """获取对话历史"""
+    """获取对话历史 — 返回前端兼容的 {role, content} 格式"""
     from app.chat_service import chat_service
 
     try:
-        history = chat_service.get_conversation_history(candidate_name=candidate_name, limit=limit)
+        db_rows = chat_service.get_conversation_history(candidate_name=candidate_name, limit=limit)
+        # 转换为前端期望的 {role, content} 格式
+        history = []
+        for row in db_rows:
+            if row.get("ai_message"):
+                history.append({"role": "assistant", "content": row["ai_message"], "time": row.get("created_at")})
+            if row.get("candidate_message"):
+                history.append({"role": "user", "content": row["candidate_message"], "time": row.get("created_at")})
+        # 按时间排序
+        history.sort(key=lambda h: h.get("time", ""))
         return {"total": len(history), "candidate_name": candidate_name, "history": history}
     except Exception as e:
         api_logger.error(f"获取对话历史失败: {e}")
@@ -1560,6 +1723,21 @@ async def get_daily_trend(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+@app.get("/api/debug/chat-dom")
+async def debug_chat_dom(current_user: dict = Depends(verify_token)):
+    """诊断工具: 扫描BOSS直聘聊天页DOM结构
+
+    返回关键元素的class/text/位置，用于调试JS选择器不匹配问题。
+    需要先打开BOSS直聘并导航到聊天页。
+    """
+    from app.chat_nav import dump_chat_dom
+    try:
+        result = await dump_chat_dom()
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/api/contact-records")

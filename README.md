@@ -1,208 +1,245 @@
-# BOSS 招聘机器人 v3.0
+# BOSS直聘 · 简历获取轮转系统 v2.0
 
-> **nodriver CDP 自动化 · Docker 部署 · Web 驾驶舱 · AI 批量回复**
->
-> 自动化 BOSS 直聘全流程: 筛选打招呼 → 简历收集 → AI 智能回复
+> **纯视觉 + Playwright 混合方案 · 自动下载简历 · 自动换微信 · 轮转到下一个候选人**
 
-## 系统架构
+## 核心流程
 
 ```
-┌──────────────────────────────────────────────────┐
-│               Web 驾驶舱 (:8321)                   │
-│  筛选配置 | 话术模板 | 岗位模板 | VNC 远程桌面      │
-├──────────────────────────────────────────────────┤
-│               API (:8002)                         │
-│  /api/greet | /api/resume | /api/chat | /filter   │
-├──────────────────────────────────────────────────┤
-│          nodriver CDP 自动化 (Chrome :9222)        │
-│  CDP 点击 | JS 提取 | 下载拦截 | 事件监听          │
-├──────────────────────────────────────────────────┤
-│          AI 服务 (DeepSeek API)                    │
-│  对话阶段推算 | 冗余检测 | 模板降级                  │
-└──────────────────────────────────────────────────┘
+点击左侧"沟通"
+    │
+    ├─ 1. 点击候选人（第一个/下一个）
+    │
+    ├─ 2. 获取简历
+    │      ├─ 深蓝"附件简历" → 弹出PDF预览 → 点"下载" → 关预览
+    │      └─ 浅蓝"在线简历"/无 → 点"求简历" → 确认弹窗 → 发送请求
+    │
+    ├─ 3. 点击"换微信"
+    │      └─ 确认弹窗 → 绿色"确认"按钮
+    │
+    └─ 4. 轮转到下一位候选人
+          └─ 重复1-3
 ```
-
-## 核心功能
-
-### F5 · 筛选打招呼
-- 搜索页自动扫描推荐牛人列表
-- 学校白名单匹配 (132所 国内外名校)
-- 学历/年限/关键词 多维度筛选
-- CDP 点击 + confirm 确认对话框
-
-### F6 · 简历收集
-- 聊天列表自动扫描联系人
-- 未读消息优先排序
-- 4 种 Case 检测 (PDF预览/请求弹窗/请求中/沟通不足)
-- CDP 下载拦截 + 事件确认
-- 逐次坐标提取 + 面板切换验证
-
-### F7 · 批量 AI 回复
-- 未读消息自动回复
-- 5 阶段对话推算 (early → ready_for_interview)
-- 冗余回复检测 (不索要已有简历/微信)
-- DeepSeek API 集成 · AI 失败自动降级模板
-- 限制弹窗检测 (20+ 关键词)
 
 ## 快速开始
 
 ```bash
-# Docker 部署（推荐）
-docker compose up -d
+# 1. 安装依赖
+pip3 install -r requirements.txt
+python3 -m playwright install chromium
 
-# 访问
-open http://localhost:8321   # 驾驶舱
-open http://localhost:8000   # noVNC 远程桌面
-open http://localhost:3101   # 数据总台
+# 2. 运行（推荐方式 - 有界面模式）
+python3 main.py --limit 10
 
-# API 文档
-open http://localhost:8002/docs
+# 3. 调试模式 - 分析页面结构
+python3 main.py --debug
+
+# 4. 无头模式（后台运行）
+python3 main.py --limit 20 --headless
 ```
 
-## 端口映射
+## 首次运行
 
-| 端口 | 服务 | 说明 |
-|------|------|------|
-| 8321 | Web 驾驶舱 | 一站式控制面板 |
-| 8000 | noVNC | 浏览器远程桌面 |
-| 8002 | API | FastAPI 后端 |
-| 3101 | 数据总台 | 数据面板 + 学校白名单 |
-| 9222 | Chrome CDP | nodriver 连接端口 |
+首次运行会打开 Chrome 浏览器，你需要：
 
-## 驾驶舱功能面板
+1. 在浏览器中 **扫码/密码登录 BOSS直聘**
+2. 登录成功后，程序自动检测到并开始工作
+3. 无需其他操作
 
-### 浏览器控制
-- 🚀 打开BOSS · 🌐 连接桌面 · ✅ 检查登录
-- 💾 导出Cookie · 📂 导入Cookie
+**超时**：默认等待登录 5 分钟，超时后退出。
 
-### 批量自动化
-- 👋 筛选+打招呼 (F5) → confirm 对话框确认
-- 📄 批量获取简历 (F6) → CDP 下载拦截
-- 💬 批量回复未读 (F7) → AI 生成 + 阶段推算
+## 参数说明
 
-### 配置管理
-- 筛选条件: 学历/年限/学校白名单/关键词 — 实时同步
-- 话术模板: 打招呼/索要简历/跟进 — 可自定义
-- 岗位模板: 岗位问题库 — 保存/删除
-
-### 快捷操作
-- 💬 聊天页 · 📋 候选人 — 一键导航
-- 📝 弹出文本编辑器 — 大段内容编辑
-- 操作日志 — 实时追踪 + 清除/展开
-
-## 测试
-
-```bash
-# 全部测试 (156 tests)
-./venv/bin/python3 -m pytest tests/test_f6_resume_collection.py \
-  tests/test_f7_batch_reply.py tests/test_f7_chat_pipeline.py -v
-
-# 视觉验收静态检查 (88 checks)
-python3 tests/run_visual_checks.py -v
-
-# 覆盖率
-./venv/bin/python3 -m pytest tests/ \
-  --cov=app.resume_collector --cov=app.chat_workflow \
-  --cov=app.chat_stage --cov=app.chat_service --cov=app.chat_nav \
-  --cov-report=term-missing
-```
-
-### 测试覆盖
-
-| 模块 | 测试数 | 覆盖 |
+| 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `test_f6_resume_collection.py` | 55 | JS脚本 + mock流程 + 4Case + 错误路径 |
-| `test_f7_batch_reply.py` | 49 | merge历史 + batch流程 + AI降级 + chat_nav |
-| `test_f7_chat_pipeline.py` | 38 | 阶段推算 + 冗余检测 + 历史构建 + 关键词 |
-| `test_chat_api.py` | 7 | ChatService + API端点 + DB表 |
-| `test_resume_endpoints.py` | 4 | 简历CRUD + 统计 |
-| `test_greet_button_extraction.py` | 35 | F5 打招呼按钮检测 |
-| `test_dc_platform_api.py` | 40+ | 3101 数据总台 |
-| `run_visual_checks.py` | 88 | JS脚本完整性 + 关键词 + 导入 |
-| **总计** | **278+** | |
-
-### 视觉验收文档
-
-| 文档 | 内容 |
-|------|------|
-| `docs/tests/f6-f7-test-strategy.md` | 测试策略 + 分层 + 优先级 |
-| `docs/tests/f6-resume-collection-visual.md` | F6 11步视觉验收清单 |
-| `docs/tests/f7-batch-reply-visual.md` | F7 11步视觉验收清单 |
-| `docs/tests/f6-f7-integration-visual.md` | F5→F6→F7 端到端 + 5场景 |
-| `docs/tests/cockpit-8321-full-flow-20260609.md` | 驾驶舱 30按钮全流程测试 |
+| `--limit N` | 10 | 处理上限人数 |
+| `--headless` | false | 无头模式（后台运行） |
+| `--debug` | false | 调试模式（只分析页面结构） |
+| `--slow N` | 300 | 操作延迟（毫秒） |
 
 ## 项目结构
 
 ```
 boss-recruitment-system/
+├── main.py                  # 🆕 v2.0 主程序（入口）
 ├── app/
-│   ├── api.py                # FastAPI 后端 (所有端点)
-│   ├── automation.py         # nodriver CDP 浏览器自动化核心
-│   ├── chat_nav.py           # 聊天页导航 + 消息提取 + 限制弹窗
-│   ├── chat_service.py       # DeepSeek AI 回复服务
-│   ├── chat_stage.py         # 对话阶段推算 + 冗余检测
-│   ├── chat_workflow.py      # F7 批量回复工作流
-│   ├── resume_collector.py   # F6 简历收集器
-│   ├── filter_criteria.py    # 筛选条件 + 学校白名单 (132所)
-│   ├── workflows.py          # 工作流协调
-│   ├── database.py           # SQLite 数据库
-│   ├── config.py             # 配置管理
-│   └── logging_config.py     # 日志配置
-├── docs/
-│   ├── tests/                # 视觉验收文档 + 截图
-│   └── F6_RESUME_WORKFLOW.md # F6 完整流程 + Grill 审查
-├── tests/
-│   ├── test_f6_resume_collection.py  # F6 测试 (55)
-│   ├── test_f7_batch_reply.py        # F7 测试 (49)
-│   ├── test_f7_chat_pipeline.py      # 对话阶段测试 (38)
-│   ├── run_visual_checks.py          # 静态视觉验收 (88 checks)
-│   └── ...
+│   ├── __init__.py
+│   ├── api.py               # FastAPI 后端
+│   ├── config.py            # 配置文件
+│   ├── vision.py            # OCR识别模块 (macOS Vision)
+│   ├── screen.py            # 屏幕控制模块
+│   ├── database.py          # 数据库模块
+│   ├── workflows.py         # 工作流模块
+│   ├── filter_criteria.py   # 🆕 筛选条件+名校白名单
+│   └── resume_collector.py  # 简历收集器（旧版坐标）
+├── boss_rpa/
+│   ├── __init__.py
+│   ├── config.py            # 学校白名单/评分规则
+│   ├── browser.py           # Playwright自动化（旧版）
+│   └── utils.py             # 工具函数
 ├── scripts/
-│   ├── init_filter_config.py  # 筛选配置初始化
-│   └── cua_greeting_loop.py   # cua-driver 打招呼
-├── data/                      # 数据库 + 简历文件
-├── tools/                     # 工具脚本
-└── web/                       # 驾驶舱前端
+│   ├── init_filter_config.py  # 🆕 筛选配置初始化
+│   ├── deploy_agent.py
+│   └── ...
+├── data/                    # 数据库
+├── tests/                   # 测试
+└── tools/                   # 工具
 ```
 
-## API 端点
+## 筛选系统
 
-| 方法 | 路径 | 功能 |
+### 筛选打招呼
+
+通过 `/api/filter/contact` 启动，自动扫描推荐牛人列表，匹配学校白名单后批量打招呼。
+
+```bash
+# 初始化筛选配置（写入数据库）
+python scripts/init_filter_config.py
+
+# 查看当前配置
+python scripts/init_filter_config.py --show
+
+# 重置为默认
+python scripts/init_filter_config.py --reset
+```
+
+### 学校白名单（132所）
+
+| 区域 | 数量 | 示例 |
 |------|------|------|
-| GET | `/health` | 健康检查 |
-| POST | `/api/greet/batch` | F5 批量打招呼 |
-| POST | `/api/resume/batch` | F6 批量获取简历 |
-| POST | `/api/chat/batch` | F7 批量AI回复 |
-| GET | `/api/chat/history` | 对话历史 |
-| POST | `/api/chat/template` | 保存回复模板 |
-| GET | `/api/chat/templates` | 获取模板列表 |
+| 国内名校 | 33 | 清华大学、北京大学、浙江大学、复旦大学... |
+| 美国名校 | 41 | Harvard, MIT, Stanford, UC Berkeley, CMU... |
+| 英国名校 | 17 | Oxford, Cambridge, Imperial, LSE, UCL... |
+| 其他地区 | 41 | ETH Zurich, NUS, Toronto, Tokyo, HKU, Melbourne... |
+
+完整名单见 `app/filter_criteria.py` 或 `scripts/init_filter_config.py`。
+
+### 可扩展筛选条件
+
+筛选条件通过 `FilterCriteria` 数据类定义，当前已启用：
+
+| 维度 | 字段 | 类型 | 说明 |
+|------|------|------|------|
+| 学校 | `school_whitelist` | multi_select | 中英文名校+缩写匹配 |
+| 学历 | `min_degree` | select | 博士 > 硕士 > 本科 > 大专 |
+| 年限 | `min_years` | number | 最低工作年限 |
+
+预留扩展（`enabled: false`，后续启用即可）：
+
+| 维度 | 字段 | 类型 |
+|------|------|------|
+| 年龄 | `age_range` | range |
+| 技术栈 | `tech_stack` | multi_select |
+| 行业 | `industry` | multi_select |
+| 职位 | `job_title_keywords` | multi_select |
+
+API `/api/filter/config` 返回 `available_filters` 列表，前端可按 `enabled` 状态动态渲染。
+
+### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
 | GET | `/api/filter/config` | 获取筛选配置 |
 | PUT | `/api/filter/config` | 更新筛选配置 |
-| GET | `/api/resume/list` | 简历列表 |
-| GET | `/api/resume/stats` | 简历统计 |
+| POST | `/api/filter/contact` | 启动筛选打招呼任务 |
+| GET | `/api/filter/status/{task_id}` | 查询任务进度 |
+
+### cua-driver 驱动（后台自动化）
+
+用 cua-driver 驱动 Chrome 完成打招呼闭环 — 无需 OCR，直接通过可访问性树 + JS 操作 DOM：
+
+```bash
+# 预览模式（只扫描候选人，不打招呼）
+python scripts/cua_greeting_loop.py --dry-run
+
+# 打招呼（上限 10 人，默认全部名校白名单）
+python scripts/cua_greeting_loop.py --limit 10
+
+# 自定义学校
+python scripts/cua_greeting_loop.py --schools "清华大学,北京大学,MIT,Stanford University"
+```
+
+**前置条件：**
+
+```bash
+# 1. 安装 cua-driver
+brew install cua-driver
+
+# 2. 授权可访问性 + 屏幕录制
+cua-driver check_permissions
+
+# 3. Chrome 开启 "Allow JavaScript from Apple Events"
+#    关闭 Chrome → 写入配置 → 重新打开
+python3 -c "
+import json, os
+prefs = os.path.expanduser('~/Library/Application Support/Google/Chrome/Default/Preferences')
+data = json.load(open(prefs))
+data.setdefault('browser', {})['allow_javascript_apple_events'] = True
+json.dump(data, open(prefs, 'w'))
+print('done')
+"
+```
+
+**对比：OCR vs cua-driver**
+
+| 维度 | OCR 方案 (workflows.py) | cua-driver 方案 |
+|------|------------------------|-----------------|
+| 定位方式 | 截图→OCR→坐标估算 | AX 树索引 + JS DOM |
+| 精度 | ±5-20px | 像素级 |
+| 后台运行 | 需要前台 Chrome | ✅ 完全后台 |
+| 受分辨率影响 | 是 | 否 |
+| 候选人信息提取 | OCR 文本解析 | JS `document.querySelectorAll` |
+| 学校匹配 | OCR 文本子串 | 结构化 JSON |
+| 环境要求 | macOS Vision / Tesseract | cua-driver + Chrome AX |
 
 ## 防检测机制
 
-- nodriver 真实浏览器指纹 (非 Playwright webdriver)
-- 随机操作间隔 (1.5-4 秒)
-- CDP 底层操作 (非 DOM 事件)
-- 模拟人类鼠标轨迹
+- 随机延迟 2-4 秒（候选人之间）
+- 非无头模式默认有界面（更真实
+- 注入反检测脚本（隐藏 webdriver）
 - macOS 真实 User-Agent
 
 ## 常见问题
 
-### Q: 如何启动？
-A: `docker compose up -d`，然后打开 http://localhost:8321
+### Q: 检测不到候选人列表怎么办？
+A: 先运行 `python3 main.py --debug` 分析页面结构，看选择器是否匹配。
 
-### Q: 简历下载到哪里？
-A: `data/resumes/` 目录，由 CDP `setDownloadBehavior` 拦截
+### Q: 简历下载到哪了？
+A: `~/Downloads/BossResumes/候选人名_时间戳.pdf`
 
-### Q: 需要 BOSS 账号吗？
-A: 需要。在 VNC (8000) 中扫码登录，Cookie 可导出复用
+### Q: 需要屏幕录制权限吗？
+A: **不需要**。本系统使用 Playwright 接管浏览器，通过 DOM 操作，不需要系统截图权限。
 
-### Q: AI 回复如何配置？
-A: 在驾驶舱「话术模板」中自定义，需配置 `DEEPSEEK_API_KEY`
+### Q: macOS 26+ 兼容吗？
+A: 兼容。因为不依赖 `screencapture`/`CGDisplayCreateImage`（这些在 macOS 26 中被废弃），所有操作通过 Playwright 完成。
 
 ---
 
-*轩辕 · 2026-06-09 · v3.0*
+## 技术方案
+
+### 为什么用 Playwright 做主方案？
+
+| 维度 | Playwright (选) | 纯视觉 OCR | ScreenCaptureKit |
+|------|----------------|-------------|------------------|
+| 权限需求 | 无 | 屏幕录制授权 | 屏幕录制授权 |
+| macOS 26+ | ✅ 兼容 | ❌ CG废弃 | ✅ 但需授权 |
+| 定位精度 | DOM级(像素级) | ±5-20px | ±3px |
+| 浏览器检测 | 注入脚本 | 无影响 | 无影响 |
+| 运行环境 | 全平台 | macOS only | macOS 13+ |
+| 速度 | 毫秒级 | 秒级 | 秒级 |
+
+### 决策
+
+**主方案：Playwright（DOM 操作）**
+- 不需要 macOS 隐私授权
+- 精准定位元素（按钮、列表、弹窗）
+- 支持下载文件
+- 跨平台
+
+**辅助方案：Vision OCR（macOS 原生）**
+- 当 Playwright 无法定位元素时使用
+- 检测按钮颜色（深蓝/浅蓝）
+- 验证操作结果
+
+---
+
+*轩辕 · 2026-05-21 · v2.0*

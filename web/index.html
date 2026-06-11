@@ -455,7 +455,12 @@ body {
 <script>
 // ── Config ──
 // API: Docker 容器服务 (8002→容器内8001)
-const API = 'http://localhost:8002';
+const API = (() => {
+	const p = window.location.port;
+	if (p === '3101' || p === '8321' || p === '3000') return 'http://localhost:8002';
+	if (p === '8002') return 'http://localhost:8002';
+	return 'http://localhost:8001';
+})();
 let token = localStorage.getItem('auth_token') || '';
 
 // ── Shared Utils ──
