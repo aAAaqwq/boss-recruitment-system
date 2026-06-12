@@ -7,7 +7,7 @@ import time as _time
 from typing import List, Dict, Optional, Tuple
 
 from app.config import settings
-from app.automation import automation
+from app.automation import automation, cancel_event
 from app.database import Database
 from app.logging_config import logger
 import httpx
@@ -191,6 +191,10 @@ async def _auto_contact_impl(
     limit_reached = False  # BOSS 限制弹窗标记
 
     while contacted < target and not limit_reached:
+        # 检查取消信号
+        if cancel_event.is_set():
+            logger.info("[F5] 检测到取消信号，停止")
+            break
         # 全局超时保护
         if _time.monotonic() - start_time > TIMEOUT_SECONDS:
             logger.warning(f"[F5] 超时退出 ({TIMEOUT_SECONDS}s)")
@@ -269,6 +273,10 @@ async def _auto_contact_impl(
         logger.info(f"[F5] 发现{len(new_cards)}个可见卡片 (按钮在视口内)")
 
         for card in new_cards:
+            # 检查取消信号
+            if cancel_event.is_set():
+                logger.info("[F5] 检测到取消信号，停止")
+                break
             if contacted >= target:
                 break
             txt = card.get("text", "")

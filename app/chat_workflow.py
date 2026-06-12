@@ -11,7 +11,7 @@ import asyncio
 import random
 from typing import Dict, List, Optional
 
-from app.automation import automation
+from app.automation import automation, cancel_event
 from app.chat_nav import (
     navigate_to_chat, get_messages,
     type_and_send, click_contact,
@@ -56,11 +56,16 @@ def _build_history_from_filtered(filtered: List[Dict]) -> List[Dict]:
 
 
 def _load_company_context() -> str:
-    """加载公司/岗位背景信息"""
-    for p in ['/app/job_info/company_profile.txt', 'job_info/company_profile.txt']:
+    """加载公司/岗位背景信息 — 读取 job_info/.selected 中指定的文件"""
+    for base in ['/app/job_info', 'job_info']:
         try:
-            with open(p, encoding='utf-8') as f:
-                return f.read().strip()
+            sel_path = f'{base}/.selected'
+            with open(sel_path, encoding='utf-8') as f:
+                selected = f.read().strip()
+            if selected:
+                filepath = f'{base}/{selected}.txt'
+                with open(filepath, encoding='utf-8') as f:
+                    return f.read().strip()
         except Exception:
             continue
     return ''
@@ -124,6 +129,10 @@ _UI_SKIP_EXACT: set = {
     "在线简历", "附件简历", "工作经历", "未填写工作经历",
     "沟通职位：", "期望：",
     "送达", "约面试",
+    # 简历请求相关的系统提示（非对话内容）
+    "简历请求已发送",
+    "您可以在线预览牛人简历， 设置邮箱 后投递的简历会同时发送到您的邮箱。",
+    "您可以在线预览牛人简历，设置邮箱后投递的简历会同时发送到您的邮箱。",
 }
 
 
@@ -192,14 +201,12 @@ async def _batch_reply_impl(
 
     contacts = nav.get("contacts", [])
     valid_contacts = [c for c in contacts if isinstance(c, dict)]
-    # 已通过"未读"筛选，所有返回的联系人都是有未读消息的
-    unread = valid_contacts
     logger.info(f"[F7] 聊天页就绪，{len(valid_contacts)}个未读联系人")
 
     # 无未读时回退到全部联系人
     if not valid_contacts:
         logger.info("[F7] 无未读，回退到全部联系人")
-        nav = await navigate_to_chat(filter_unread=False)
+        nav = await navigate_to_chat()
         contacts = nav.get("contacts", [])
         valid_contacts = [c for c in contacts if isinstance(c, dict)]
         logger.info(f"[F7] 全部联系人: {len(valid_contacts)} 个")
@@ -222,10 +229,15 @@ async def _batch_reply_impl(
     db.init_tables()
 
     try:
-        targets = unread[:max_count] if unread else valid_contacts[:max_count]
+        targets = valid_contacts[:max_count]
         logger.info(f"[F7] 处理前 {len(targets)} 个")
 
         for i, contact in enumerate(targets):
+            # 检查取消信号
+            if cancel_event.is_set():
+                logger.info("[F7] 检测到取消信号，停止")
+                break
+
             name = contact.get("name", "未知")
             subtitle = contact.get("subtitle", "")
             contact_x = contact.get("x", 0)
