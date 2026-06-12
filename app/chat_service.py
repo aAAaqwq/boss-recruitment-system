@@ -16,16 +16,22 @@ _COMPANY_PROFILE_CACHE: Optional[str] = None
 
 
 def _load_company_profile() -> str:
-    """加载公司/岗位背景信息（缓存避免反复读盘）"""
-    global _COMPANY_PROFILE_CACHE
-    if _COMPANY_PROFILE_CACHE is not None:
-        return _COMPANY_PROFILE_CACHE
+    """加载公司/岗位背景信息 — 读取 job_info/.selected 中指定的文件"""
+    try:
+        with open('/app/job_info/.selected', encoding='utf-8') as f:
+            selected = f.read().strip()
+        if selected:
+            path = f'/app/job_info/{selected}.txt'
+            with open(path, encoding='utf-8') as f:
+                return f.read().strip()
+    except Exception:
+        pass
+    # 兼容回退
     try:
         with open('/app/job_info/company_profile.txt', encoding='utf-8') as f:
-            _COMPANY_PROFILE_CACHE = f.read().strip()
+            return f.read().strip()
     except Exception:
-        _COMPANY_PROFILE_CACHE = ""
-    return _COMPANY_PROFILE_CACHE
+        return ""
 
 
 class ChatService:

@@ -18,8 +18,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-from app.automation import automation
-from app.chat_nav import navigate_to_chat, get_contacts, click_contact, check_limit_popup, dismiss_popup, click_communicating_filter
+import httpx
+
+from app.automation import automation, cancel_event
+from app.config import settings
+from app.chat_nav import (
+    navigate_to_chat, get_contacts, click_contact,
+    check_limit_popup, dismiss_popup,
+    click_communicating_filter, click_new_greet_filter,
+    get_messages, type_and_send,
+    refind_contact, scroll_contact_into_view,
+)
 from app.database import Database
 from app.logging_config import logger
 
@@ -179,75 +188,6 @@ _JS_DETECT_RESUME_CASE = """
 })()
 """
 
-# 逐次提取单个联系人坐标 — 优先主文档 .geek-item-wrap（与 get_contacts 一致）
-_JS_FIND_CONTACT_BY_NAME = """
-(function() {
-    var targetName = {NAME_PLACEHOLDER};
-    var vw = Math.max(window.innerWidth, 1000);
-
-    function findInDoc(doc) {
-        // 优先用 .geek-item-wrap（与 get_contacts 保持一致的选择器）
-        var items = doc.querySelectorAll('.geek-item-wrap');
-        if (items.length > 0) {
-            for (var i = 0; i < items.length; i++) {
-                var t = (items[i].innerText || '').trim();
-                if (t.indexOf(targetName) >= 0) {
-                    var r = items[i].getBoundingClientRect();
-                    if (r.width > 80 && r.height > 30) {
-                        var parts = t.split(/[\\n]+/).filter(function(l) { return l.trim().length > 0; });
-                        var name = parts[0] || '';
-                        var topEl = items[i].querySelector('.geek-item-top');
-                        if (topEl) {
-                            var topText = (topEl.innerText || '').trim();
-                            var topParts = topText.split(/[\\n]+/);
-                            if (topParts[0]) name = topParts[0].trim();
-                        }
-                        return {
-                            name: name,
-                            text: t,
-                            x: r.x + r.width / 2,
-                            y: r.y + r.height / 2,
-                            visible: r.y > 0 && r.y < window.innerHeight
-                        };
-                    }
-                }
-            }
-        }
-        // 回退: 扫描左侧区域所有 div/li/a
-        var leftBoundary = vw * 0.45;
-        var allEls = doc.querySelectorAll('div, li, a');
-        for (var j = 0; j < allEls.length; j++) {
-            var rr = allEls[j].getBoundingClientRect();
-            var tt = (allEls[j].innerText || '').trim();
-            if (rr.x >= 0 && rr.x < leftBoundary
-                && rr.width > 60 && rr.height > 20
-                && tt.length > 1 && tt.indexOf(targetName) >= 0) {
-                return {
-                    name: (tt.split('\\n')[0] || '').trim(),
-                    text: tt,
-                    x: rr.x + rr.width / 2,
-                    y: rr.y + rr.height / 2,
-                    visible: rr.y > 0 && rr.y < window.innerHeight
-                };
-            }
-        }
-        return null;
-    }
-
-    // 先搜主文档（BOSS直聘聊天页在主文档中）
-    var result = findInDoc(document);
-    if (result) return result;
-
-    // 回退: iframe
-    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
-    if (iframe && iframe.contentDocument) {
-        var ifResult = findInDoc(iframe.contentDocument);
-        if (ifResult) return ifResult;
-    }
-    return null;
-})()
-"""
-
 # 验证右侧聊天面板是否已切换（主文档优先）
 _JS_VERIFY_CHAT_PANEL = """
 (function() {
@@ -339,20 +279,6 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             return {"status": "error", "message": "无法访问聊天页，可能需登录"}
         await asyncio.sleep(3)
 
-    # 筛选"沟通中" — 只有沟通过的联系人才有简历权限
-    comm_result = await click_communicating_filter()
-    if comm_result.get("status") == "ok":
-        await asyncio.sleep(2)
-        contacts = await get_contacts()
-    else:
-        logger.warning("[F6] '沟通中'筛选未命中，使用全部联系人")
-        contacts = nav_result.get("contacts", [])
-
-    if not contacts:
-        logger.info("[F6] 未找到联系人，尝试备用提取...")
-        await asyncio.sleep(3)
-        contacts = await get_contacts()
-
     # 初始化数据库
     db = Database()
     db.connect()
@@ -363,15 +289,82 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
     failed = 0
     details = []
 
-    # 按 hasUnread 排序 — 未读优先（最可能发了简历）
-    contacts.sort(key=lambda c: (c.get("hasUnread", False), len(c.get("text", ""))), reverse=True)
-    unread_count = sum(1 for c in contacts if c.get("hasUnread"))
-    logger.info(f"[F6] 找到 {len(contacts)} 个联系人（{unread_count} 未读），上限 {max_count}")
+    # === 阶段1: "沟通中"筛选 → 对比数据库，跳过已处理过的 ===
+    comm_result = await click_communicating_filter()
+    if comm_result.get("status") == "ok":
+        await asyncio.sleep(2)
+        comm_contacts = await get_contacts()
+    else:
+        comm_contacts = []
+    if not comm_contacts:
+        comm_contacts = nav_result.get("contacts", [])
 
-    for i, contact in enumerate(contacts[:max_count]):
+    # 过滤掉数据库中已处理过的（downloaded 或 requested）
+    contacts = []
+    for c in comm_contacts:
+        name = (c.get("name", "") or "").strip()
+        if not name:
+            continue
+        try:
+            ops = db.get_resume_ops(name)
+        except Exception:
+            ops = []
+        already_processed = any(
+            r.get("action") in ("downloaded", "requested", "rejected", "farewell") or r.get("resume_downloaded")
+            for r in ops
+        )
+        if already_processed:
+            logger.info(f"[F6] 跳过已处理: {name}")
+            details.append({"name": name, "action": "skipped", "reason": "已处理过"})
+            skipped += 1
+        else:
+            contacts.append(c)
+
+    logger.info(f"[F6] 阶段1(沟通中): {len(comm_contacts)}人 → 过滤后 {len(contacts)}人待处理")
+
+    # === 阶段2: 如果还没达到上限，补充"新招呼" ===
+    if len(contacts) < max_count:
+        greet_result = await click_new_greet_filter()
+        if greet_result.get("status") == "ok":
+            await asyncio.sleep(2)
+            greet_contacts = await get_contacts()
+            remaining = max_count - len(contacts)
+            # "新招呼"的联系人一定没处理过，直接加入
+            greet_added = 0
+            for c in greet_contacts:
+                name = (c.get("name", "") or "").strip()
+                if not name:
+                    continue
+                contacts.append(c)
+                greet_added += 1
+                if greet_added >= remaining:
+                    break
+            logger.info(f"[F6] 阶段2(新招呼): 补充 {greet_added}人")
+        else:
+            logger.info("[F6] 阶段2(新招呼): 未找到筛选按钮，跳过")
+
+    if not contacts:
+        db.close()
+        return {
+            "status": "completed", "message": "没有待处理的联系人",
+            "downloaded": 0, "skipped": skipped, "failed": 0,
+            "total_scanned": 0, "resume_ops": 0, "details": details,
+        }
+
+    logger.info(f"[F6] 待处理 {len(contacts)} 人，目标获取 {max_count} 份简历")
+
+    resume_ops = 0  # 成功获取/请求简历的人数（不含跳过和失败）
+    for i, contact in enumerate(contacts):
+        # 检查取消信号
+        if cancel_event.is_set():
+            logger.info("[F6] 检测到取消信号，停止遍历")
+            break
+        # 已达到目标，停止遍历
+        if resume_ops >= max_count:
+            logger.info(f"[F6] 已达到目标 {max_count} 份，停止遍历")
+            break
         contact_name = (contact.get("name", "") or contact.get("text", "") or f"contact_{i}").strip()
-        logger.info(f"[F6] 处理 ({i+1}/{min(len(contacts), max_count)}): {contact_name}"
-                    f" {'[未读]' if contact.get('hasUnread') else ''}")
+        logger.info(f"[F6] 处理 ({i+1}/{len(contacts)}, 已获取{resume_ops}/{max_count}): {contact_name}")
 
         # 检查去重
         try:
@@ -379,18 +372,18 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         except Exception:
             existing = []
         if existing:
-            already_downloaded = any(
-                r.get("resume_downloaded") or r.get("action") == "downloaded"
+            already_processed = any(
+                r.get("resume_downloaded") or r.get("action") in ("downloaded", "requested", "rejected", "farewell")
                 for r in existing
             )
-            if already_downloaded:
+            if already_processed:
                 skipped += 1
-                details.append({"name": contact_name, "action": "skipped", "reason": "已下载过"})
-                logger.info(f"[F6] 跳过 {contact_name}: 已下载")
+                details.append({"name": contact_name, "action": "skipped", "reason": "已处理过"})
+                logger.info(f"[F6] 跳过 {contact_name}: 已处理过")
                 continue
 
         # Fix 2: 逐次提取坐标 — 每次点击前重新查找联系人位置
-        fresh_contact = await _refind_contact(contact_name)
+        fresh_contact = await refind_contact(contact_name)
         if not fresh_contact:
             logger.warning(f"[F6] 逐次查找联系人失败: {contact_name}, 回退到原始坐标")
             fresh_contact = contact
@@ -398,10 +391,10 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         # 0. 联系人不可见 → 滚动左侧列表使其落入视口
         if not fresh_contact.get("visible", True):
             logger.info(f"[F6] {contact_name} 在 y={fresh_contact.get('y')}，滚动列表使其可见")
-            await _scroll_contact_into_view(contact_name, fresh_contact)
+            await scroll_contact_into_view(contact_name)
             await asyncio.sleep(1)
             # 重新获取坐标
-            fresh_contact = await _refind_contact(contact_name)
+            fresh_contact = await refind_contact(contact_name)
             if not fresh_contact:
                 fresh_contact = contact
             logger.info(f"[F6] {contact_name} 滚动后 y={fresh_contact.get('y')}")
@@ -444,6 +437,49 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             logger.info(f"[F6] 重试后面板切换成功: {verify2.get('method')}")
         else:
             logger.info(f"[F6] 面板切换验证: {verify.get('method')}")
+
+        # AI上下文判断 + 顺手回复
+        try:
+            msgs = await get_messages()
+            # 找最后一条非系统消息
+            last_msg = None
+            if msgs:
+                for m in reversed(msgs):
+                    t = (m.get("text", "") or "").strip()
+                    if t and len(t) > 2:
+                        last_msg = m
+                        break
+
+            ai_decision = "PROCEED"
+            if msgs:
+                ai_decision = await _check_resume_appropriate(contact_name, msgs)
+
+            if ai_decision == "FAREWELL":
+                # 我们已发过祝福告别，不回复也不取简历
+                logger.info(f"[F6] {contact_name}: 已告别过，跳过")
+                _record_resume_op(db, contact_name, "farewell", btn_text="ai_farewell")
+                skipped += 1
+                details.append({"name": contact_name, "action": "skipped", "reason": "已祝福告别"})
+                continue
+            elif ai_decision == "REJECTION":
+                # 对方表达不合适/拒绝 → 礼貌回复后跳过
+                logger.info(f"[F6] {contact_name}: 对方拒绝，礼貌回复后跳过")
+                await type_and_send("好的，了解了，打扰您了")
+                await asyncio.sleep(1.5)
+                _record_resume_op(db, contact_name, "rejected", btn_text="ai_rejection")
+                skipped += 1
+                details.append({"name": contact_name, "action": "skipped", "reason": "对方拒绝"})
+                continue
+            elif last_msg and not last_msg.get("isMe"):
+                # 正常情况，对方最后发言 → 顺手回复再取简历
+                quick_reply = "收到，我先看看您的简历，稍后详细回复您。"
+                logger.info(f"[F6] {contact_name}: 对方最后发言，顺手回复")
+                await type_and_send(quick_reply)
+                await asyncio.sleep(1.5)
+            else:
+                logger.info(f"[F6] {contact_name}: 已回复过，直接取简历")
+        except Exception as e:
+            logger.debug(f"[F6] 上下文判断/顺手回复异常: {e}")
 
         if dry_run:
             details.append({"name": contact_name, "action": "would_download"})
@@ -505,6 +541,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             )
             if ok:
                 downloaded += 1
+                resume_ops += 1
             else:
                 failed += 1
 
@@ -513,6 +550,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             await _handle_case2_confirm(
                 contact_name, case_info, btn, db, details
             )
+            resume_ops += 1
 
         elif case_type == "request_pending":
             # Case-3: "附件简历请求中" — 跳过
@@ -545,6 +583,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
                     if file_verified:
                         _update_candidate_resume(db, contact_name, resume_path=dl_result.get("path", ""), boss_id=contact_name)
                         downloaded += 1
+                        resume_ops += 1
                         details.append({"name": contact_name, "action": "downloaded", "btn_type": btn.get("text"),
                                         "file_verified": True, "case": "online_resume_then_download"})
                         db.insert_resume_op(candidate_name=contact_name, action="downloaded", resume_downloaded=True,
@@ -570,6 +609,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
 
             if dl and dl.get("found"):
                 downloaded += 1
+                resume_ops += 1
                 await _click_download(contact_name, btn, db, details)
             else:
                 details.append({
@@ -603,53 +643,10 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         "downloaded": downloaded,
         "skipped": skipped,
         "failed": failed,
-        "total_scanned": len(contacts[:max_count]),
+        "total_scanned": i + 1,
+        "resume_ops": resume_ops,
         "details": details,
     }
-
-
-_JS_SCROLL_TO_CONTACT = """
-(function() {
-    var targetName = {NAME_PLACEHOLDER};
-    // 找到联系人列表容器并滚动使目标可见
-    var items = document.querySelectorAll('.geek-item-wrap');
-    for (var i = 0; i < items.length; i++) {
-        var t = (items[i].innerText || '').trim();
-        if (t.indexOf(targetName) >= 0) {
-            items[i].scrollIntoView({block: 'nearest', behavior: 'instant'});
-            return {scrolled: true, name: (t.split('\\n')[0] || '').trim()};
-        }
-    }
-    return {scrolled: false};
-})()
-"""
-
-async def _scroll_contact_into_view(contact_name: str, fresh_contact: Dict) -> None:
-    """滚动联系人列表使目标联系人落入视口，然后重新查找坐标。"""
-    try:
-        safe_name = json.dumps(contact_name)
-        script = _JS_SCROLL_TO_CONTACT.replace("{NAME_PLACEHOLDER}", safe_name)
-        result = await automation.execute_js(script)
-        if isinstance(result, dict) and result.get("scrolled"):
-            logger.info(f"[F6] 已滚动联系人列表: {contact_name}")
-    except Exception as e:
-        logger.debug(f"[F6] 滚动联系人失败: {e}")
-
-
-async def _refind_contact(contact_name: str) -> Optional[Dict]:
-    """逐次提取单个联系人的最新坐标（解决一次性提取过期问题）。
-
-    每次点击前调用，通过姓名在聊天列表中重新查找，返回视口坐标。
-    """
-    try:
-        safe_name = json.dumps(contact_name)  # JSON 编码防止 JS 注入
-        script = _JS_FIND_CONTACT_BY_NAME.replace("{NAME_PLACEHOLDER}", safe_name)
-        result = await automation.execute_js(script)
-        if isinstance(result, dict) and result.get("x") is not None:
-            return result
-    except Exception as e:
-        logger.debug(f"[F6] _refind_contact({contact_name}) 失败: {e}")
-    return None
 
 
 async def _close_resume_and_return() -> None:
@@ -682,6 +679,105 @@ async def _detect_resume_case() -> Dict:
     except Exception as e:
         logger.debug(f"[F6] Case检测失败: {e}")
     return {"case_type": "unknown"}
+
+
+_CHAT_NOISE = {
+    "没有更多了", "全部职位", "全部", "未读", "已读",
+    "沟通中", "不限", "筛选", "发送", "我知道了",
+    "求简历", "换电话", "换微信", "不合适",
+    "刚刚活跃", "今日活跃", "在线",
+    "同意", "拒绝", "接收", "忽略",
+    "在线简历", "附件简历", "工作经历", "未填写工作经历",
+    "沟通职位：", "期望：",
+    "送达", "约面试",
+    "简历请求已发送",
+    "设置邮箱",
+    "对方想发送附件简历给您，您是否同意",
+    "对方想发送附件简历给您",
+    "您可以在线预览牛人简历， 设置邮箱 后投递的简历会同时发送到您的邮箱。",
+    "您可以在线预览牛人简历，设置邮箱后投递的简历会同时发送到您的邮箱。",
+    "后投递的简历会同时发送到您的邮箱。",
+}
+
+
+def _is_chat_noise(text: str) -> bool:
+    """判断文本是否为UI噪音（按钮、标签、系统提示等非对话内容）"""
+    if not text or not text.strip():
+        return True
+    t = text.strip()
+    if t in _CHAT_NOISE:
+        return True
+    if "撤回了一条消息" in t:
+        return True
+    if len(t) <= 8 and (t.endswith(("月", "日")) or ":" in t or t.isdigit()):
+        return True
+    import re
+    if re.match(r'^\d{1,2}岁$', t): return True
+    if re.match(r'^\d{1,2}年(应届生)?$', t): return True
+    if t in ("本科", "硕士", "博士", "大专"): return True
+    if re.match(r'^[一-龥]{2,8}(大学|学院)$', t): return True
+    return False
+
+
+async def _check_resume_appropriate(contact_name: str, msgs: list) -> str:
+    """AI判断对话状态，返回 FAREWELL / REJECTION / PROCEED。
+
+    FAREWELL: 招聘方已发祝福告别（如"祝你找到心仪的岗位"）→ 不回复、不取简历
+    REJECTION: 候选人表达拒绝（如"不合适""不考虑"）→ 礼貌回复后跳过
+    PROCEED: 正常情况 → 继续取简历
+    """
+    if not msgs:
+        return "PROCEED"
+
+    # 过滤UI噪音（按钮、系统提示等）
+    lines = []
+    for m in msgs:
+        role = "招聘方" if m.get("isMe") else "候选人"
+        text = (m.get("text", "") or "").strip()
+        if not text or _is_chat_noise(text):
+            continue
+        lines.append(f"[{role}] {text}")
+    lines = lines[-8:]  # 取最近8条有效消息
+    if not lines:
+        return "PROCEED"
+
+    dialog = "\n".join(lines)
+    logger.info(f"[F6] {contact_name} AI上下文判断，对话({len(lines)}条):\n{dialog}")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": settings.DEEPSEEK_MODEL,
+                    "messages": [
+                        {"role": "system", "content": (
+                            "你是招聘助手。根据对话判断是否应继续向候选人请求简历，只回复一个词。\n\n"
+                            "FAREWELL — 招聘方明确发了结束对话的祝福告别，例如：\n"
+                            '  "祝你找到心仪的岗位""祝你好运""我们不太合适，抱歉""感谢你的关注，再见"等\n\n'
+                            "REJECTION — 候选人明确表示拒绝此岗位或不感兴趣，例如：\n"
+                            '  "不合适""不考虑了""算了""已经找到工作了""不感兴趣"等\n'
+                            '  注意：候选人说「不是做X」来描述自己的工作内容（如「我们不是做单一产品」）不属于拒绝\n\n'
+                            "PROCEED — 以上两种情况都不符合，正常沟通中"
+                        )},
+                        {"role": "user", "content": dialog},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 10,
+                },
+            )
+        if resp.status_code == 200:
+            result = resp.json()["choices"][0]["message"]["content"].strip().upper()
+            if result in ("FAREWELL", "REJECTION", "PROCEED"):
+                logger.info(f"[F6] {contact_name}: AI判断 → {result}")
+                return result
+    except Exception as e:
+        logger.debug(f"[F6] AI上下文判断失败: {e}，默认继续")
+    return "PROCEED"
 
 
 async def _handle_case1_download(

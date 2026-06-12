@@ -221,6 +221,18 @@ async def force_unlock_browser():
     _lock_acquired_at = None
     return {"status": "ok", "message": "浏览器锁已强制释放"}
 
+
+@app.post("/api/tasks/cancel")
+async def cancel_current_task(current_user: dict = Depends(verify_token)):
+    """取消当前正在运行的自动化任务（F5/F6/F7/F8）
+
+    设置取消信号，后台线程会在下一个检查点检测到并停止。
+    """
+    from app.automation import cancel_event
+    cancel_event.set()
+    api_logger.info(f"[Cancel] 取消信号已设置 (当前任务: {_active_task_type})")
+    return {"status": "ok", "message": f"取消信号已发出，{_active_task_type or '无'} 任务将在下一个检查点停止"}
+
 # ============================================================
 # 数据库
 # ============================================================
@@ -797,6 +809,8 @@ def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template:
     import asyncio as _asyncio
 
     async def _thread_main():
+        from app.automation import cancel_event
+        cancel_event.clear()
         try:
             from app.chat_workflow import _batch_reply_impl
         except ImportError as e:
@@ -938,6 +952,8 @@ def _run_resume_in_thread(max_count: int, dry_run: bool = False):
     import asyncio as _asyncio
 
     async def _thread_main():
+        from app.automation import cancel_event
+        cancel_event.clear()
         try:
             from app.resume_collector import collect_resumes
         except ImportError as e:
@@ -1002,6 +1018,140 @@ def _run_resume_in_thread(max_count: int, dry_run: bool = False):
 async def get_resume_task_status(current_user: dict = Depends(verify_token)):
     """获取批量简历任务状态"""
     return resume_task_status
+
+
+# ============================================================
+# F8 已获取简历下载 (resume_downloader.py)
+# ============================================================
+_received_resume_task_status: Dict[str, Any] = {
+    "status": "idle", "downloaded": 0, "skipped": 0, "failed": 0,
+    "total": 0, "message": "", "details": [],
+}
+
+
+@app.post("/api/resume/received")
+async def download_received_resumes(
+    req: BatchResumeRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """下载已获取的简历 — 针对已同意分享简历的联系人
+
+    与 /api/resume/batch（申请简历）不同，本端点处理的是对方已上传附件简历的情况。
+    流程：联系人 → 附件简历 → PDF预览 → 下载 → 关闭预览 → 下一个
+    """
+    global _received_resume_task_status, _active_task_type, _lock_acquired_at
+
+    _force_unlock_if_stale()
+    if not _browser_task_lock.acquire(blocking=False):
+        return {"status": "error", "message": f"浏览器正被 {_active_task_type} 任务占用，请稍后重试"}
+
+    if _received_resume_task_status.get("status") == "running":
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
+        return {"status": "error", "message": "已有下载任务正在运行"}
+
+    _active_task_type = "F8-download-received"
+    _lock_acquired_at = __import__('time').time()
+    _received_resume_task_status = {
+        "status": "running",
+        "downloaded": 0,
+        "skipped": 0,
+        "failed": 0,
+        "total": req.limit,
+        "message": f"正在下载最多 {req.limit} 份已获取简历...",
+        "details": [],
+        "start_time": datetime.now().isoformat(),
+    }
+    api_logger.info(f"[F8] 启动已获取简历下载任务，上限 {req.limit} 人")
+
+    import threading as _th
+    _th.Thread(
+        target=_run_received_resume_in_thread,
+        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False),
+        daemon=True,
+    ).start()
+
+    return {
+        "status": "started",
+        "message": f"已获取简历下载任务已启动，上限 {req.limit} 人",
+    }
+
+
+def _run_received_resume_in_thread(max_count: int, dry_run: bool = False):
+    """在独立线程中运行已获取简历下载"""
+    global _received_resume_task_status, _active_task_type
+    import asyncio as _asyncio
+
+    async def _thread_main():
+        from app.automation import cancel_event
+        cancel_event.clear()
+        try:
+            from app.resume_downloader import collect_received_resumes
+        except ImportError as e:
+            _received_resume_task_status["status"] = "error"
+            _received_resume_task_status["message"] = f"简历下载模块未就绪: {e}"
+            api_logger.error(f"[F8] 失败: 模块导入错误: {e}")
+            return
+
+        try:
+            automation.reset_for_thread()
+            conn = await automation.connect()
+            if conn.get("status") not in ("connected", "already_connected"):
+                _received_resume_task_status["status"] = "error"
+                _received_resume_task_status["message"] = "浏览器连接失败"
+                return
+
+            login_status = await automation.check_login()
+            if not login_status.get("logged_in"):
+                _received_resume_task_status["status"] = "error"
+                _received_resume_task_status["message"] = "BOSS直聘未登录，请先在VNC中扫码登录"
+                return
+
+            result = await collect_received_resumes(max_count=max_count, dry_run=dry_run)
+
+            _received_resume_task_status["status"] = result.get("status", "completed")
+            _received_resume_task_status["downloaded"] = result.get("downloaded", 0)
+            _received_resume_task_status["skipped"] = result.get("skipped", 0)
+            _received_resume_task_status["failed"] = result.get("failed", 0)
+            _received_resume_task_status["total"] = result.get("total_scanned", 0)
+            _received_resume_task_status["message"] = (
+                f"下载:{result.get('downloaded',0)} "
+                f"跳过:{result.get('skipped',0)} "
+                f"失败:{result.get('failed',0)} "
+                f"扫描:{result.get('total_scanned',0)}"
+            )
+            _received_resume_task_status["details"] = result.get("details", [])
+            _received_resume_task_status["end_time"] = datetime.now().isoformat()
+            api_logger.info(f"[F8] 完成: {_received_resume_task_status['message']}")
+
+        except Exception as e:
+            import traceback
+            _received_resume_task_status["status"] = "error"
+            _received_resume_task_status["message"] = str(e)
+            api_logger.error(f"[F8] 失败: {e}\n{traceback.format_exc()}")
+
+    try:
+        _asyncio.run(_thread_main())
+    except Exception as e:
+        _received_resume_task_status["status"] = "error"
+        _received_resume_task_status["message"] = str(e)
+        api_logger.error(f"[F8] 线程失败: {e}")
+    finally:
+        global _active_task_type, _lock_acquired_at
+        _active_task_type = None
+        _lock_acquired_at = None
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
+
+
+@app.get("/api/resume/received-status")
+async def get_received_resume_status(current_user: dict = Depends(verify_token)):
+    """获取已获取简历下载任务状态"""
+    return _received_resume_task_status
 
 
 @app.get("/api/resume/list")
@@ -1302,6 +1452,8 @@ def _run_filter_contact_in_thread(
 
     async def _thread_main():
         """线程主协程：连接浏览器 → 执行工作流"""
+        from app.automation import cancel_event
+        cancel_event.clear()
         # 在线程的事件循环中重新连接浏览器（线程安全）
         _filter_tasks[task_id]["progress"] = 5
         automation.reset_for_thread()
@@ -1671,6 +1823,7 @@ async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
         return {
             "f5_filter": f5_status,
             "f6_resume": resume_task_status,
+            "f8_received": _received_resume_task_status,
             "f7_reply": _reply_task_status,
             "browser": {"connected": automation._connected},
         }
@@ -1681,10 +1834,10 @@ async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
 
 @app.get("/api/stats/daily-trend")
 async def get_daily_trend(
-    days: int = Query(7, ge=1, le=30),
-    current_user: dict = Depends(verify_token),
+    days: int = Query(default=7, ge=1, le=30),
+    current_user: dict = Depends(verify_token)
 ):
-    """最近 N 天每日统计趋势"""
+    """7日趋势数据 — 按日聚合联系/简历/对话统计"""
     conn = get_db()
     try:
         trend = []
@@ -1723,21 +1876,6 @@ async def get_daily_trend(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
-
-
-@app.get("/api/debug/chat-dom")
-async def debug_chat_dom(current_user: dict = Depends(verify_token)):
-    """诊断工具: 扫描BOSS直聘聊天页DOM结构
-
-    返回关键元素的class/text/位置，用于调试JS选择器不匹配问题。
-    需要先打开BOSS直聘并导航到聊天页。
-    """
-    from app.chat_nav import dump_chat_dom
-    try:
-        result = await dump_chat_dom()
-        return {"status": "ok", "data": result}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 
 @app.get("/api/contact-records")
@@ -1943,6 +2081,7 @@ async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
     return {
         "f5_filter": f5_status,
         "f6_resume": f6_status,
+        "f8_received": _received_resume_task_status,
         "f7_reply": f7_status,
         "browser": browser_status,
         "login": login_status,
@@ -2014,6 +2153,118 @@ async def get_daily_trend(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+# ============================================================
+# 岗位话术文件管理 — 绑定 job_info/ 文件夹
+# ============================================================
+
+JOB_INFO_DIR = BASE_DIR / "job_info"
+
+
+class JobInfoSaveRequest(BaseModel):
+    """岗位话术保存请求"""
+    filename: str   # 不含 .txt 后缀
+    content: str
+
+
+class JobInfoSelectRequest(BaseModel):
+    """选择当前使用的岗位"""
+    filename: str   # 不含 .txt 后缀
+
+
+@app.get("/api/job-info/files")
+async def list_job_info_files(current_user: dict = Depends(verify_token)):
+    """列出 job_info/ 下所有 .txt 文件"""
+    try:
+        files = []
+        if JOB_INFO_DIR.exists():
+            for f in sorted(JOB_INFO_DIR.glob("*.txt")):
+                name = f.stem  # 去掉 .txt
+                if name == ".selected":
+                    continue
+                stat = f.stat()
+                files.append({
+                    "filename": name,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+        # 读取当前选中的岗位
+        selected = None
+        sel_file = JOB_INFO_DIR / ".selected"
+        if sel_file.exists():
+            selected = sel_file.read_text(encoding="utf-8").strip()
+        return {"files": files, "selected": selected}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/job-info/files/{filename}")
+async def get_job_info_file(filename: str, current_user: dict = Depends(verify_token)):
+    """读取指定 .txt 文件内容"""
+    filepath = JOB_INFO_DIR / f"{filename}.txt"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail=f"文件 {filename}.txt 不存在")
+    try:
+        return {
+            "filename": filename,
+            "content": filepath.read_text(encoding="utf-8"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/job-info/files")
+async def save_job_info_file(
+    req: JobInfoSaveRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """创建或更新 .txt 文件"""
+    if not req.filename or not req.filename.strip():
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+    safe_name = req.filename.strip().replace("/", "_").replace("\\", "_")
+    filepath = JOB_INFO_DIR / f"{safe_name}.txt"
+    try:
+        JOB_INFO_DIR.mkdir(parents=True, exist_ok=True)
+        filepath.write_text(req.content, encoding="utf-8")
+        # 如果是第一个文件或没有选中项，自动设为当前岗位
+        sel_file = JOB_INFO_DIR / ".selected"
+        if not sel_file.exists():
+            sel_file.write_text(safe_name, encoding="utf-8")
+        return {"filename": safe_name, "message": f"已保存 {safe_name}.txt"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/job-info/files/{filename}")
+async def delete_job_info_file(filename: str, current_user: dict = Depends(verify_token)):
+    """删除指定 .txt 文件"""
+    filepath = JOB_INFO_DIR / f"{filename}.txt"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail=f"文件 {filename}.txt 不存在")
+    try:
+        filepath.unlink()
+        # 如果删除的是当前选中项，清除选择
+        sel_file = JOB_INFO_DIR / ".selected"
+        if sel_file.exists() and sel_file.read_text(encoding="utf-8").strip() == filename:
+            sel_file.unlink()
+        return {"message": f"已删除 {filename}.txt"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/job-info/select")
+async def select_job_info(
+    req: JobInfoSelectRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """设置当前使用的岗位话术文件"""
+    filepath = JOB_INFO_DIR / f"{req.filename}.txt"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail=f"文件 {req.filename}.txt 不存在")
+    sel_file = JOB_INFO_DIR / ".selected"
+    sel_file.write_text(req.filename.strip(), encoding="utf-8")
+    return {"selected": req.filename.strip(), "message": f"已切换到 {req.filename}"}
 
 
 if __name__ == "__main__":

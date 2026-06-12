@@ -1002,6 +1002,13 @@
                         <span class="btn-text">💬 批量回复未读</span>
                     </button>
                 </div>
+                <div class="input-row">
+                    <input type="number" id="receivedResumeLimit" value="10" placeholder="人数" aria-label="下载已获取简历人数上限" min="1" max="200">
+                    <button class="btn btn-success" onclick="batchDownloadReceivedResumes()" id="btnDownloadReceived">
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span class="btn-text">📥 下载已获取简历</span>
+                    </button>
+                </div>
             </div>
 
             <!-- 筛选条件 -->
@@ -1093,7 +1100,7 @@
                 </div>
             </div>
 
-            <!-- 岗位面试话术库 -->
+            <!-- 岗位话术库 — 绑定 job_info/ 文件夹 -->
             <div class="section">
                 <div class="section-header">
                     <span class="section-label">岗位话术库</span>
@@ -1102,24 +1109,24 @@
                 <div class="config-content" id="positionTemplates">
                     <div class="config-card">
                         <div class="form-group">
-                            <label>选择岗位</label>
-                            <select id="positionSelect" onchange="loadPositionTemplate()">
-                                <option value="">-- 添加新岗位 --</option>
+                            <label>选择岗位 <span id="activeBadge" style="display:none;color:var(--accent);margin-left:6px;font-size:12px;">● 当前注入</span></label>
+                            <select id="positionSelect" onchange="onPositionSelect()">
+                                <option value="">-- 选择或新建 --</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label>岗位名称</label>
-                            <input type="text" id="positionName" placeholder="例如：后端工程师、前端开发...">
+                            <input type="text" id="positionName" placeholder="文件名（不含.txt），例如：后端工程师" oninput="updateActiveBadge()">
                         </div>
                         <div class="form-group">
-                            <label>面试问题（每行一个，支持 {候选人姓名} 占位符）</label>
-                            <textarea id="positionQuestions" placeholder="1. 能讲讲您最满意的项目经历吗？&#10;2. 工作地点：北京，工作时间：965，能接受吗？&#10;3. 本周三或周四下午方便面试吗？" rows="6"></textarea>
+                            <label>岗位背景 / 测试问题（此内容将注入大模型 system prompt）</label>
+                            <textarea id="positionContent" placeholder="公司名称：xxx&#10;主营业务：xxx&#10;招聘岗位：xxx&#10;岗位要求：xxx&#10;岗位亮点：xxx" rows="8"></textarea>
                         </div>
                         <div class="btn-row">
-                            <button class="btn btn-secondary btn-sm" onclick="savePositionTemplate()">💾 保存</button>
-                            <button class="btn btn-secondary btn-sm" onclick="deletePositionTemplate()">🗑️ 删除</button>
+                            <button class="btn btn-secondary btn-sm" onclick="savePositionFile()">💾 保存</button>
+                            <button class="btn btn-secondary btn-sm" onclick="deletePositionFile()">🗑️ 删除</button>
+                            <button class="btn btn-secondary btn-sm" id="btnSetActive" onclick="setActivePosition()" style="display:none;">⭐ 设为当前注入</button>
                         </div>
-                        <div class="template-list" id="positionList" style="margin-top:10px;"></div>
                     </div>
                 </div>
             </div>
@@ -1297,7 +1304,7 @@
 
             // 3. 用当前 config 填充表单
             applyConfigToForm();
-            renderPositionList();
+            loadJobFiles();
         }
 
         function applyConfigToForm() {
@@ -1651,6 +1658,16 @@
 
         function cancelCurrentTask() {
             if (!confirm('确认取消当前任务？')) return;
+            // 调用后端取消 API — 设置取消信号，后台线程将在检查点停止
+            apiCall('/api/tasks/cancel', null, 'POST').then(data => {
+                if (data && data.status === 'ok') {
+                    log('⏹ ' + data.message, 'warn');
+                } else {
+                    log('⏹ 取消请求已发送', 'warn');
+                }
+            }).catch(() => {
+                log('⏹ 取消请求已发送', 'warn');
+            });
             // Clear all polling timers
             if (_filterPollTimer) { clearInterval(_filterPollTimer); _filterPollTimer = null; }
             if (_chatReplyPollTimer) { clearInterval(_chatReplyPollTimer); _chatReplyPollTimer = null; }
@@ -1659,7 +1676,7 @@
             setLoading(document.getElementById('btnFilterHello'), false);
             setLoading(document.getElementById('btnGetResumes'), false);
             setLoading(document.getElementById('btnReplyMessages'), false);
-            log('⏹ 任务已手动取消', 'warn');
+            setLoading(document.getElementById('btnDownloadReceived'), false);
         }
 
         function clearTaskStatus() {
@@ -1699,6 +1716,7 @@
                     localStorage.setItem('auth_token', authToken);
                     updateAuthUI(true);
                     log('✅ API 登录成功', 'info');
+                    loadJobFiles();  // 登录后加载岗位列表
                     return true;
                 } else {
                     const err = await resp.json();
@@ -1832,93 +1850,151 @@
             flashSave(event && event.target ? event.target.closest('.btn') : null, '已保存');
         }
 
-        // ── Position Templates ──
-        function renderPositionList() {
+        // ── Position Files (job_info/ 文件夹) ──
+        let jobFiles = [];
+        let activeJobFile = '';
+
+        async function loadJobFiles() {
+            try {
+                const token = getAuthToken();
+                if (!token) return;  // 未登录，跳过
+                const resp = await fetch(`${API_BASE}/api/job-info/files`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                jobFiles = data.files || [];
+                activeJobFile = data.selected || '';
+                renderJobSelect();
+            } catch (e) {
+                console.error('加载岗位文件列表失败', e);
+            }
+        }
+
+        function renderJobSelect() {
             const select = document.getElementById('positionSelect');
-            const list = document.getElementById('positionList');
-            const positions = Object.keys(config.positions || {});
             const currentValue = select.value;
-            select.innerHTML = '<option value="">-- 添加新岗位 --</option>';
-            positions.forEach(name => {
-                const option = document.createElement('option');
-                option.value = name;
-                option.textContent = name;
-                select.appendChild(option);
+            select.innerHTML = '<option value="">-- 选择或新建 --</option>';
+            jobFiles.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.filename;
+                opt.textContent = f.filename + (f.filename === activeJobFile ? ' ●' : '');
+                select.appendChild(opt);
             });
-            if (currentValue && positions.includes(currentValue)) select.value = currentValue;
-            list.innerHTML = '';
-            positions.forEach(name => {
-                const questions = config.positions[name];
-                const item = document.createElement('div');
-                item.className = 'template-item';
-                item.setAttribute('role', 'button');
-                item.setAttribute('tabindex', '0');
-                const nm = document.createElement('div');
-                nm.className = 'template-name';
-                nm.textContent = name + ' ';
-                const small = document.createElement('small');
-                small.style.color = 'var(--text-muted)';
-                small.textContent = '(' + questions.length + '个问题)';
-                nm.appendChild(small);
-                const txt = document.createElement('div');
-                txt.className = 'template-text';
-                txt.textContent = questions.slice(0, 2).join('、') + (questions.length > 2 ? '...' : '');
-                item.appendChild(nm);
-                item.appendChild(txt);
-                item.onclick = () => { document.getElementById('positionSelect').value = name; loadPositionTemplate(); };
-                item.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); } };
-                list.appendChild(item);
-            });
+            if (currentValue && jobFiles.find(f => f.filename === currentValue)) {
+                select.value = currentValue;
+            }
+            updateActiveBadge();
         }
 
-        function loadPositionTemplate() {
-            const select = document.getElementById('positionSelect');
-            const positionName = select.value;
-            if (positionName && config.positions[positionName]) {
-                document.getElementById('positionName').value = positionName;
-                document.getElementById('positionQuestions').value = config.positions[positionName].join('\n');
-                log(`已加载岗位: ${positionName}`, 'info');
+        function updateActiveBadge() {
+            const badge = document.getElementById('activeBadge');
+            const btn = document.getElementById('btnSetActive');
+            const name = document.getElementById('positionName').value.trim();
+            if (name && name === activeJobFile) {
+                badge.style.display = 'inline';
+                btn.style.display = 'none';
+            } else if (name) {
+                badge.style.display = 'none';
+                btn.style.display = 'inline-block';
             } else {
+                badge.style.display = 'none';
+                btn.style.display = 'none';
+            }
+        }
+
+        async function onPositionSelect() {
+            const name = document.getElementById('positionSelect').value;
+            if (!name) {
                 document.getElementById('positionName').value = '';
-                document.getElementById('positionQuestions').value = '';
+                document.getElementById('positionContent').value = '';
+                updateActiveBadge();
+                return;
+            }
+            try {
+                const token = getAuthToken();
+                const resp = await fetch(`${API_BASE}/api/job-info/files/${encodeURIComponent(name)}`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!resp.ok) { log('❌ 加载文件失败', 'error'); return; }
+                const data = await resp.json();
+                document.getElementById('positionName').value = data.filename;
+                document.getElementById('positionContent').value = data.content;
+                updateActiveBadge();
+                log(`已加载: ${data.filename}`, 'info');
+            } catch (e) {
+                log('❌ 加载文件异常', 'error');
             }
         }
 
-        function savePositionTemplate() {
-            const positionName = document.getElementById('positionName').value.trim();
-            const questionsText = document.getElementById('positionQuestions').value.trim();
-            if (!positionName) { log('❌ 请输入岗位名称', 'error'); return; }
-            if (!questionsText) { log('❌ 请输入面试问题', 'error'); return; }
-            const questions = questionsText.split('\n').map(q => q.trim()).filter(q => q.length > 0);
-            if (questions.length === 0) { log('❌ 请至少输入一个问题', 'error'); return; }
-            if (!config.positions) config.positions = {};
-            config.positions[positionName] = questions;
-            saveConfig();
-            renderPositionList();
-            document.getElementById('positionSelect').value = positionName;
-            log(`✅ 岗位 "${positionName}" 已保存 (${questions.length}个问题)`, 'info');
+        async function savePositionFile() {
+            const name = document.getElementById('positionName').value.trim();
+            const content = document.getElementById('positionContent').value.trim();
+            if (!name) { log('❌ 请输入岗位名称', 'error'); return; }
+            if (!content) { log('❌ 请输入岗位内容', 'error'); return; }
+            try {
+                const token = getAuthToken();
+                const resp = await fetch(`${API_BASE}/api/job-info/files`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ filename: name, content: content })
+                });
+                if (!resp.ok) { const err = await resp.json(); log('❌ ' + (err.detail || '保存失败'), 'error'); return; }
+                await loadJobFiles();
+                document.getElementById('positionSelect').value = name;
+                document.getElementById('positionName').value = name;
+                updateActiveBadge();
+                log(`✅ ${name}.txt 已保存`, 'info');
+            } catch (e) {
+                log('❌ 保存失败', 'error');
+            }
         }
 
-        function deletePositionTemplate() {
-            const positionName = document.getElementById('positionName').value.trim();
-            if (!positionName || !config.positions || !config.positions[positionName]) {
-                log('❌ 没有选中的岗位', 'error'); return;
-            }
-            if (confirm(`确定要删除岗位 "${positionName}" 吗？`)) {
-                delete config.positions[positionName];
-                saveConfig();
+        async function deletePositionFile() {
+            const name = document.getElementById('positionName').value.trim();
+            if (!name) { log('❌ 没有选中的岗位', 'error'); return; }
+            if (!confirm(`确定要删除 ${name}.txt 吗？`)) return;
+            try {
+                const token = getAuthToken();
+                const resp = await fetch(`${API_BASE}/api/job-info/files/${encodeURIComponent(name)}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!resp.ok) { log('❌ 删除失败', 'error'); return; }
                 document.getElementById('positionName').value = '';
-                document.getElementById('positionQuestions').value = '';
-                renderPositionList();
-                log(`✅ 岗位 "${positionName}" 已删除`, 'info');
+                document.getElementById('positionContent').value = '';
+                document.getElementById('positionSelect').value = '';
+                await loadJobFiles();
+                log(`✅ ${name}.txt 已删除`, 'info');
+            } catch (e) {
+                log('❌ 删除失败', 'error');
             }
         }
 
-        function getPositionQuestions(positionName, candidateName = '') {
-            if (!config.positions || !config.positions[positionName]) return null;
-            return config.positions[positionName].map(q => {
-                return q.replace(/{候选人姓名}/g, candidateName).replace(/{name}/g, candidateName);
-            });
+        async function setActivePosition() {
+            const name = document.getElementById('positionName').value.trim();
+            if (!name) { log('❌ 没有选中的岗位', 'error'); return; }
+            try {
+                const token = getAuthToken();
+                const resp = await fetch(`${API_BASE}/api/job-info/select`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ filename: name })
+                });
+                if (!resp.ok) { log('❌ 设置失败', 'error'); return; }
+                activeJobFile = name;
+                renderJobSelect();
+                updateActiveBadge();
+                log(`⭐ ${name} 已设为当前注入岗位`, 'info');
+            } catch (e) {
+                log('❌ 设置失败', 'error');
+            }
         }
 
         // ── VNC Control ──
@@ -2319,6 +2395,64 @@
                     setStats(null, data.length, null);
                 }
             });
+        }
+
+        function batchDownloadReceivedResumes() {
+            const btn = document.getElementById('btnDownloadReceived');
+            const limit = parseInt(document.getElementById('receivedResumeLimit').value) || 10;
+            if (!confirm(`确认下载最多 ${limit} 份已获取的简历？\n\n此功能针对已同意分享简历的联系人，直接下载附件简历。`)) return;
+            setLoading(btn, true);
+            log(`📥 开始下载已获取简历，上限 ${limit} 人...`, 'info');
+            apiCall('/api/resume/received', { limit: limit }).then(data => {
+                if (data && data.status === 'started') {
+                    log(`✅ 任务已启动，预计下载 ${limit} 份简历`, 'info');
+                    currentTask = { type: 'receivedResume', taskId: null, active: true };
+                    updateTaskStatus(true, '下载已获取简历', 0, `正在处理联系人...`);
+                    pollReceivedResumeStatus(btn, limit);
+                } else if (data && data.status === 'error') {
+                    log(`❌ ${data.message}`, 'error');
+                    setLoading(btn, false);
+                } else {
+                    setLoading(btn, false);
+                }
+            });
+        }
+
+        function pollReceivedResumeStatus(btn, limit) {
+            let pollCount = 0;
+            const interval = setInterval(async () => {
+                pollCount++;
+                if (pollCount > 100) {
+                    clearInterval(interval);
+                    log('⏰ 下载任务轮询超时', 'warn');
+                    clearTaskStatus();
+                    setLoading(btn, false);
+                    return;
+                }
+                try {
+                    const data = await apiCall('/api/resume/received-status', null, 'GET');
+                    if (!data) { clearInterval(interval); return; }
+                    if (data.status === 'completed') {
+                        log(`✅ 已获取简历下载完成! 下载:${data.downloaded||0} 跳过:${data.skipped||0} 失败:${data.failed||0}`, 'info');
+                        updateStats(null, data.downloaded || 0, null);
+                        loadResumeList();
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'error') {
+                        log(`❌ 任务失败: ${data.message}`, 'error');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'running') {
+                        const done = (data.downloaded || 0) + (data.failed || 0) + (data.skipped || 0);
+                        const total = data.total || limit;
+                        const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+                        updateTaskStatus(true, '下载已获取简历', progress, `已下载 ${data.downloaded||0}, 总 ${total} 人`);
+                        if (pollCount % 5 === 0) log(`⏳ 下载中... (${data.downloaded||0}/${total})`, 'info');
+                    }
+                } catch (e) { console.error('轮询状态失败:', e); }
+            }, 3000);
         }
 
         function batchReplyMessages() {

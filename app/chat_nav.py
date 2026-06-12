@@ -627,6 +627,138 @@ async def click_communicating_filter() -> Dict:
         return {"status": "not_found", "message": "未找到沟通中筛选按钮"}
 
 
+_JS_CLICK_NEW_GREET = """
+(function() {
+    var filterArea = document.querySelector('.chat-message-filter-left');
+    if (filterArea) {
+        var spans = filterArea.querySelectorAll('span');
+        for (var i = 0; i < spans.length; i++) {
+            var t = (spans[i].innerText || '').trim();
+            if (t === '新招呼') {
+                var r = spans[i].getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    spans[i].click();
+                    return {found: true, text: t, x: r.x + r.width/2, y: r.y + r.height/2};
+                }
+            }
+        }
+        var ft = (filterArea.innerText || '').trim();
+        if (ft.indexOf('新招呼') >= 0) {
+            var fr = filterArea.getBoundingClientRect();
+            filterArea.click();
+            return {found: true, text: 'filter-click', x: fr.x + fr.width/2, y: fr.y + fr.height/2};
+        }
+    }
+    var allSpans = document.querySelectorAll('span');
+    for (var j = 0; j < allSpans.length; j++) {
+        var st = (allSpans[j].innerText || '').trim();
+        if (st === '新招呼') {
+            var sr = allSpans[j].getBoundingClientRect();
+            if (sr.width > 0 && sr.height > 0 && sr.y < 300) {
+                allSpans[j].click();
+                return {found: true, text: st, x: sr.x + sr.width/2, y: sr.y + sr.height/2};
+            }
+        }
+    }
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) {
+        var idoc = iframe.contentDocument;
+        var ispans = idoc.querySelectorAll('span');
+        for (var k = 0; k < ispans.length; k++) {
+            if ((ispans[k].innerText || '').trim() === '新招呼') {
+                var ir = ispans[k].getBoundingClientRect();
+                if (ir.width > 0 && ir.height > 0) {
+                    ispans[k].click();
+                    return {found: true, text: 'iframe-新招呼', x: ir.x + ir.width/2, y: ir.y + ir.height/2};
+                }
+            }
+        }
+    }
+    return {found: false};
+})()
+"""
+
+
+async def click_new_greet_filter() -> Dict:
+    """点击聊天页"新招呼"筛选标签，显示新打招呼的联系人。
+
+    这些联系人还未建立沟通，直接请求简历即可，无需数据库去重检查。
+
+    Returns:
+        {status: "ok"|"not_found", message: str}
+    """
+    result = await automation.execute_js(_JS_CLICK_NEW_GREET)
+    if not isinstance(result, dict):
+        result = {}
+    if result.get("found"):
+        await asyncio.sleep(2)
+        logger.info(f"[ChatNav] 已点击'新招呼'筛选: {result.get('text')}")
+        return {"status": "ok", "message": "已筛选新招呼"}
+    else:
+        logger.warning("[ChatNav] 未找到'新招呼'筛选按钮")
+        return {"status": "not_found", "message": "未找到新招呼筛选按钮"}
+
+
+_JS_CLICK_RECEIVED_RESUME = """
+(function() {
+    var filterArea = document.querySelector('.chat-message-filter-left');
+    if (filterArea) {
+        var spans = filterArea.querySelectorAll('span');
+        for (var i = 0; i < spans.length; i++) {
+            var t = (spans[i].innerText || '').trim();
+            if (t === '已获取简历') {
+                var r = spans[i].getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    spans[i].click();
+                    return {found: true, text: t, x: r.x + r.width/2, y: r.y + r.height/2};
+                }
+            }
+        }
+    }
+    var allSpans = document.querySelectorAll('span');
+    for (var j = 0; j < allSpans.length; j++) {
+        var st = (allSpans[j].innerText || '').trim();
+        if (st === '已获取简历') {
+            var sr = allSpans[j].getBoundingClientRect();
+            if (sr.width > 0 && sr.height > 0 && sr.y < 300) {
+                allSpans[j].click();
+                return {found: true, text: st, x: sr.x + sr.width/2, y: sr.y + sr.height/2};
+            }
+        }
+    }
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) {
+        var idoc = iframe.contentDocument;
+        var ispans = idoc.querySelectorAll('span');
+        for (var k = 0; k < ispans.length; k++) {
+            if ((ispans[k].innerText || '').trim() === '已获取简历') {
+                var ir = ispans[k].getBoundingClientRect();
+                if (ir.width > 0 && ir.height > 0) {
+                    ispans[k].click();
+                    return {found: true, text: 'iframe-已获取简历', x: ir.x + ir.width/2, y: ir.y + ir.height/2};
+                }
+            }
+        }
+    }
+    return {found: false};
+})()
+"""
+
+
+async def click_received_resume_filter() -> Dict:
+    """点击聊天页"已获取简历"筛选标签，显示已同意分享简历的联系人。"""
+    result = await automation.execute_js(_JS_CLICK_RECEIVED_RESUME)
+    if not isinstance(result, dict):
+        result = {}
+    if result.get("found"):
+        await asyncio.sleep(2)
+        logger.info(f"[ChatNav] 已点击'已获取简历'筛选: {result.get('text')}")
+        return {"status": "ok", "message": "已筛选已获取简历"}
+    else:
+        logger.warning("[ChatNav] 未找到'已获取简历'筛选按钮")
+        return {"status": "not_found", "message": "未找到已获取简历筛选按钮"}
+
+
 async def navigate_to_chat(filter_unread: bool = False) -> Dict:
     """导航到BOSS直聘聊天页。
 
@@ -833,3 +965,105 @@ async def type_and_send(message: str) -> Dict:
         return {"status": "ok", "message": "已发送"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# ===== 共享工具：逐次查找联系人 + 滚动 =====
+
+_JS_FIND_CONTACT_BY_NAME = """
+(function() {
+    var targetName = {NAME_PLACEHOLDER};
+    var vw = Math.max(window.innerWidth, 1000);
+
+    function findInDoc(doc) {
+        var items = doc.querySelectorAll('.geek-item-wrap');
+        if (items.length > 0) {
+            for (var i = 0; i < items.length; i++) {
+                var t = (items[i].innerText || '').trim();
+                if (t.indexOf(targetName) >= 0) {
+                    var r = items[i].getBoundingClientRect();
+                    if (r.width > 80 && r.height > 30) {
+                        var parts = t.split(/[\\n]+/).filter(function(l) { return l.trim().length > 0; });
+                        var name = parts[0] || '';
+                        var topEl = items[i].querySelector('.geek-item-top');
+                        if (topEl) {
+                            var topText = (topEl.innerText || '').trim();
+                            var topParts = topText.split(/[\\n]+/);
+                            if (topParts[0]) name = topParts[0].trim();
+                        }
+                        return {
+                            name: name, text: t,
+                            x: r.x + r.width / 2, y: r.y + r.height / 2,
+                            visible: r.y > 0 && r.y < window.innerHeight
+                        };
+                    }
+                }
+            }
+        }
+        var leftBoundary = vw * 0.45;
+        var allEls = doc.querySelectorAll('div, li, a');
+        for (var j = 0; j < allEls.length; j++) {
+            var rr = allEls[j].getBoundingClientRect();
+            var tt = (allEls[j].innerText || '').trim();
+            if (rr.x >= 0 && rr.x < leftBoundary
+                && rr.width > 60 && rr.height > 20
+                && tt.length > 1 && tt.indexOf(targetName) >= 0) {
+                return {
+                    name: (tt.split('\\n')[0] || '').trim(), text: tt,
+                    x: rr.x + rr.width / 2, y: rr.y + rr.height / 2,
+                    visible: rr.y > 0 && rr.y < window.innerHeight
+                };
+            }
+        }
+        return null;
+    }
+
+    var result = findInDoc(document);
+    if (result) return result;
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) {
+        var ifResult = findInDoc(iframe.contentDocument);
+        if (ifResult) return ifResult;
+    }
+    return null;
+})()
+"""
+
+_JS_SCROLL_TO_CONTACT = """
+(function() {
+    var targetName = {NAME_PLACEHOLDER};
+    var items = document.querySelectorAll('.geek-item-wrap');
+    for (var i = 0; i < items.length; i++) {
+        var t = (items[i].innerText || '').trim();
+        if (t.indexOf(targetName) >= 0) {
+            items[i].scrollIntoView({block: 'nearest', behavior: 'instant'});
+            return {scrolled: true, name: (t.split('\\n')[0] || '').trim()};
+        }
+    }
+    return {scrolled: false};
+})()
+"""
+
+
+async def refind_contact(contact_name: str) -> Optional[Dict]:
+    """逐次提取单个联系人的最新坐标（解决一次性提取过期问题）。"""
+    try:
+        safe_name = json.dumps(contact_name)
+        script = _JS_FIND_CONTACT_BY_NAME.replace("{NAME_PLACEHOLDER}", safe_name)
+        result = await automation.execute_js(script)
+        if isinstance(result, dict) and result.get("x") is not None:
+            return result
+    except Exception as e:
+        logger.debug(f"[ChatNav] refind_contact({contact_name}) 失败: {e}")
+    return None
+
+
+async def scroll_contact_into_view(contact_name: str) -> None:
+    """滚动联系人列表使目标联系人落入视口。"""
+    try:
+        safe_name = json.dumps(contact_name)
+        script = _JS_SCROLL_TO_CONTACT.replace("{NAME_PLACEHOLDER}", safe_name)
+        result = await automation.execute_js(script)
+        if isinstance(result, dict) and result.get("scrolled"):
+            logger.info(f"[ChatNav] 已滚动列表至: {contact_name}")
+    except Exception as e:
+        logger.debug(f"[ChatNav] 滚动失败: {e}")

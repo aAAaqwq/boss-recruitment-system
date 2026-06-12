@@ -1030,6 +1030,13 @@ class BrowserAutomation:
         try:
             from nodriver.cdp import input_ as cdp_input
 
+            # mouseMoved — 先移动鼠标到目标位置
+            await self.page.send(cdp_input.dispatch_mouse_event(
+                type_="mouseMoved",
+                x=x, y=y,
+            ))
+            await asyncio.sleep(0.02)
+
             # mousePressed
             await self.page.send(cdp_input.dispatch_mouse_event(
                 type_="mousePressed",
@@ -1101,7 +1108,8 @@ class BrowserAutomation:
     # ===== CDP 下载事件监听 =====
 
     async def wait_for_download(
-        self, download_dir: str, timeout: float = 30.0, poll_interval: float = 0.5
+        self, download_dir: str, timeout: float = 30.0, poll_interval: float = 0.5,
+        before_files: set = None,
     ) -> Dict:
         """等待下载完成 — CDP事件 + 目录轮询双重保障。
 
@@ -1112,17 +1120,18 @@ class BrowserAutomation:
             download_dir: 下载目录绝对路径
             timeout: 最大等待秒数
             poll_interval: 目录轮询间隔秒数
+            before_files: 预记录的文件快照（用于点击下载前就记录的情况）
 
         Returns:
             {status: "downloaded"|"timeout"|"error", path?: str, size?: int, method: str}
         """
         dl_dir = Path(download_dir)
-        before = set(dl_dir.iterdir()) if dl_dir.exists() else set()
+        before = before_files if before_files is not None else (set(dl_dir.iterdir()) if dl_dir.exists() else set())
 
-        # 方法1: 尝试 CDP 事件监听 (Browser.downloadProgress)
+        # 方法1: 尝试 CDP 事件监听 (Browser.downloadProgress) — 短超时快速退回
         cdp_result = None
         try:
-            cdp_result = await self._wait_download_cdp(timeout)
+            cdp_result = await self._wait_download_cdp(min(timeout, 5.0))
         except Exception as e:
             logger.debug(f"[CDP] 下载事件监听失败，回退到目录轮询: {e}")
 
@@ -1148,11 +1157,10 @@ class BrowserAutomation:
                 except OSError:
                     continue
                 if current_size == 0:
-                    continue  # 文件还在写入中
+                    continue
 
                 prev = checked_files.get(str(f))
                 if prev is not None and prev[0] == current_size:
-                    # 大小连续两次检查不变 → 下载完成
                     logger.info(f"[CDP] 目录轮询确认下载: {f.name} ({current_size} bytes)")
                     return {
                         "status": "downloaded",
@@ -1240,6 +1248,9 @@ class BrowserAutomation:
         await self.type_text(text)
         return True
 
+
+# 全局取消信号 — 用于 F5/F6/F7/F8 任务中断
+cancel_event = threading.Event()
 
 # 全局单例
 automation = BrowserAutomation()
