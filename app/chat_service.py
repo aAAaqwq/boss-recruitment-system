@@ -176,7 +176,7 @@ class ChatService:
             db.cursor.execute("""
                 INSERT INTO conversations
                 (candidate_name, action, ai_message, candidate_message, detail, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
             """, (
                 candidate_name,
                 action,
@@ -186,7 +186,7 @@ class ChatService:
                 datetime.now().isoformat()
             ))
             db.conn.commit()
-            return db.cursor.lastrowid
+            row = db.cursor.fetchone(); return row[0] if row else None
 
     def get_conversation_history(
         self,
@@ -205,18 +205,20 @@ class ChatService:
         """
         with self.db as db:
             if candidate_name:
-                rows = db.cursor.execute("""
+                db.cursor.execute("""
                     SELECT * FROM conversations
-                    WHERE candidate_name = ?
+                    WHERE candidate_name = %s
                     ORDER BY created_at DESC
-                    LIMIT ?
-                """, (candidate_name, limit)).fetchall()
+                    LIMIT %s
+                """, (candidate_name, limit))
+                rows = db.cursor.fetchall()
             else:
-                rows = db.cursor.execute("""
+                db.cursor.execute("""
                     SELECT * FROM conversations
                     ORDER BY created_at DESC
-                    LIMIT ?
-                """, (limit,)).fetchall()
+                    LIMIT %s
+                """, (limit,))
+                rows = db.cursor.fetchall()
 
             return [dict(row) for row in rows]
 
@@ -229,12 +231,13 @@ class ChatService:
         """
         with self.db as db:
             # 从candidates表获取需要回复的候选人
-            rows = db.cursor.execute("""
+            db.cursor.execute("""
                 SELECT c.* FROM candidates c
                 WHERE c.status IN ('replied', 'chatting')
                 ORDER BY c.updated_at DESC
                 LIMIT 100
-            """).fetchall()
+            """)
+            rows = db.cursor.fetchall()
 
             return [dict(row) for row in rows]
 
@@ -251,47 +254,27 @@ class ChatService:
             template_id
         """
         with self.db as db:
-            # 确保reply_templates表存在
             db.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS reply_templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    user_id TEXT DEFAULT 'default',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(name, user_id)
-                )
-            """)
-
-            db.cursor.execute("""
-                INSERT OR REPLACE INTO reply_templates (name, content, user_id, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO reply_templates (name, content, user_id, updated_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (name, user_id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING id
             """, (name, content, user_id, datetime.now().isoformat()))
 
             db.conn.commit()
-            return db.cursor.lastrowid
+            row = db.cursor.fetchone(); return row['id'] if row else None
 
     def get_templates(self, user_id: str = "default") -> List[Dict]:
         """获取所有回复模板"""
         with self.db as db:
             db.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS reply_templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    user_id TEXT DEFAULT 'default',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(name, user_id)
-                )
-            """)
-
-            rows = db.cursor.execute("""
                 SELECT * FROM reply_templates
-                WHERE user_id = ?
+                WHERE user_id = %s
                 ORDER BY updated_at DESC
-            """, (user_id,)).fetchall()
+            """, (user_id,))
+            rows = db.cursor.fetchall()
 
             return [dict(row) for row in rows]
 

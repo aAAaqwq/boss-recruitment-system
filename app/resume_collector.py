@@ -231,7 +231,7 @@ def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str
     try:
         db.cursor.execute(
             """INSERT INTO candidates (boss_id, candidate_name, status, resume_path, updated_at)
-               VALUES (?, ?, 'resume_downloaded', ?, datetime('now'))
+               VALUES (%s, %s, 'resume_downloaded', %s, NOW())
                ON CONFLICT(boss_id) DO UPDATE SET
                resume_path = excluded.resume_path,
                status = 'resume_downloaded',
@@ -305,8 +305,9 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         name = (c.get("name", "") or "").strip()
         if not name:
             continue
+        dedup_boss_id = c.get("boss_id") or name  # 优先用平台ID去重
         try:
-            ops = db.get_resume_ops(name)
+            ops = db.get_resume_ops(boss_id=dedup_boss_id)
         except Exception:
             ops = []
         already_processed = any(
@@ -364,11 +365,12 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             logger.info(f"[F6] 已达到目标 {max_count} 份，停止遍历")
             break
         contact_name = (contact.get("name", "") or contact.get("text", "") or f"contact_{i}").strip()
+        boss_id = contact.get("boss_id") or contact_name  # 优先使用BOSS平台唯一ID
         logger.info(f"[F6] 处理 ({i+1}/{len(contacts)}, 已获取{resume_ops}/{max_count}): {contact_name}")
 
-        # 检查去重
+        # 检查去重（用平台唯一ID）
         try:
-            existing = db.get_resume_ops(contact_name)
+            existing = db.get_resume_ops(boss_id=boss_id)
         except Exception:
             existing = []
         if existing:
@@ -457,7 +459,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             if ai_decision == "FAREWELL":
                 # 我们已发过祝福告别，不回复也不取简历
                 logger.info(f"[F6] {contact_name}: 已告别过，跳过")
-                _record_resume_op(db, contact_name, "farewell", btn_text="ai_farewell")
+                _record_resume_op(db, contact_name, "farewell", btn_text="ai_farewell", boss_id=boss_id)
                 skipped += 1
                 details.append({"name": contact_name, "action": "skipped", "reason": "已祝福告别"})
                 continue
@@ -466,7 +468,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
                 logger.info(f"[F6] {contact_name}: 对方拒绝，礼貌回复后跳过")
                 await type_and_send("好的，了解了，打扰您了")
                 await asyncio.sleep(1.5)
-                _record_resume_op(db, contact_name, "rejected", btn_text="ai_rejection")
+                _record_resume_op(db, contact_name, "rejected", btn_text="ai_rejection", boss_id=boss_id)
                 skipped += 1
                 details.append({"name": contact_name, "action": "skipped", "reason": "对方拒绝"})
                 continue
@@ -537,7 +539,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         if case_type == "pdf_preview":
             # Case-1: PDF预览 — 下载
             ok = await _handle_case1_download(
-                contact_name, btn, db, details, downloaded
+                contact_name, btn, db, details, downloaded, boss_id=boss_id
             )
             if ok:
                 downloaded += 1
@@ -548,7 +550,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         elif case_type == "request_popup":
             # Case-2: "向牛人请求简历" 弹窗 — 点确认
             await _handle_case2_confirm(
-                contact_name, case_info, btn, db, details
+                contact_name, case_info, btn, db, details, boss_id=boss_id
             )
             resume_ops += 1
 
@@ -557,14 +559,14 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             logger.info(f"[F6] {contact_name}: 简历请求中，跳过")
             details.append({"name": contact_name, "action": "requested_pending"})
             _record_resume_op(db, contact_name, "requested_pending",
-                              btn_text=btn.get("text"))
+                              btn_text=btn.get("text"), boss_id=boss_id)
 
         elif case_type == "need_reply":
             # Case-4: "双方回复后可以向TA请求" — 跳过
             logger.info(f"[F6] {contact_name}: 沟通不足，无法索取简历")
             details.append({"name": contact_name, "action": "need_reply"})
             _record_resume_op(db, contact_name, "need_reply",
-                              btn_text=btn.get("text"))
+                              btn_text=btn.get("text"), boss_id=boss_id)
 
         elif case_type == "online_resume":
             # Case-5: 在线简历模态框 — 只有结构化数据，无附件可下载
@@ -577,27 +579,28 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             if dl and dl.get("found"):
                 logger.info(f"[F6] {contact_name}: 在线简历弹窗上找到下载按钮，尝试下载")
                 try:
+                    before_snap = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
                     await automation.cdp_click_viewport(float(dl["x"]), float(dl["y"]))
-                    dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=30.0)
+                    dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=30.0, before_files=before_snap)
                     file_verified = dl_result.get("status") == "downloaded"
                     if file_verified:
-                        _update_candidate_resume(db, contact_name, resume_path=dl_result.get("path", ""), boss_id=contact_name)
+                        _update_candidate_resume(db, contact_name, resume_path=dl_result.get("path", ""), boss_id=boss_id)
                         downloaded += 1
                         resume_ops += 1
                         details.append({"name": contact_name, "action": "downloaded", "btn_type": btn.get("text"),
                                         "file_verified": True, "case": "online_resume_then_download"})
-                        db.insert_resume_op(candidate_name=contact_name, action="downloaded", resume_downloaded=True,
+                        db.insert_resume_op(boss_id=boss_id, candidate_name=contact_name, action="downloaded", resume_downloaded=True,
                                             detail=json.dumps({"case": "online_resume_then_download", "time": datetime.now().isoformat()}))
                     else:
                         details.append({"name": contact_name, "action": "online_resume_viewed", "btn_type": btn.get("text")})
-                        _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"))
+                        _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"), boss_id=boss_id)
                 except Exception:
                     details.append({"name": contact_name, "action": "online_resume_viewed", "btn_type": btn.get("text")})
-                    _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"))
+                    _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"), boss_id=boss_id)
             else:
                 logger.info(f"[F6] {contact_name}: 仅在线简历（无附件），截图记录")
                 details.append({"name": contact_name, "action": "online_resume_viewed", "btn_type": btn.get("text")})
-                _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"))
+                _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"), boss_id=boss_id)
 
         else:
             # 未知: 尝试查找下载按钮，兼容旧逻辑
@@ -610,14 +613,14 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             if dl and dl.get("found"):
                 downloaded += 1
                 resume_ops += 1
-                await _click_download(contact_name, btn, db, details)
+                await _click_download(contact_name, btn, db, details, boss_id=boss_id)
             else:
                 details.append({
                     "name": contact_name, "action": "unknown_case",
                     "btn_type": btn.get("text"),
                 })
                 _record_resume_op(db, contact_name, "requested",
-                                  btn_text=btn.get("text"))
+                                  btn_text=btn.get("text"), boss_id=boss_id)
 
         # 关闭预览 + 返回聊天列表
         try:
@@ -786,6 +789,7 @@ async def _handle_case1_download(
     db: Database,
     details: list,
     current_downloaded: int,
+    boss_id: str = None,
 ) -> bool:
     """Case-1: PDF预览弹出 → 查找下载按钮 → CDP事件确认下载。
 
@@ -805,8 +809,10 @@ async def _handle_case1_download(
                 logger.warning(f"[F6] CDP点击下载按钮失败")
 
             # Fix 1: 使用 CDP事件+目录轮询双重确认下载
+            before_snap = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
+            await asyncio.sleep(0.3)
             dl_result = await automation.wait_for_download(
-                str(RESUMES_DIR), timeout=30.0
+                str(RESUMES_DIR), timeout=30.0, before_files=before_snap
             )
             file_verified = dl_result.get("status") == "downloaded"
             verify_method = dl_result.get("method", "unknown")
@@ -816,7 +822,7 @@ async def _handle_case1_download(
                 _update_candidate_resume(
                     db, contact_name,
                     resume_path=dl_result.get("path", ""),
-                    boss_id=contact_name,
+                    boss_id=boss_id,
                 )
                 logger.info(
                     f"[F6] {contact_name} 简历下载成功 "
@@ -835,6 +841,7 @@ async def _handle_case1_download(
                 "verify_method": verify_method,
             })
             db.insert_resume_op(
+                boss_id=boss_id,
                 candidate_name=contact_name,
                 action="downloaded",
                 resume_downloaded=file_verified,
@@ -852,7 +859,7 @@ async def _handle_case1_download(
             logger.warning(f"[F6] 下载失败: {e}")
             details.append({"name": contact_name, "action": "download_failed"})
             db.insert_resume_op(
-                candidate_name=contact_name, action="download_failed",
+                boss_id=boss_id, candidate_name=contact_name, action="download_failed",
                 resume_downloaded=False, detail=str(e),
             )
             return False
@@ -863,7 +870,7 @@ async def _handle_case1_download(
             "btn_type": btn.get("text"),
         })
         db.insert_resume_op(
-            candidate_name=contact_name, action="viewed",
+            boss_id=boss_id, candidate_name=contact_name, action="viewed",
             resume_downloaded=False,
             detail=json.dumps({
                 "case": "pdf_preview_no_download_btn",
@@ -880,6 +887,7 @@ async def _handle_case2_confirm(
     btn: Dict,
     db: Database,
     details: list,
+    boss_id: str = None,
 ) -> None:
     """Case-2: "向牛人请求简历"弹窗 → 点确认 → 检测是否有PDF。"""
     confirm_x = case_info.get("x")
@@ -906,13 +914,14 @@ async def _handle_case2_confirm(
                         logger.warning(f"[F6] CDP点击下载按钮(confirm后)失败")
                     await asyncio.sleep(4)
                     # 确认下载
-                    dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=15.0)
+                    before_snap = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
+                    dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=15.0, before_files=before_snap)
                     file_verified = dl_result.get("status") == "downloaded"
                     if file_verified:
                         _update_candidate_resume(
                             db, contact_name,
                             resume_path=dl_result.get("path", ""),
-                            boss_id=contact_name,
+                            boss_id=boss_id,
                         )
                     details.append({
                         "name": contact_name,
@@ -921,7 +930,7 @@ async def _handle_case2_confirm(
                         "file_verified": file_verified,
                     })
                     db.insert_resume_op(
-                        candidate_name=contact_name, action="downloaded",
+                        boss_id=boss_id, candidate_name=contact_name, action="downloaded",
                         resume_downloaded=True,
                         detail=json.dumps({
                             "case": "request_popup_then_pdf",
@@ -938,7 +947,7 @@ async def _handle_case2_confirm(
         "btn_type": btn.get("text"),
     })
     db.insert_resume_op(
-        candidate_name=contact_name, action="requested",
+        boss_id=boss_id, candidate_name=contact_name, action="requested",
         resume_downloaded=False,
         detail=json.dumps({
             "case": "request_popup",
@@ -953,6 +962,7 @@ async def _click_download(
     btn: Dict,
     db: Database,
     details: list,
+    boss_id: str = None,
 ) -> None:
     """旧逻辑兜底: 尝试点击下载按钮。"""
     existing_files = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
@@ -970,7 +980,7 @@ async def _click_download(
                 "btn_type": btn.get("text"), "file_verified": file_appeared,
             })
             db.insert_resume_op(
-                candidate_name=contact_name, action="downloaded",
+                boss_id=boss_id, candidate_name=contact_name, action="downloaded",
                 resume_downloaded=True,
                 detail=json.dumps({
                     "case": "unknown_fallback",
@@ -987,10 +997,12 @@ def _record_resume_op(
     contact_name: str,
     action: str,
     btn_text: str = None,
+    boss_id: str = None,
 ) -> None:
     """安全记录简历操作到DB。"""
     try:
         db.insert_resume_op(
+            boss_id=boss_id,
             candidate_name=contact_name,
             action=action,
             resume_downloaded=False,

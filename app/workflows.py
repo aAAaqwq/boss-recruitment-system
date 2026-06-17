@@ -46,6 +46,69 @@ _JS_EXTRACT_CARDS = """
     if (cards.length === 0) {
         cards = Array.from(doc.querySelectorAll('[class*="card-inner"]'));
     }
+    // 从卡片DOM提取BOSS平台唯一ID（增强版）
+    function extractBossId(el) {
+        // 1. 扫描元素自身所有属性
+        for (var a = 0; a < (el.attributes || []).length; a++) {
+            var an = el.attributes[a].name;
+            var av = el.attributes[a].value;
+            if (!av || av.length < 5) continue;
+            if (/^(data-)?(uid|userid|user-id|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(an)) {
+                return av;
+            }
+        }
+        // 2. 从链接href提取 (query params + path segments)
+        var links = el.querySelectorAll('a[href]');
+        for (var l = 0; l < links.length; l++) {
+            var h = links[l].getAttribute('href') || '';
+            var m = h.match(/[?&](securityId|encryptId|encryptBossId|uid|userId|bossId)=([^&?#]+)/i);
+            if (m && m[2]) return m[2];
+            var pm = h.match(/\/(geek|chat|boss|user)\/([a-zA-Z0-9_-]{10,})/i);
+            if (pm && pm[2]) return pm[2];
+        }
+        // 3. 扫描子元素属性（2层深）
+        var kids = el.querySelectorAll('[data-uid],[data-security-id],[data-encrypt-id],[data-id],[data-user-id]');
+        for (var k = 0; k < kids.length; k++) {
+            for (var b = 0; b < (kids[k].attributes || []).length; b++) {
+                var kan = kids[k].attributes[b].name;
+                var kav = kids[k].attributes[b].value;
+                if (!kav || kav.length < 5) continue;
+                if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(kan)) {
+                    return kav;
+                }
+            }
+        }
+        // 4. 父元素（3层）
+        for (var p = el.parentElement, d = 0; p && d < 3; p = p.parentElement, d++) {
+            for (var c = 0; c < (p.attributes || []).length; c++) {
+                var pn = p.attributes[c].name;
+                var pv = p.attributes[c].value;
+                if (!pv || pv.length < 5) continue;
+                if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(pn)) {
+                    return pv;
+                }
+            }
+        }
+        // 5. React fiber内部状态
+        try {
+            var fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'); });
+            if (fiberKey) {
+                var fiber = el[fiberKey];
+                for (var ff = fiber, fd = 0; ff && fd < 10; ff = ff.return || ff._debugOwner, fd++) {
+                    var mp = ff.memoizedProps;
+                    if (mp) {
+                        var idSource = mp.securityId || mp.encryptId || mp.encryptBossId || mp.uid || mp.userId || mp.bossId || mp.geekId;
+                        if (idSource && typeof idSource === 'string' && idSource.length > 5) return idSource;
+                        if (mp.children && typeof mp.children === 'object') {
+                            var cid = mp.children.securityId || mp.children.encryptId || mp.children.uid;
+                            if (cid && typeof cid === 'string' && cid.length > 5) return cid;
+                        }
+                    }
+                }
+            }
+        } catch(e) {}
+        return null;
+    }
     var result = [];
     for (var i = 0; i < cards.length; i++) {
         var c = cards[i];
@@ -73,10 +136,12 @@ _JS_EXTRACT_CARDS = """
         // 只返回打招呼按钮在视口内的卡片
         // 按钮 y 在 [oy, vy) 范围内才可被 CDP 点击
         if (gx !== null && gy !== null && gy >= oy && gy < vy && gx >= ox && gx < vx) {
+            var bossId = extractBossId(container) || extractBossId(c);
             result.push({
                 text: c.innerText||'', x: r.x + ox, y: r.y + oy, w: r.width, h: r.height,
                 cx: r.x+r.width/2+ox, cy: r.y+r.height/2+oy,
-                greet_x: gx, greet_y: gy, greet_text: gt
+                greet_x: gx, greet_y: gy, greet_text: gt,
+                boss_id: bossId
             });
         }
     }
@@ -285,7 +350,7 @@ async def _auto_contact_impl(
                 "degree": _extract_degree(txt), "school": _extract_school(txt),
             }
             fingerprint = card.get("text", "")[:50].strip()
-            boss_id = cand["name"] or f"unk_{hash(fingerprint) & 0xFFFFFF}"
+            boss_id = card.get("boss_id") or cand["name"] or f"unk_{hash(fingerprint) & 0xFFFFFF}"
 
             if boss_id in contacted_ids or not _should_contact(cand, criteria):
                 skipped += 1

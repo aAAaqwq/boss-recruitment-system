@@ -7,6 +7,7 @@ python-dotenv
 python-jose
 passlib
 bcrypt
+psycopg2-binary
 jinja2
 aiofiles
 pillow

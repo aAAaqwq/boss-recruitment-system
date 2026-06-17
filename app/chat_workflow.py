@@ -133,6 +133,13 @@ _UI_SKIP_EXACT: set = {
     "简历请求已发送",
     "您可以在线预览牛人简历， 设置邮箱 后投递的简历会同时发送到您的邮箱。",
     "您可以在线预览牛人简历，设置邮箱后投递的简历会同时发送到您的邮箱。",
+    # BOSS系统快捷回复（输入框预置，非候选人真实消息）
+    "不好意思，不太合适哦",
+    "好的，我们再聊聊",
+    "抱歉，暂时不考虑",
+    "我对这个职位很感兴趣",
+    "我们加个微信详细聊吧",
+    "请问这个职位还招人吗",
 }
 
 
@@ -242,7 +249,7 @@ async def _batch_reply_impl(
             subtitle = contact.get("subtitle", "")
             contact_x = contact.get("x", 0)
             contact_y = contact.get("y", 0)
-            boss_id = name  # 使用姓名作为boss_id
+            boss_id = contact.get("boss_id") or name  # 优先使用平台唯一ID
 
             logger.info(f"[F7] ({i+1}/{len(targets)}) 处理: {name} ({subtitle})")
 

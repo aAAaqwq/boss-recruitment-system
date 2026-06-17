@@ -1138,9 +1138,9 @@ class BrowserAutomation:
         if cdp_result and cdp_result.get("status") == "downloaded":
             return {**cdp_result, "method": "cdp_event"}
 
-        # 方法2: 目录轮询 — 等待新文件出现且大小稳定
+        # 方法2: 目录轮询 — 等待新文件出现且大小>0
         deadline = asyncio.get_event_loop().time() + timeout
-        checked_files = {}  # path -> (size, stable_count)
+        seen_sizes = {}  # path -> (size, count) — 用于检测文件写入完成
 
         while asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(poll_interval)
@@ -1152,6 +1152,9 @@ class BrowserAutomation:
             for f in new_files:
                 if not f.is_file():
                     continue
+                # 跳过临时文件（.crdownload / .tmp / .part）
+                if f.suffix.lower() in ('.crdownload', '.tmp', '.part'):
+                    continue
                 try:
                     current_size = f.stat().st_size
                 except OSError:
@@ -1159,7 +1162,16 @@ class BrowserAutomation:
                 if current_size == 0:
                     continue
 
-                prev = checked_files.get(str(f))
+                prev = seen_sizes.get(str(f))
+                # 小文件(<100KB)一次检测即确认；大文件等大小稳定
+                if current_size < 100 * 1024:
+                    logger.info(f"[CDP] 目录轮询确认下载(小文件): {f.name} ({current_size} bytes)")
+                    return {
+                        "status": "downloaded",
+                        "path": str(f),
+                        "size": current_size,
+                        "method": "poll_small",
+                    }
                 if prev is not None and prev[0] == current_size:
                     logger.info(f"[CDP] 目录轮询确认下载: {f.name} ({current_size} bytes)")
                     return {
@@ -1168,7 +1180,18 @@ class BrowserAutomation:
                         "size": current_size,
                         "method": "poll",
                     }
-                checked_files[str(f)] = (current_size, (prev[1] + 1) if prev else 1)
+                seen_sizes[str(f)] = (current_size, (prev[1] + 1) if prev else 1)
+
+            # 也检查所有文件（包括 before_files 中已存在的），防止文件在 before 快照后被覆盖写入
+            all_files = after
+            for f in all_files:
+                if not f.is_file():
+                    continue
+                if f.suffix.lower() in ('.crdownload', '.tmp', '.part'):
+                    continue
+                fpath = str(f)
+                if fpath in {str(x) for x in before}:
+                    continue  # 跳过之前就有的文件
 
         return {"status": "timeout", "message": f"下载未在 {timeout}s 内完成", "method": "timeout"}
 

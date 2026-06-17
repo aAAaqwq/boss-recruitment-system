@@ -61,7 +61,7 @@ def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str
     try:
         db.cursor.execute(
             """INSERT INTO candidates (boss_id, candidate_name, status, resume_path, updated_at)
-               VALUES (?, ?, 'resume_downloaded', ?, datetime('now'))
+               VALUES (%s, %s, 'resume_downloaded', %s, NOW())
                ON CONFLICT(boss_id) DO UPDATE SET
                resume_path = excluded.resume_path,
                status = 'resume_downloaded',
@@ -119,14 +119,15 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
     failed = 0
     details = []
 
-    # 过滤已下载过的
+    # 过滤已下载过的（用平台唯一ID去重）
     targets = []
     for c in contacts:
         name = (c.get("name", "") or "").strip()
         if not name:
             continue
+        dedup_boss_id = c.get("boss_id") or name
         try:
-            ops = db.get_resume_ops(name)
+            ops = db.get_resume_ops(boss_id=dedup_boss_id)
         except Exception:
             ops = []
         already_done = any(
@@ -152,6 +153,9 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
             break
 
         contact_name = (contact.get("name", "") or "").strip()
+        boss_id = contact.get("boss_id") or contact_name  # 优先使用BOSS平台唯一ID
+        if contact_name == "__DIAG__":
+            logger.info(f"[DL] 🔍 诊断: subtitle={contact.get('subtitle', '')}")
         logger.info(f"[DL] 处理 ({i+1}/{len(targets)}, 已下载{downloaded}/{max_count}): {contact_name}")
 
         # 限制弹窗检测
@@ -206,7 +210,8 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
             failed += 1
             continue
 
-        # PDF预览出现 → 找灰色下载箭头
+        # PDF预览出现 → 等待内容加载完成再找下载箭头
+        await asyncio.sleep(3)
         arrow = await automation.execute_js(_JS_FIND_PDF_DOWNLOAD_ARROW)
         if isinstance(arrow, dict) and arrow.get("found"):
             logger.info(f"[DL] {contact_name} 找到下载箭头: {arrow.get('text')} -> ({arrow['x']:.0f},{arrow['y']:.0f})")
@@ -227,12 +232,12 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
                 if file_verified:
                     _update_candidate_resume(db, contact_name,
                                              resume_path=dl_result.get("path", ""),
-                                             boss_id=contact_name)
+                                             boss_id=boss_id)
                     downloaded += 1
                     details.append({"name": contact_name, "action": "downloaded",
                                     "file_verified": True, "path": dl_result.get("path")})
                     db.insert_resume_op(
-                        candidate_name=contact_name, action="downloaded",
+                        boss_id=boss_id, candidate_name=contact_name, action="downloaded",
                         resume_downloaded=True,
                         detail=json.dumps({"time": datetime.now().isoformat(),
                                            "path": dl_result.get("path", "")}),
@@ -258,11 +263,11 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
                     if dl_result.get("status") == "downloaded":
                         _update_candidate_resume(db, contact_name,
                                                  resume_path=dl_result.get("path", ""),
-                                                 boss_id=contact_name)
+                                                 boss_id=boss_id)
                         downloaded += 1
                         details.append({"name": contact_name, "action": "downloaded",
                                         "file_verified": True, "path": dl_result.get("path")})
-                        db.insert_resume_op(candidate_name=contact_name, action="downloaded",
+                        db.insert_resume_op(boss_id=boss_id, candidate_name=contact_name, action="downloaded",
                                             resume_downloaded=True,
                                             detail=json.dumps({"time": datetime.now().isoformat()}))
                 except Exception:

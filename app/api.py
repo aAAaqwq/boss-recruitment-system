@@ -2,7 +2,7 @@
 BOSS直聘三位一体系统 - Web API v2.0
 FastAPI后端，提供统一的RESTful接口 + 自动化任务控制
 """
-import os, sys, json, subprocess, sqlite3, asyncio, platform
+import os, sys, json, subprocess, asyncio, platform
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
@@ -21,11 +21,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import authentication module
-from app.auth import verify_token, create_access_token, verify_credentials
+from app.auth import verify_token, create_access_token, verify_credentials, ensure_admin_user
 # Import logging
 from app.logging_config import api_logger
 # Import automation singleton
 from app.automation import automation
+# Import database
+from app.database import Database
 # Import school whitelists for filter config (lightweight, no heavy deps)
 from app.filter_criteria import DOMESTIC_ELITE_SCHOOLS, US_ELITE_SCHOOLS, UK_ELITE_SCHOOLS, OTHER_ELITE_SCHOOLS, FilterCriteria
 
@@ -38,7 +40,6 @@ INTERNATIONAL_ELITE_SCHOOLS = US_ELITE_SCHOOLS + UK_ELITE_SCHOOLS + OTHER_ELITE_
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 LOGS_DIR = BASE_DIR / "logs"
-DB_PATH = DATA_DIR / "boss_recruitment.db"
 
 DATA_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
@@ -237,107 +238,14 @@ async def cancel_current_task(current_user: dict = Depends(verify_token)):
 # 数据库
 # ============================================================
 def get_db():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+    """获取数据库连接（PostgreSQL）"""
+    db = Database()
+    db.connect()
+    return db
 
-def init_db():
-    """初始化数据库表 — 与 database.py 中 Database.init_tables() 保持一致"""
-    conn = get_db()
-    # 候选人表
-    conn.execute('''CREATE TABLE IF NOT EXISTS candidates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        boss_id TEXT NOT NULL UNIQUE,
-        candidate_name TEXT,
-        school TEXT,
-        degree TEXT,
-        years INTEGER,
-        current_role TEXT,
-        expected_role TEXT,
-        expected_city TEXT,
-        skills TEXT,
-        status TEXT DEFAULT 'discovered',
-        contacted_at TEXT,
-        resume_path TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id ON candidates(boss_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON candidates(status)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_school ON candidates(school)")
-
-    # 联系记录表
-    conn.execute('''CREATE TABLE IF NOT EXISTS contact_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        boss_id TEXT NOT NULL,
-        action TEXT NOT NULL,
-        action_date TEXT NOT NULL,
-        success BOOLEAN DEFAULT 1,
-        error_message TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id_action ON contact_records(boss_id, action)")
-
-    # 聊天会话表
-    conn.execute('''CREATE TABLE IF NOT EXISTS chat_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        boss_id TEXT NOT NULL UNIQUE,
-        candidate_name TEXT,
-        current_round_id TEXT,
-        round_index INTEGER DEFAULT 0,
-        history TEXT,
-        last_screen_text TEXT,
-        rounds_sent_today INTEGER DEFAULT 0,
-        last_sent_date TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id_chat ON chat_sessions(boss_id)")
-
-    # 简历操作表
-    conn.execute('''CREATE TABLE IF NOT EXISTS resume_operations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        candidate_name TEXT,
-        action TEXT,
-        resume_downloaded INTEGER DEFAULT 0,
-        wechat_exchanged INTEGER DEFAULT 0,
-        detail TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_resume_candidate ON resume_operations(candidate_name)")
-
-    # 对话记录表
-    conn.execute('''CREATE TABLE IF NOT EXISTS conversations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        candidate_name TEXT,
-        action TEXT,
-        ai_message TEXT,
-        candidate_message TEXT,
-        detail TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # 运行时状态表
-    conn.execute('''CREATE TABLE IF NOT EXISTS runtime_state (
-        key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-    # 已处理候选人表 (去重用)
-    conn.execute('''CREATE TABLE IF NOT EXISTS processed_candidates (
-        candidate_key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-    # 回复模板表 (岗位话术库)
-    conn.execute('''CREATE TABLE IF NOT EXISTS reply_templates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        content TEXT NOT NULL,
-        user_id TEXT DEFAULT 'default',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(name, user_id)
-    )''')
-
-    conn.commit()
-    conn.close()
-
-init_db()
+@app.on_event("startup")
+def on_startup():
+    ensure_admin_user()
 
 # ============================================================
 # API端点
@@ -406,7 +314,7 @@ async def get_candidates(
                 FROM resume_operations
             ) ro ON (ro.candidate_name = c.boss_id AND ro.rn = 1)
             ORDER BY c.updated_at DESC
-            LIMIT ?
+            LIMIT %s
         """
         rows = conn.execute(query, (limit,)).fetchall()
 
@@ -449,7 +357,7 @@ async def get_candidates(
         if not candidates:
             rows = conn.execute(
                 "SELECT candidate_name as boss_id, candidate_name, action, resume_downloaded, detail, created_at "
-                "FROM resume_operations ORDER BY created_at DESC LIMIT ?",
+                "FROM resume_operations ORDER BY created_at DESC LIMIT %s",
                 (limit,),
             ).fetchall()
             for row in rows:
@@ -500,7 +408,7 @@ async def get_stats(current_user: dict = Depends(verify_token)):
                 "SELECT action as status, COUNT(*) as count FROM contact_records GROUP BY action"
             ).fetchall()
             today_processed = conn.execute(
-                "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE action = 'contacted' AND date(action_date) = date('now')"
+                "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE action = 'contacted' AND action_date = CURRENT_DATE::text"
             ).fetchone()[0]
             return {
                 "total_candidates": total,
@@ -511,11 +419,11 @@ async def get_stats(current_user: dict = Depends(verify_token)):
         # 回退: processed_candidates
         total = conn.execute("SELECT COUNT(*) FROM processed_candidates").fetchone()[0]
         today_processed = conn.execute(
-            "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = date('now')"
+            "SELECT COUNT(*) FROM processed_candidates WHERE created_at::date = CURRENT_DATE"
         ).fetchone()[0]
         # 简历下载统计
         resume_count = conn.execute(
-            "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1"
+            "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = true"
         ).fetchone()[0]
         return {
             "total_candidates": total,
@@ -541,8 +449,13 @@ class LoginResponse(BaseModel):
 @app.post("/api/auth/login", response_model=LoginResponse)
 async def login(req: LoginRequest):
     """用户登录 - 返回JWT访问令牌"""
-    if verify_credentials(req.username, req.password):
-        token = create_access_token({"sub": req.username})
+    user = verify_credentials(req.username, req.password)
+    if user:
+        token = create_access_token({
+            "sub": user["username"],
+            "user_id": user["id"],
+            "role": user["role"],
+        })
         return LoginResponse(access_token=token, token_type="bearer")
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1176,16 +1089,16 @@ async def list_resumes(
         if status:
             rows = conn.execute(
                 """SELECT * FROM resume_operations
-                   WHERE action LIKE ?
+                   WHERE action LIKE %s
                    ORDER BY created_at DESC
-                   LIMIT ?""",
+                   LIMIT %s""",
                 (f"%{status}%", limit)
             ).fetchall()
         else:
             rows = conn.execute(
                 """SELECT * FROM resume_operations
                    ORDER BY created_at DESC
-                   LIMIT ?""",
+                   LIMIT %s""",
                 (limit,)
             ).fetchall()
 
@@ -1242,7 +1155,7 @@ async def download_resume(
     try:
         # 获取简历记录
         row = conn.execute(
-            "SELECT * FROM resume_operations WHERE id = ?",
+            "SELECT * FROM resume_operations WHERE id = %s",
             (resume_id,)
         ).fetchone()
 
@@ -1288,7 +1201,7 @@ async def get_resume_stats(current_user: dict = Depends(verify_token)):
 
         rows = conn.execute("SELECT action, resume_downloaded FROM resume_operations").fetchall()
         for row in rows:
-            if row["resume_downloaded"] == 1:
+            if row["resume_downloaded"]:
                 downloaded += 1
             elif "requested" in row["action"]:
                 requested += 1
@@ -1630,7 +1543,7 @@ async def get_filter_config(current_user: dict = Depends(verify_token)):
     try:
         conn = get_db()
         row = conn.execute(
-            "SELECT value FROM runtime_state WHERE key = ?", ("filter_config",)
+            "SELECT value FROM runtime_state WHERE key = %s", ("filter_config",)
         ).fetchone()
         conn.close()
         if row:
@@ -1676,7 +1589,8 @@ async def update_filter_config(
 
         # 保存到runtime_state表
         conn.execute(
-            "INSERT OR REPLACE INTO runtime_state (key, value, updated_at) VALUES (?, ?, ?)",
+            "INSERT INTO runtime_state (key, value, updated_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
             ("filter_config", config_json, datetime.now().isoformat())
         )
         conn.commit()
@@ -1842,22 +1756,21 @@ async def get_daily_trend(
     try:
         trend = []
         for i in range(days - 1, -1, -1):
-            # Compute date label via SQLite, then reuse as parameter
-            row = conn.execute("SELECT date('now', ?)", (f'-{int(i)} days',)).fetchone()
-            date_label = row[0]
+            from datetime import date as _date, timedelta as _td
+            date_label = (_date.today() - _td(days=i)).strftime("%Y-%m-%d")
 
             contacted = conn.execute(
-                "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = ?",
+                "SELECT COUNT(*) FROM processed_candidates WHERE created_at::date = %s",
                 (date_label,),
             ).fetchone()[0]
 
             resumes = conn.execute(
-                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1 AND date(created_at) = ?",
+                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = true AND created_at::date = %s",
                 (date_label,),
             ).fetchone()[0]
 
             replies = conn.execute(
-                "SELECT COUNT(*) FROM conversations WHERE action = 'auto_reply' AND date(created_at) = ?",
+                "SELECT COUNT(*) FROM conversations WHERE action = 'auto_reply' AND created_at::date = %s",
                 (date_label,),
             ).fetchone()[0]
 
@@ -1893,16 +1806,16 @@ async def get_contact_records(
         params: list = []
 
         if action:
-            conditions.append("action = ?")
+            conditions.append("action = %s")
             params.append(action)
         if date:
-            conditions.append("date(action_date) = ?")
+            conditions.append("action_date = %s")
             params.append(date)
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        query += " ORDER BY created_at DESC LIMIT ?"
+        query += " ORDER BY created_at DESC LIMIT %s"
         params.append(limit)
 
         rows = conn.execute(query, params).fetchall()
@@ -1930,7 +1843,7 @@ async def get_conversation_sessions(
                FROM conversations
                GROUP BY candidate_name
                ORDER BY last_at DESC
-               LIMIT ?""",
+               LIMIT %s""",
             (limit * 3,),  # 多取3倍数据，清洗后再截断
         ).fetchall()
 
@@ -1986,7 +1899,8 @@ async def update_daily_caps(
             "daily_chat_rounds_cap": req.daily_chat_rounds_cap,
         }
         conn.execute(
-            "INSERT OR REPLACE INTO runtime_state (key, value, updated_at) VALUES (?, ?, ?)",
+            "INSERT INTO runtime_state (key, value, updated_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
             ("daily_caps", json.dumps(caps), datetime.now().isoformat()),
         )
         conn.commit()
@@ -2114,24 +2028,24 @@ async def get_daily_trend(
             cr_count = conn.execute("SELECT COUNT(*) FROM contact_records").fetchone()[0]
             if cr_count > 0:
                 contacted = conn.execute(
-                    "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE date(action_date) = ?",
+                    "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE action_date = %s",
                     (d,)
                 ).fetchone()[0]
             else:
                 contacted = conn.execute(
-                    "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = ?",
+                    "SELECT COUNT(*) FROM processed_candidates WHERE created_at::date = %s",
                     (d,)
                 ).fetchone()[0]
 
             # 简历下载数
             resumes = conn.execute(
-                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1 AND date(created_at) = ?",
+                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = true AND created_at::date = %s",
                 (d,)
             ).fetchone()[0]
 
             # AI回复数（conversations 中 ai_message 非空）
             replies = conn.execute(
-                "SELECT COUNT(*) FROM conversations WHERE date(created_at) = ? AND ai_message IS NOT NULL AND ai_message != ''",
+                "SELECT COUNT(*) FROM conversations WHERE created_at::date = %s AND ai_message IS NOT NULL AND ai_message != ''",
                 (d,)
             ).fetchone()[0]
 
@@ -2153,6 +2067,152 @@ async def get_daily_trend(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+# ============================================================
+# 用户管理
+# ============================================================
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    role: str = "user"
+
+class UpdateUserRequest(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@app.get("/api/users")
+async def list_users(current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    with Database() as db:
+        return {"users": db.list_users()}
+
+
+@app.post("/api/users")
+async def create_user(req: CreateUserRequest, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    from app.auth import hash_password
+    with Database() as db:
+        existing = db.get_user_by_username(req.username)
+        if existing:
+            raise HTTPException(status_code=400, detail=f"用户名 {req.username} 已存在")
+        user = db.create_user(
+            username=req.username,
+            password_hash=hash_password(req.password),
+            display_name=req.display_name,
+            role=req.role,
+        )
+        return {"user": user}
+
+
+@app.put("/api/users/{user_id}")
+async def update_user(user_id: int, req: UpdateUserRequest, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    updates = {}
+    if req.username is not None:
+        updates["username"] = req.username
+    if req.password is not None:
+        from app.auth import hash_password
+        updates["password_hash"] = hash_password(req.password)
+    if req.display_name is not None:
+        updates["display_name"] = req.display_name
+    if req.role is not None:
+        updates["role"] = req.role
+    if req.is_active is not None:
+        updates["is_active"] = req.is_active
+    if not updates:
+        raise HTTPException(status_code=400, detail="无更新内容")
+    with Database() as db:
+        ok = db.update_user(user_id, **updates)
+        if not ok:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        return {"message": "用户已更新"}
+
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(user_id: int, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    with Database() as db:
+        ok = db.delete_user(user_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        return {"message": "用户已删除"}
+
+
+# ============================================================
+# BOSS账号管理
+# ============================================================
+class CreateBossAccountRequest(BaseModel):
+    user_id: int
+    account_name: Optional[str] = None
+    cdp_host: str = "127.0.0.1"
+    cdp_port: int = 9222
+    profile_dir: Optional[str] = None
+    cookies_file: Optional[str] = None
+    use_external_browser: bool = False
+    is_default: bool = False
+    enabled: bool = True
+
+class UpdateBossAccountRequest(BaseModel):
+    account_name: Optional[str] = None
+    boss_identity: Optional[str] = None
+    cdp_host: Optional[str] = None
+    cdp_port: Optional[int] = None
+    profile_dir: Optional[str] = None
+    cookies_file: Optional[str] = None
+    use_external_browser: Optional[bool] = None
+    is_default: Optional[bool] = None
+    enabled: Optional[bool] = None
+
+
+@app.get("/api/boss-accounts")
+async def list_boss_accounts(
+    user_id: Optional[int] = None,
+    current_user: dict = Depends(verify_token),
+):
+    with Database() as db:
+        return {"accounts": db.list_boss_accounts(user_id=user_id)}
+
+
+@app.post("/api/boss-accounts")
+async def create_boss_account(req: CreateBossAccountRequest, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    with Database() as db:
+        account = db.create_boss_account(**req.dict(exclude_none=True))
+        return {"account": account}
+
+
+@app.put("/api/boss-accounts/{account_id}")
+async def update_boss_account(account_id: int, req: UpdateBossAccountRequest, current_user: dict = Depends(verify_token)):
+    updates = {k: v for k, v in req.dict().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="无更新内容")
+    with Database() as db:
+        ok = db.update_boss_account(account_id, **updates)
+        if not ok:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        return {"message": "账号已更新"}
+
+
+@app.delete("/api/boss-accounts/{account_id}")
+async def delete_boss_account(account_id: int, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    with Database() as db:
+        ok = db.delete_boss_account(account_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        return {"message": "账号已删除"}
 
 
 # ============================================================
