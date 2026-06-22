@@ -889,14 +889,12 @@
 
         <div class="header-auth" id="authSection">
             <div class="auth-inputs">
-                <input type="text" id="login-user" value="admin" placeholder="用户" class="h-input" aria-label="API用户名">
-                <input type="password" id="login-pass" placeholder="密码" class="h-input" aria-label="API密码">
-                <button class="h-auth-btn" onclick="doLogin(event)">
-                    <span class="spinner" aria-hidden="true"></span>
-                    <span class="btn-text">登录</span>
-                </button>
-            </div>
-            <span class="auth-badge" id="authStatus" aria-live="polite">未登录</span>
+                <span id="loginUserDisplay" style="color:var(--text2);font-size:12px;"></span>
+            <button class="h-auth-btn" id="btnLogout" onclick="window.location=API_BASE+'/login'" style="font-size:12px;padding:4px 12px;">
+                退出
+            </button>
+        </div>
+        <span class="auth-badge" id="authStatus" aria-live="polite">已登录</span>
         </div>
 
         <div class="h-divider"></div>
@@ -1007,6 +1005,25 @@
                     <button class="btn btn-success" onclick="batchDownloadReceivedResumes()" id="btnDownloadReceived">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">📥 下载已获取简历</span>
+                    </button>
+                </div>
+                <div class="input-row">
+                    <input type="number" id="analyzeLimit" value="20" placeholder="人数" aria-label="AI分析简历数量上限" min="1" max="200">
+                    <button class="btn btn-info" onclick="batchAnalyzeResumes()" id="btnAnalyzeResumes">
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span class="btn-text">🤖 AI分析简历</span>
+                    </button>
+                </div>
+                <div class="input-row">
+                    <input type="number" id="interviewLimit" value="10" placeholder="人数" aria-label="约面试人数上限" min="1" max="200">
+                    <select id="interviewType" aria-label="面试类型">
+                        <option value="">不限</option>
+                        <option value="线下">线下面试</option>
+                        <option value="线上">线上面试</option>
+                    </select>
+                    <button class="btn btn-accent" onclick="batchInviteInterview()" id="btnInviteInterview">
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span class="btn-text">💼 批量约面试</span>
                     </button>
                 </div>
             </div>
@@ -1178,7 +1195,7 @@
         })();
         let vncConnected = false;
         let vncScale = 1;
-        let authToken = localStorage.getItem('auth_token') || null;
+        let authToken = localStorage.getItem('token') || '';
         let config = {
             filter: {
                 degree: '',
@@ -1341,7 +1358,7 @@
         }
 
         function getAuthToken() {
-            return localStorage.getItem('auth_token') || localStorage.getItem('token') || authToken || null;
+            return authToken || localStorage.getItem('token') || null;
         }
 
         async function loadConfigFromAPI() {
@@ -1699,47 +1716,31 @@
             document.getElementById('statReplied').textContent = replied;
         }
 
-        // ── Auth ──
-        async function login() {
-            const username = document.getElementById('login-user')?.value || 'admin';
-            const password = document.getElementById('login-pass')?.value || '';
-            log(`🔑 正在登录 ${API_BASE} ...`, 'info');
-            try {
-                const resp = await fetch(`${API_BASE}/api/auth/login`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username, password})
-                });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    authToken = data.access_token;
-                    localStorage.setItem('auth_token', authToken);
-                    updateAuthUI(true);
-                    log('✅ API 登录成功', 'info');
-                    loadJobFiles();  // 登录后加载岗位列表
-                    return true;
-                } else {
-                    const err = await resp.json();
-                    updateAuthUI(false);
-                    log(`❌ 登录失败: ${err.detail || '用户名或密码错误'}`, 'error');
-                    return false;
-                }
-            } catch (e) {
-                updateAuthUI(false);
-                if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
-                    log(`❌ 无法连接API服务器 (${API_BASE})，请检查API服务是否启动`, 'error');
-                } else {
-                    log(`登录异常: ${e.message}`, 'error');
-                }
-                return false;
-            }
-        }
+        // ── Auth ──（从 /login 获取的 JWT，存在 localStorage）
+        let currentUserId = '';
 
-        async function doLogin(e) {
-            const btn = e && e.target ? (e.target.closest('.h-auth-btn') || e.target.closest('.btn')) : null;
-            setLoading(btn, true);
-            const ok = await login();
-            setLoading(btn, false);
+        function initAuth() {
+            // 只从 /login 页面拿的 JWT，清除旧残留
+            localStorage.removeItem('auth_token');
+            const token = localStorage.getItem('token');
+            if (!token) {
+                log('⚠ 未登录，跳转到登录页...', 'warn');
+                setTimeout(() => { location.href = API_BASE + '/login'; }, 500);
+                return;
+            }
+            authToken = token;
+            // 解析 JWT 拿 user_id
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                document.getElementById('loginUserDisplay').textContent = payload.sub || '';
+                currentUserId = payload.user_id || '';
+                localStorage.setItem('user_id', currentUserId);
+            } catch(e) {}
+            updateAuthUI(true);
+            log('✅ 已认证，正在启动桌面...', 'info');
+            loadJobFiles();
+            // 自动启动浏览器 + 连接桌面，用户直接看到BOSS直聘
+            setTimeout(() => { openBossZhipin(); }, 800);
         }
 
         function updateAuthUI(isLoggedIn) {
@@ -2002,15 +2003,32 @@
             const btn = e && e.target ? e.target.closest('.btn') : null;
             setLoading(btn, true);
             log('正在启动浏览器并打开BOSS直聘...', 'info');
+
+            // 先连VNC桌面，确保用户能看到
+            if (!vncConnected) {
+                try {
+                    log('正在连接VNC桌面...', 'info');
+                    await connectVNC({});
+                } catch(e) {
+                    log(`VNC连接失败: ${e.message}`, 'warn');
+                }
+            }
+
             try {
                 const data = await apiCall('/api/browser/open-boss');
                 setLoading(btn, false);
                 if (data && data.status === 'ok') {
                     log('✅ Chrome已启动，BOSS直聘已打开', 'info');
-                    if (!vncConnected) {
-                        log('正在连接VNC桌面以查看浏览器...', 'info');
-                        await connectVNC({});
-                    }
+                    // 尝试自动导入已保存的Cookie（免扫码登录）
+                    setTimeout(async () => {
+                        try {
+                            const ck = await apiCall('/api/browser/import-cookies');
+                            if (ck && ck.status === 'ok' && ck.imported > 0) {
+                                log(`🍪 已导入 ${ck.imported} 条Cookie，刷新页面...`, 'info');
+                                await apiCall('/api/browser/execute', { script: 'location.reload()' });
+                            }
+                        } catch(e) { /* 无Cookie可导入，正常扫码即可 */ }
+                    }, 3000);
                 } else if (data && data.status === 'error') {
                     log(`❌ 启动失败: ${data.message}`, 'error');
                 } else {
@@ -2031,7 +2049,8 @@
                 const vncConfig = await apiCall('/api/vnc/config', null, 'GET');
                 if (btn) setLoading(btn, false);
                 if (!vncConfig) { log('获取VNC配置失败', 'error'); return; }
-                const novncUrl = `${vncConfig.novnc_url}&password=${encodeURIComponent(vncConfig.password)}&resize=scale`;
+                // 使用 vnc_lite.html（自动连接，不弹密码框）+ scale=true 自动缩放到适应容器
+                const novncUrl = `http://${window.location.hostname}:6901/vnc_lite.html?password=${encodeURIComponent(vncConfig.password)}&scale=true`;
                 document.getElementById('vncPlaceholder').style.display = 'none';
                 const iframe = document.getElementById('vncFrame');
                 iframe.src = novncUrl;
@@ -2139,7 +2158,7 @@
                     method: method,
                     headers: { 'Content-Type': 'application/json' }
                 };
-                const token = localStorage.getItem('auth_token');
+                const token = getAuthToken();
                 if (token) {
                     options.headers = {...options.headers, 'Authorization': `Bearer ${token}`};
                 }
@@ -2149,7 +2168,7 @@
                 const response = await fetch(`${API_BASE}${endpoint}`, options);
                 if (response.status === 401) {
                     authToken = null;
-                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('token');
                     updateAuthUI(false);
                     log('⚠️ API 认证失败，请先登录', 'warn');
                     return null;
@@ -2455,6 +2474,120 @@
             }, 3000);
         }
 
+        // ── AI简历分析 ──
+        function batchAnalyzeResumes() {
+            const btn = document.getElementById('btnAnalyzeResumes');
+            const limit = parseInt(document.getElementById('analyzeLimit').value) || 20;
+            if (!confirm(`确认分析最多 ${limit} 份已下载的简历？\n\n将使用 DeepSeek AI 分析简历与岗位匹配度。`)) return;
+            setLoading(btn, true);
+            log(`🤖 开始AI简历分析，上限 ${limit} 人...`, 'info');
+            apiCall('/api/resume/analyze', { limit: limit }).then(data => {
+                if (data && data.status === 'started') {
+                    log(`✅ 分析任务已启动，预计分析 ${limit} 份简历`, 'info');
+                    currentTask = { type: 'analyze', taskId: null, active: true };
+                    updateTaskStatus(true, 'AI简历分析', 0, '正在分析候选人简历...');
+                    pollAnalyzeStatus(btn, limit);
+                } else {
+                    setLoading(btn, false);
+                    log(`❌ 启动失败: ${(data && data.message) || '未知错误'}`, 'error');
+                }
+            });
+        }
+
+        function pollAnalyzeStatus(btn, limit) {
+            let pollCount = 0;
+            const interval = setInterval(async () => {
+                pollCount++;
+                if (pollCount > 200) {
+                    clearInterval(interval);
+                    log('⏰ 分析任务轮询超时', 'warn');
+                    clearTaskStatus();
+                    setLoading(btn, false);
+                    return;
+                }
+                try {
+                    const data = await apiCall('/api/resume/analyze-status', null, 'GET');
+                    if (!data) { clearInterval(interval); return; }
+                    if (data.status === 'completed') {
+                        log(`✅ 简历分析完成! 分析:${data.analyzed||0} 匹配:${data.matched||0}`, 'info');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'error') {
+                        log(`❌ 分析失败: ${data.message}`, 'error');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'running') {
+                        const done = (data.analyzed || 0) + (data.not_matched || 0);
+                        const total = data.total || limit;
+                        const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+                        updateTaskStatus(true, 'AI简历分析', progress, `已分析 ${done}, 匹配 ${data.matched||0}`);
+                        if (pollCount % 5 === 0) log(`⏳ 分析中... (匹配:${data.matched||0})`, 'info');
+                    }
+                } catch (e) { console.error('轮询分析状态失败:', e); }
+            }, 3000);
+        }
+
+        // ── 批量约面试 ──
+        function batchInviteInterview() {
+            const btn = document.getElementById('btnInviteInterview');
+            const limit = parseInt(document.getElementById('interviewLimit').value) || 10;
+            const interviewType = document.getElementById('interviewType').value;
+            const typeLabel = interviewType === '线下' ? '线下面试' : (interviewType === '线上' ? '线上面试' : '不限');
+            if (!confirm(`确认对最多 ${limit} 位候选人发起约面试（测试模式）？\n\n面试类型: ${typeLabel}\n仅测试流程，会点击"取消"而不会真正发送面试邀请。`)) return;
+            setLoading(btn, true);
+            log(`💼 开始批量约面试，上限 ${limit} 人，类型: ${typeLabel}...`, 'info');
+            apiCall('/api/workflow/invite-interview', { limit: limit, dry_run: false, interview_type: interviewType || null }).then(data => {
+                if (data && data.status === 'started') {
+                    log(`✅ 任务已启动，预计处理 ${limit} 人`, 'info');
+                    currentTask = { type: 'interview', taskId: null, active: true };
+                    updateTaskStatus(true, '批量约面试', 0, '正在处理候选人...');
+                    pollInterviewStatus(btn, limit);
+                } else if (data && data.status === 'error') {
+                    log(`❌ ${data.message}`, 'error');
+                    setLoading(btn, false);
+                } else {
+                    setLoading(btn, false);
+                }
+            });
+        }
+
+        function pollInterviewStatus(btn, limit) {
+            let pollCount = 0;
+            const interval = setInterval(async () => {
+                pollCount++;
+                if (pollCount > 200) {
+                    clearInterval(interval);
+                    log('⏰ 约面试任务轮询超时', 'warn');
+                    clearTaskStatus();
+                    setLoading(btn, false);
+                    return;
+                }
+                try {
+                    const data = await apiCall('/api/workflow/invite-interview-status', null, 'GET');
+                    if (!data) { clearInterval(interval); return; }
+                    if (data.status === 'completed') {
+                        log(`✅ 约面试完成! 已处理:${data.invited||0} 跳过:${data.skipped||0} 失败:${data.failed||0}`, 'info');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'error') {
+                        log(`❌ 任务失败: ${data.message}`, 'error');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'running') {
+                        const done = (data.invited || 0) + (data.failed || 0) + (data.skipped || 0);
+                        const total = data.total || limit;
+                        const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+                        updateTaskStatus(true, '批量约面试', progress, `已处理 ${data.invited||0}, 总 ${total} 人`);
+                        if (pollCount % 5 === 0) log(`⏳ 约面试中... (${data.invited||0}/${total})`, 'info');
+                    }
+                } catch (e) { console.error('轮询约面试状态失败:', e); }
+            }, 3000);
+        }
+
         function batchReplyMessages() {
             const btn = document.getElementById('btnReplyMessages');
             const limit = parseInt(document.getElementById('replyLimit').value) || 15;
@@ -2536,12 +2669,8 @@
         // ── Init ──
         window.onload = function() {
             loadConfig();
-            const token = localStorage.getItem('auth_token');
-            updateAuthUI(!!token);
-            log('📡 系统就绪，请依次操作：连接桌面 → 打开BOSS直聘 → 检查登录', 'info');
-            if (!token) {
-                log('⚠️ 请先在顶栏输入密码登录API，否则批量操作不可用', 'warn');
-            }
+            initAuth();
+            log('📡 系统就绪，正在自动连接桌面...', 'info');
         };
     </script>
 </body>

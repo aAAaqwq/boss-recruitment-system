@@ -8,6 +8,7 @@ python-jose
 passlib
 bcrypt
 psycopg2-binary
+pypdf>=4.0
 jinja2
 aiofiles
 pillow

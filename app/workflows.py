@@ -48,13 +48,19 @@ _JS_EXTRACT_CARDS = """
     }
     // 从卡片DOM提取BOSS平台唯一ID（增强版）
     function extractBossId(el) {
+        // 辅助：如果值是 "数字-数字" 格式（如 data-id="28717495-0"），提取数字部分
+        function cleanId(v) {
+            if (!v) return v;
+            var m = v.match(/^(\d+)-\d+$/);
+            return m ? m[1] : v;
+        }
         // 1. 扫描元素自身所有属性
         for (var a = 0; a < (el.attributes || []).length; a++) {
             var an = el.attributes[a].name;
             var av = el.attributes[a].value;
             if (!av || av.length < 5) continue;
-            if (/^(data-)?(uid|userid|user-id|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(an)) {
-                return av;
+            if (/^(data-)?(uid|userid|user-id|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(an)) {
+                return cleanId(av);
             }
         }
         // 2. 从链接href提取 (query params + path segments)
@@ -73,8 +79,8 @@ _JS_EXTRACT_CARDS = """
                 var kan = kids[k].attributes[b].name;
                 var kav = kids[k].attributes[b].value;
                 if (!kav || kav.length < 5) continue;
-                if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(kan)) {
-                    return kav;
+                if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(kan)) {
+                    return cleanId(kav);
                 }
             }
         }
@@ -84,8 +90,8 @@ _JS_EXTRACT_CARDS = """
                 var pn = p.attributes[c].name;
                 var pv = p.attributes[c].value;
                 if (!pv || pv.length < 5) continue;
-                if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(pn)) {
-                    return pv;
+                if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(pn)) {
+                    return cleanId(pv);
                 }
             }
         }
@@ -138,7 +144,7 @@ _JS_EXTRACT_CARDS = """
         if (gx !== null && gy !== null && gy >= oy && gy < vy && gx >= ox && gx < vx) {
             var bossId = extractBossId(container) || extractBossId(c);
             result.push({
-                text: c.innerText||'', x: r.x + ox, y: r.y + oy, w: r.width, h: r.height,
+                text: (c.innerText||'').trim(), x: r.x + ox, y: r.y + oy, w: r.width, h: r.height,
                 cx: r.x+r.width/2+ox, cy: r.y+r.height/2+oy,
                 greet_x: gx, greet_y: gy, greet_text: gt,
                 boss_id: bossId
@@ -146,6 +152,198 @@ _JS_EXTRACT_CARDS = """
         }
     }
     return JSON.stringify(result);
+})()
+"""
+
+# JS: 监听 + 自动记录新出现的弹窗（打招呼后BOSS可能弹出"推荐牛人"等模态）
+_JS_POPUP_WATCHER_INSTALL = """
+(function() {
+    window.__f5_popups = [];
+    function record(el) {
+        var c = typeof el.className === 'string' ? el.className : '';
+        var t = (el.innerText || '').trim().slice(0, 100);
+        window.__f5_popups.push({cls: c, tag: el.tagName, txt: t});
+    }
+    function scan(doc) {
+        var all = doc.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            var el = all[i], s = getComputedStyle(el);
+            if (s.display === 'none') continue;
+            var z = parseInt(s.zIndex) || 0;
+            if ((s.position === 'fixed' || s.position === 'absolute') && z > 200 && el.offsetWidth > 100 && el.offsetHeight > 80) {
+                record(el);
+            }
+        }
+    }
+    // 扫描主文档
+    scan(document);
+    // 扫描 iframe
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) scan(iframe.contentDocument);
+    // MutationObserver 监听新增弹窗
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(m) {
+            for (var i = 0; i < m.addedNodes.length; i++) {
+                var node = m.addedNodes[i];
+                if (node.nodeType === 1) {
+                    var s = getComputedStyle(node);
+                    var z = parseInt(s.zIndex) || 0;
+                    if ((s.position === 'fixed' || s.position === 'absolute') && z > 200) {
+                        record(node);
+                        // 同时递归扫描子元素
+                        var children = node.querySelectorAll('*');
+                        for (var j = 0; j < children.length; j++) record(children[j]);
+                    }
+                }
+            }
+        });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // 也对 iframe 内监听
+    var iframe2 = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe2 && iframe2.contentDocument && iframe2.contentDocument.body) {
+        observer.observe(iframe2.contentDocument.body, { childList: true, subtree: true });
+    }
+    return JSON.stringify({installed: true, existing: window.__f5_popups.length});
+})()
+"""
+
+# JS: 读取观察器捕获的弹窗信息 + 暴力关闭所有弹窗
+_JS_POPUP_WATCHER_DISMISS = """
+(function() {
+    var popups = window.__f5_popups || [];
+    var closed = 0;
+    // 从记录的弹窗中提取 class 名，构建精准选择器
+    var exactSelectors = [];
+    var seen = {};
+    popups.forEach(function(p) {
+        if (p.cls && !seen[p.cls]) {
+            seen[p.cls] = true;
+            // 取第一个 class 名作为选择器（避免复合选择器过长）
+            var firstCls = p.cls.split(' ')[0];
+            if (firstCls && firstCls.length > 2) {
+                exactSelectors.push('.' + firstCls);
+            }
+        }
+    });
+    // 通用选择器 + 精准选择器
+    var baseSelectors = '.dialog-wrap,[class*=overlay],[class*=mask],[class*=backdrop],.boss-popup__wrapper,[class*=modal],[class*=drawer],[class*=popup],.t-popup,[class*=recommend-popup],[class*=guide],[class*=notice]';
+    var selector = baseSelectors + (exactSelectors.length > 0 ? ',' + exactSelectors.join(',') : '');
+    // 暴力扫描：移除所有 fixed/absolute + 高z-index + 大尺寸的遮罩（排除侧边栏和水印）
+    function removePopups(doc) {
+        var all = doc.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            var s = getComputedStyle(el);
+            var z = parseInt(s.zIndex) || 0;
+            if (s.display === 'none') continue;
+            var cls = typeof el.className === 'string' ? el.className : '';
+            // 跳过已知安全元素：侧边栏、水印
+            if (cls.indexOf('side-wrap') >= 0 || cls.indexOf('__wm') >= 0) continue;
+            if (cls.indexOf('chat-global-wrap') >= 0) continue;
+            // 移除弹窗/遮罩
+            if ((s.position === 'fixed' || s.position === 'absolute') && z > 200 && el.offsetWidth > 80 && el.offsetHeight > 60) {
+                el.remove();
+                closed++;
+            }
+        }
+    }
+    removePopups(document);
+    // 也扫描 iframe
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) removePopups(iframe.contentDocument);
+    window.__f5_popups = [];
+    return JSON.stringify({closed: closed, last_popups: popups});
+})()
+"""
+
+# JS: 根据卡片文本指纹重新定位打招呼按钮（避免弹窗后坐标偏移）
+_JS_REFIND_GREET_BTN = """
+(function() {
+    var fp = '%s';
+    var greets = ['打招呼','立即沟通','开聊','继续沟通'];
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    var doc = iframe && iframe.contentDocument ? iframe.contentDocument : document;
+    var ox = iframe ? iframe.getBoundingClientRect().x : 0;
+    var oy = iframe ? iframe.getBoundingClientRect().y : 0;
+    var cards = Array.from(doc.querySelectorAll('.card-inner'));
+    if (cards.length === 0) cards = Array.from(doc.querySelectorAll('.candidate-card-wrap'));
+    if (cards.length === 0) cards = Array.from(doc.querySelectorAll('[class*="card-inner"]'));
+    if (cards.length === 0) cards = Array.from(doc.querySelectorAll('.recommend-card'));
+    for (var i = 0; i < cards.length; i++) {
+        var c = cards[i];
+        var t = (c.innerText||'').trim();
+        if (t.substring(0,50).trim() !== fp) continue;
+        var btns = c.querySelectorAll('button, [class*="btn"], [class*="greet"]');
+        for (var j = 0; j < btns.length; j++) {
+            var btnText = (btns[j].innerText||'').trim();
+            if (greets.indexOf(btnText) >= 0 && btns[j].offsetParent !== null) {
+                var br = btns[j].getBoundingClientRect();
+                return JSON.stringify({found: true, gx: br.x + br.width/2 + ox, gy: br.y + br.height/2 + oy, greet_text: btnText});
+            }
+        }
+    }
+    return JSON.stringify({found: false});
+})()
+"""
+
+# JS: 直接通过 DOM 点击打招呼按钮（绕过 z-index 弹窗遮挡）
+# 相比 CDP 坐标点击，element.click() + dispatchEvent 直接作用于目标元素，
+# 不受上方弹窗/遮罩的 z-index 影响
+_JS_CLICK_GREET_BTN = """
+(function() {
+    var fp = '%s';
+    var greets = ['打招呼','立即沟通','开聊','继续沟通'];
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    var doc = iframe && iframe.contentDocument ? iframe.contentDocument : document;
+    var cards = Array.from(doc.querySelectorAll('.card-inner'));
+    if (cards.length === 0) cards = Array.from(doc.querySelectorAll('.candidate-card-wrap'));
+    if (cards.length === 0) cards = Array.from(doc.querySelectorAll('[class*="card-inner"]'));
+    if (cards.length === 0) cards = Array.from(doc.querySelectorAll('.recommend-card'));
+    for (var i = 0; i < cards.length; i++) {
+        var c = cards[i];
+        var t = (c.innerText||'').trim();
+        if (t.substring(0,50).trim() !== fp) continue;
+        var btns = c.querySelectorAll('button, [class*="btn"], [class*="greet"], [class*="chat-btn"]');
+        for (var j = 0; j < btns.length; j++) {
+            var btnText = (btns[j].innerText||'').trim();
+            if (greets.indexOf(btnText) >= 0 && btns[j].offsetParent !== null) {
+                var rect = btns[j].getBoundingClientRect();
+                var cx = rect.left + rect.width / 2;
+                var cy = rect.top + rect.height / 2;
+                // 1. 先发送完整的 MouseEvent（兼容 React 合成事件）
+                var evt = new MouseEvent('click', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: cx, clientY: cy, button: 0
+                });
+                btns[j].dispatchEvent(evt);
+                // 2. 再调用原生 click()（兼容直接绑定的 onclick）
+                try { btns[j].click(); } catch(e) {}
+                return JSON.stringify({found: true, clicked: true, btn_text: btnText});
+            }
+        }
+        // 如果精确文本匹配失败，尝试模糊匹配（按钮文本包含关键词）
+        for (var j2 = 0; j2 < btns.length; j2++) {
+            var btnText2 = (btns[j2].innerText||'').trim();
+            var matched = false;
+            for (var g = 0; g < greets.length; g++) {
+                if (btnText2.indexOf(greets[g]) >= 0) { matched = true; break; }
+            }
+            if (matched && btns[j2].offsetParent !== null) {
+                var rect2 = btns[j2].getBoundingClientRect();
+                var cx2 = rect2.left + rect2.width / 2;
+                var cy2 = rect2.top + rect2.height / 2;
+                var evt2 = new MouseEvent('click', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: cx2, clientY: cy2, button: 0
+                });
+                btns[j2].dispatchEvent(evt2);
+                try { btns[j2].click(); } catch(e) {}
+                return JSON.stringify({found: true, clicked: true, btn_text: btnText2, fuzzy: true});
+            }
+        }
+    }
+    return JSON.stringify({found: false});
 })()
 """
 
@@ -203,13 +401,9 @@ def workflow_3_1_auto_contact(
 async def _auto_contact_impl(
     daily_cap: int, school_whitelist: List[str], min_degree: str,
     min_years: int, dry_run: bool, criteria: Optional[FilterCriteria],
-    batch_limit: int = 20,
+    batch_limit: int = 20, user_id: int = None,
 ) -> Dict:
-    """批量打招呼核心逻辑 (async)
-
-    daily_cap:  每日封顶上限（硬限制）
-    batch_limit: 单次处理数量（本次最多联系多少人）
-    """
+    """批量打招呼核心逻辑 (async)"""
     if criteria is None:
         criteria = FilterCriteria(
             school_whitelist=school_whitelist or None,
@@ -265,7 +459,7 @@ async def _auto_contact_impl(
             logger.warning(f"[F5] 超时退出 ({TIMEOUT_SECONDS}s)")
             break
 
-        # 限制弹窗检测 — BOSS "已达上限" 等提示
+        # 限制弹窗检测 -- BOSS "已达上限" 等提示
         limit_kw = await check_limit_popup()
         if limit_kw:
             logger.warning(f"[F5] 检测到限制弹窗: {limit_kw}，终止打招呼")
@@ -310,7 +504,7 @@ async def _auto_contact_impl(
         # 去重
         new_cards = []
         for c in cards:
-            fp = c.get("text", "")[:50].strip()
+            fp = c.get("text", "").strip()[:50]
             if fp and fp not in seen:
                 seen.add(fp)
                 new_cards.append(c)
@@ -337,6 +531,9 @@ async def _auto_contact_impl(
         no_new = 0
         logger.info(f"[F5] 发现{len(new_cards)}个可见卡片 (按钮在视口内)")
 
+        # 从当前可见卡片中找一个符合条件且未联系的，点击后立即 break
+        # 回到外层 while 重新提取卡片坐标（因为"为您推荐"等内嵌元素会改变布局）
+        clicked_this_round = False
         for card in new_cards:
             # 检查取消信号
             if cancel_event.is_set():
@@ -349,17 +546,15 @@ async def _auto_contact_impl(
                 "name": _extract_name(txt), "years": _extract_years(txt),
                 "degree": _extract_degree(txt), "school": _extract_school(txt),
             }
-            fingerprint = card.get("text", "")[:50].strip()
+            fingerprint = card.get("text", "").strip()[:50]
             boss_id = card.get("boss_id") or cand["name"] or f"unk_{hash(fingerprint) & 0xFFFFFF}"
 
             if boss_id in contacted_ids or not _should_contact(cand, criteria):
                 skipped += 1
                 continue
 
-            # 按钮 JS 已确保在视口内，此检查仅做安全兜底
             gx, gy = card.get("greet_x"), card.get("greet_y")
             if gx is None or gy is None:
-                logger.debug(f"[F5] 跳过无按钮卡片: {cand['name']}")
                 skipped += 1
                 continue
 
@@ -369,10 +564,11 @@ async def _auto_contact_impl(
                 contacted += 1
                 contacted_ids.add(boss_id)
                 logger.info(f"[F5] dry_run 模拟点击: ({gx:.0f},{gy:.0f}) btn={card.get('greet_text')}")
-                continue
+                clicked_this_round = True
+                break
 
-            # CDP 点击打招呼按钮
-            logger.info(f"[F5] 点击打招呼: ({gx:.0f},{gy:.0f}) text={card.get('greet_text')}")
+            # CDP 点击（当前 DOM 中的最新坐标）
+            logger.info(f"[F5] CDP点击: ({gx:.0f},{gy:.0f}) btn={card.get('greet_text')}")
             if await automation.cdp_click_viewport(float(gx), float(gy)):
                 contacted += 1
                 contacted_ids.add(boss_id)
@@ -380,33 +576,37 @@ async def _auto_contact_impl(
                     with Database() as db:
                         db.init_tables()
                         db.insert_contact_record(
-                            boss_id=boss_id, action="contacted", success=True,
+                            boss_id=boss_id, action="contacted", success=True, user_id=user_id,
                         )
                         db.insert_candidate(
                             boss_id=boss_id, candidate_name=cand["name"],
                             school=cand["school"], degree=cand["degree"],
-                            years=cand["years"], status="contacted",
+                            years=cand["years"], status="contacted", user_id=user_id,
                         )
                 except Exception as db_err:
                     logger.warning(f"[F5] DB写入失败: {db_err}")
                 logger.info(f"[F5] 成功({contacted}/{target}): {boss_id[:1]}**")
 
-                # 点击后检测——BOSS可能在打招呼后弹限制弹窗
+                # 点击后等待 + 检测限制弹窗
+                await asyncio.sleep(0.8)
                 limit_kw2 = await check_limit_popup()
                 if limit_kw2:
-                    logger.warning(f"[F5] 点击后检测到限制弹窗: {limit_kw2}，终止打招呼")
+                    logger.warning(f"[F5] 检测到限制弹窗: {limit_kw2}，终止打招呼")
                     await dismiss_popup()
                     limit_reached = True
                     break
+                # 重要: break 出 for 循环, 回到外层 while 重新提取卡片
+                # 因为"为您推荐"等内嵌元素已改变页面布局, 旧坐标不可用
+                clicked_this_round = True
+                break
             else:
                 failed += 1
-                logger.warning(f"[F5] 点击失败: {boss_id[:1]}**")
+                logger.warning(f"[F5] CDP点击失败: {boss_id[:1]}**")
 
-            await asyncio.sleep(random.uniform(2, 4))
-
-        # 每处理完一批可见卡片 → 滚动加载下一批
-        await automation.execute_js(_JS_SCROLL_IFRAME)
-        await asyncio.sleep(random.uniform(1.5, 3))
+        # 本轮没点击任何人 → 滚动加载更多
+        if not clicked_this_round:
+            await automation.execute_js(_JS_SCROLL_IFRAME)
+            await asyncio.sleep(random.uniform(1, 2))
 
         # 每5个新增截图
         total = contacted + skipped + failed
@@ -417,8 +617,6 @@ async def _auto_contact_impl(
             except Exception:
                 pass
 
-        # 滚动 iframe 内的候选列表
-        await automation.execute_js(_JS_SCROLL_IFRAME)
         await asyncio.sleep(random.uniform(1.5, 3))
 
     try:
@@ -436,7 +634,7 @@ async def _auto_contact_impl(
 
 
 def _extract_name(text: str) -> Optional[str]:
-    """从卡片文本提取姓名 — 跳过薪资等非姓名行"""
+    """从卡片文本提取姓名 -- 跳过薪资等非姓名行"""
     if not text:
         return None
     salary_kw = ('面议', '薪资', 'K', 'k', '元/', '万', '·', '/', '-')

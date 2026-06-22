@@ -157,7 +157,8 @@ class ChatService:
         candidate_name: str,
         candidate_message: str,
         ai_message: str,
-        action: str = "auto_reply"
+        action: str = "auto_reply",
+        user_id: int = None,
     ) -> int:
         """
         保存对话记录到数据库
@@ -175,15 +176,16 @@ class ChatService:
         with self.db as db:
             db.cursor.execute("""
                 INSERT INTO conversations
-                (candidate_name, action, ai_message, candidate_message, detail, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+                (candidate_name, action, ai_message, candidate_message, detail, created_at, user_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
             """, (
                 candidate_name,
                 action,
                 ai_message,
                 candidate_message,
                 json.dumps({"boss_id": boss_id}),
-                datetime.now().isoformat()
+                datetime.now().isoformat(),
+                user_id,
             ))
             db.conn.commit()
             row = db.cursor.fetchone(); return row[0] if row else None

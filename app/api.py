@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import authentication module
-from app.auth import verify_token, create_access_token, verify_credentials, ensure_admin_user
+from app.auth import verify_token, create_access_token, verify_credentials, ensure_admin_user, register_user
 # Import logging
 from app.logging_config import api_logger
 # Import automation singleton
@@ -256,6 +256,28 @@ async def root(request: Request):
     html_path = BASE_DIR / "templates" / "index.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """登录/注册页"""
+    html_path = BASE_DIR / "templates" / "login.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request):
+    """管理后台（需admin角色）"""
+    html_path = BASE_DIR / "templates" / "admin.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
+    """用户驾驶舱"""
+    html_path = BASE_DIR / "templates" / "index.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
 @app.get("/api/automation/status")
 async def automation_status(current_user: dict = Depends(verify_token)):
     return manager.get_status()
@@ -349,6 +371,7 @@ async def get_candidates(
                 "resume_path": resume_path,
                 "resume_filename": resume_filename,
                 "resume_action": row_dict["resume_action"] or "",
+                "interview_status": row_dict.get("interview_status") or "",
                 "contacted_at": row_dict["contacted_at"],
                 "created_at": row_dict["created_at"],
             })
@@ -444,6 +467,7 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str
+    role: str = "user"
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
@@ -456,11 +480,23 @@ async def login(req: LoginRequest):
             "user_id": user["id"],
             "role": user["role"],
         })
-        return LoginResponse(access_token=token, token_type="bearer")
+        return LoginResponse(access_token=token, token_type="bearer", role=user.get("role", "user"))
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="认证失败：用户名或密码错误"
     )
+
+
+@app.post("/api/auth/register")
+async def register(req: LoginRequest):
+    """用户注册"""
+    result = register_user(req.username, req.password)
+    if result["status"] == "error":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"]
+        )
+    return {"status": "ok", "user": result["user"]}
 
 
 @app.get("/health")
@@ -701,12 +737,13 @@ async def reply_messages(req: WorkflowRequest, current_user: dict = Depends(veri
         "results": [],
         "start_time": datetime.now().isoformat(),
     }
+    user_id = current_user.get("user_id")
     api_logger.info(f"[F7] 启动批量回复任务，上限 {req.limit} 人")
 
     import threading as _th
     _th.Thread(
         target=_run_reply_in_thread,
-        args=(req.limit, req.dry_run, req.custom_template),
+        args=(req.limit, req.dry_run, req.custom_template, user_id),
         daemon=True,
     ).start()
 
@@ -716,7 +753,7 @@ async def reply_messages(req: WorkflowRequest, current_user: dict = Depends(veri
     }
 
 
-def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template: Optional[str] = None):
+def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template: Optional[str] = None, user_id: int = None):
     """在独立线程中运行批量回复工作流"""
     global _reply_task_status, _active_task_type
     import asyncio as _asyncio
@@ -747,6 +784,7 @@ def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template:
                 max_count=max_count,
                 template=custom_template,
                 dry_run=dry_run,
+                user_id=user_id,
             )
 
             _reply_task_status["status"] = result.get("status", "completed")
@@ -796,6 +834,7 @@ class BatchResumeRequest(BaseModel):
     limit: int = 10
     candidate_ids: Optional[List[str]] = None  # 指定候选人ID列表
     dry_run: bool = False  # 干跑模式（只扫描不操作）
+    interview_type: Optional[str] = None  # "线下" / "线上" / None(不限)
 
 
 class ResumeInfo(BaseModel):
@@ -843,13 +882,14 @@ async def batch_download_resumes(
         "message": f"正在处理 {req.limit} 个候选人...",
         "start_time": datetime.now().isoformat()
     }
+    user_id = current_user.get("user_id")
     api_logger.info(f"启动批量简历下载任务，上限 {req.limit} 人")
 
     # 在独立线程中运行（nodriver 对象绑定到事件循环）
     import threading as _th
     _th.Thread(
         target=_run_resume_in_thread,
-        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False),
+        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False, user_id),
         daemon=True
     ).start()
 
@@ -859,7 +899,7 @@ async def batch_download_resumes(
     }
 
 
-def _run_resume_in_thread(max_count: int, dry_run: bool = False):
+def _run_resume_in_thread(max_count: int, dry_run: bool = False, user_id: int = None):
     """在独立线程中运行简历收集"""
     global resume_task_status, _active_task_type
     import asyncio as _asyncio
@@ -891,7 +931,7 @@ def _run_resume_in_thread(max_count: int, dry_run: bool = False):
                 resume_task_status["message"] = "BOSS直聘未登录，请先在VNC中扫码登录"
                 return
 
-            result = await collect_resumes(max_count=max_count, dry_run=dry_run)
+            result = await collect_resumes(max_count=max_count, dry_run=dry_run, user_id=user_id)
 
             resume_task_status["status"] = result.get("status", "completed")
             resume_task_status["processed"] = result.get("downloaded", 0)
@@ -941,6 +981,18 @@ _received_resume_task_status: Dict[str, Any] = {
     "total": 0, "message": "", "details": [],
 }
 
+# === F9 批量约面试任务状态 ===
+_interview_invite_task_status: Dict[str, Any] = {
+    "status": "idle", "invited": 0, "skipped": 0, "failed": 0,
+    "total": 0, "message": "", "details": [],
+}
+
+# === AI简历分析任务状态 ===
+_resume_analyze_task_status: Dict[str, Any] = {
+    "status": "idle", "analyzed": 0, "matched": 0, "not_matched": 0,
+    "total": 0, "message": "",
+}
+
 
 @app.post("/api/resume/received")
 async def download_received_resumes(
@@ -977,12 +1029,13 @@ async def download_received_resumes(
         "details": [],
         "start_time": datetime.now().isoformat(),
     }
+    user_id = current_user.get("user_id")
     api_logger.info(f"[F8] 启动已获取简历下载任务，上限 {req.limit} 人")
 
     import threading as _th
     _th.Thread(
         target=_run_received_resume_in_thread,
-        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False),
+        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False, user_id),
         daemon=True,
     ).start()
 
@@ -992,7 +1045,7 @@ async def download_received_resumes(
     }
 
 
-def _run_received_resume_in_thread(max_count: int, dry_run: bool = False):
+def _run_received_resume_in_thread(max_count: int, dry_run: bool = False, user_id: int = None):
     """在独立线程中运行已获取简历下载"""
     global _received_resume_task_status, _active_task_type
     import asyncio as _asyncio
@@ -1022,7 +1075,7 @@ def _run_received_resume_in_thread(max_count: int, dry_run: bool = False):
                 _received_resume_task_status["message"] = "BOSS直聘未登录，请先在VNC中扫码登录"
                 return
 
-            result = await collect_received_resumes(max_count=max_count, dry_run=dry_run)
+            result = await collect_received_resumes(max_count=max_count, dry_run=dry_run, user_id=user_id)
 
             _received_resume_task_status["status"] = result.get("status", "completed")
             _received_resume_task_status["downloaded"] = result.get("downloaded", 0)
@@ -1065,6 +1118,193 @@ def _run_received_resume_in_thread(max_count: int, dry_run: bool = False):
 async def get_received_resume_status(current_user: dict = Depends(verify_token)):
     """获取已获取简历下载任务状态"""
     return _received_resume_task_status
+
+
+# ════════════════════════════════════════════════════════════════
+# AI 简历分析
+# ════════════════════════════════════════════════════════════════
+
+@app.post("/api/resume/analyze")
+async def start_resume_analyze(
+    req: BatchResumeRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """AI分析简历与岗位匹配度"""
+    global _resume_analyze_task_status
+
+    if _resume_analyze_task_status.get("status") == "running":
+        return {"status": "error", "message": "已有分析任务正在运行"}
+
+    _resume_analyze_task_status = {
+        "status": "running",
+        "analyzed": 0, "matched": 0, "not_matched": 0,
+        "total": req.limit,
+        "message": f"正在分析最多 {req.limit} 份简历...",
+        "start_time": datetime.now().isoformat(),
+    }
+    api_logger.info(f"[Analyze] 启动AI简历分析，上限 {req.limit} 人")
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    import threading as _th
+    _th.Thread(
+        target=_run_analyze_in_thread,
+        args=(req.limit, user_id),
+        daemon=True,
+    ).start()
+
+    return {"status": "started", "message": f"简历分析任务已启动，上限 {req.limit} 人"}
+
+
+def _run_analyze_in_thread(limit: int, user_id: int = None):
+    global _resume_analyze_task_status
+    import asyncio as _asyncio
+
+    async def _main():
+        try:
+            from app.resume_analyzer import _analyze_resumes_impl
+            result = await _analyze_resumes_impl(limit, user_id=user_id)
+            _resume_analyze_task_status["status"] = result.get("status", "completed")
+            _resume_analyze_task_status["analyzed"] = result.get("analyzed", 0)
+            _resume_analyze_task_status["matched"] = result.get("matched", 0)
+            _resume_analyze_task_status["not_matched"] = result.get("not_matched", 0)
+            _resume_analyze_task_status["message"] = result.get("message", "")
+            _resume_analyze_task_status["end_time"] = datetime.now().isoformat()
+            api_logger.info(f"[Analyze] 完成: {_resume_analyze_task_status['message']}")
+        except Exception as e:
+            import traceback
+            _resume_analyze_task_status["status"] = "error"
+            _resume_analyze_task_status["message"] = str(e)
+            api_logger.error(f"[Analyze] 失败: {e}\n{traceback.format_exc()}")
+
+    try:
+        _asyncio.run(_main())
+    except Exception as e:
+        _resume_analyze_task_status["status"] = "error"
+        _resume_analyze_task_status["message"] = str(e)
+
+
+@app.get("/api/resume/analyze-status")
+async def get_analyze_status(current_user: dict = Depends(verify_token)):
+    """获取AI简历分析任务状态"""
+    return _resume_analyze_task_status
+
+
+# ════════════════════════════════════════════════════════════════
+# 批量约面试 (F9)
+# ════════════════════════════════════════════════════════════════
+
+@app.post("/api/workflow/invite-interview")
+async def batch_invite_interview(
+    req: BatchResumeRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """批量约面试 — 对标记为可约面的候选人发起约面试（测试模式）"""
+    global _interview_invite_task_status, _active_task_type, _lock_acquired_at
+
+    _force_unlock_if_stale()
+    if not _browser_task_lock.acquire(blocking=False):
+        return {"status": "error", "message": f"浏览器正被 {_active_task_type} 任务占用，请稍后重试"}
+
+    if _interview_invite_task_status.get("status") == "running":
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
+        return {"status": "error", "message": "已有约面试任务正在运行"}
+
+    _active_task_type = "F9-interview"
+    _lock_acquired_at = __import__('time').time()
+    _interview_invite_task_status = {
+        "status": "running",
+        "invited": 0, "skipped": 0, "failed": 0,
+        "total": req.limit,
+        "message": f"正在处理最多 {req.limit} 个候选人...",
+        "details": [],
+        "start_time": datetime.now().isoformat(),
+    }
+    api_logger.info(f"[F9] 启动批量约面试任务，上限 {req.limit} 人")
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    interview_type = req.interview_type
+    import threading as _th
+    _th.Thread(
+        target=_run_invite_interview_in_thread,
+        args=(req.limit, user_id, interview_type),
+        daemon=True,
+    ).start()
+
+    return {"status": "started", "message": f"批量约面试任务已启动，上限 {req.limit} 人"}
+
+
+def _run_invite_interview_in_thread(max_count: int, user_id: int = None, interview_type: str = None):
+    global _interview_invite_task_status, _active_task_type
+    import asyncio as _asyncio
+
+    async def _main():
+        from app.automation import cancel_event
+        cancel_event.clear()
+        try:
+            from app.interview_inviter import _batch_invite_interview_impl
+        except ImportError as e:
+            _interview_invite_task_status["status"] = "error"
+            _interview_invite_task_status["message"] = f"模块未就绪: {e}"
+            api_logger.error(f"[F9] 失败: 模块导入错误: {e}")
+            return
+
+        try:
+            automation.reset_for_thread()
+            conn = await automation.connect()
+            if conn.get("status") not in ("connected", "already_connected"):
+                _interview_invite_task_status["status"] = "error"
+                _interview_invite_task_status["message"] = "浏览器连接失败"
+                return
+
+            login_status = await automation.check_login()
+            if login_status.get("need_login"):
+                _interview_invite_task_status["status"] = "error"
+                _interview_invite_task_status["message"] = "BOSS直聘未登录，请先在Dashboard中登录"
+                return
+
+            result = await _batch_invite_interview_impl(max_count, user_id=user_id, interview_type=interview_type)
+            _interview_invite_task_status["status"] = result.get("status", "completed")
+            _interview_invite_task_status["invited"] = result.get("invited", 0)
+            _interview_invite_task_status["skipped"] = result.get("skipped", 0)
+            _interview_invite_task_status["failed"] = result.get("failed", 0)
+            _interview_invite_task_status["total"] = result.get("total_scanned", 0)
+            _interview_invite_task_status["message"] = (
+                f"已约面:{result.get('invited',0)} "
+                f"跳过:{result.get('skipped',0)} "
+                f"失败:{result.get('failed',0)}"
+            )
+            _interview_invite_task_status["details"] = result.get("details", [])
+            _interview_invite_task_status["end_time"] = datetime.now().isoformat()
+            api_logger.info(f"[F9] 完成: {_interview_invite_task_status['message']}")
+        except Exception as e:
+            import traceback
+            _interview_invite_task_status["status"] = "error"
+            _interview_invite_task_status["message"] = str(e)
+            api_logger.error(f"[F9] 失败: {e}\n{traceback.format_exc()}")
+
+    try:
+        _asyncio.run(_main())
+    except Exception as e:
+        _interview_invite_task_status["status"] = "error"
+        _interview_invite_task_status["message"] = str(e)
+        api_logger.error(f"[F9] 线程失败: {e}")
+    finally:
+        global _active_task_type, _lock_acquired_at
+        _active_task_type = None
+        _lock_acquired_at = None
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
+
+
+@app.get("/api/workflow/invite-interview-status")
+async def get_invite_interview_status(current_user: dict = Depends(verify_token)):
+    """获取批量约面试任务状态"""
+    return _interview_invite_task_status
 
 
 @app.get("/api/resume/list")
@@ -1320,10 +1560,11 @@ async def start_filter_contact(
 
         # 在独立线程中运行，避免阻塞 FastAPI 事件循环
         # nodriver 对象绑定到事件循环，必须在独立线程中创建新的事件循环
+        user_id = current_user.get("user_id")
         import threading
         thread = threading.Thread(
             target=_run_filter_contact_in_thread,
-            args=(task_id, req.daily_cap, req.batch_limit, criteria, req.dry_run),
+            args=(task_id, req.daily_cap, req.batch_limit, criteria, req.dry_run, user_id),
             daemon=True
         )
 
@@ -1354,7 +1595,8 @@ def _run_filter_contact_in_thread(
     daily_cap: int,
     batch_limit: int,
     criteria: "FilterCriteria",
-    dry_run: bool
+    dry_run: bool,
+    user_id: int = None,
 ):
     """在独立线程中运行筛选打招呼任务，避免阻塞 FastAPI 事件循环。
 
@@ -1432,6 +1674,7 @@ def _run_filter_contact_in_thread(
             min_years=criteria.min_years,
             dry_run=dry_run,
             criteria=criteria,
+            user_id=user_id,
         )
 
         _filter_tasks[task_id]["status"] = result.get("status", "unknown")
@@ -1996,6 +2239,8 @@ async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
         "f5_filter": f5_status,
         "f6_resume": f6_status,
         "f8_received": _received_resume_task_status,
+        "f9_interview": _interview_invite_task_status,
+        "resume_analyze": _resume_analyze_task_status,
         "f7_reply": f7_status,
         "browser": browser_status,
         "login": login_status,
@@ -2325,6 +2570,50 @@ async def select_job_info(
     sel_file = JOB_INFO_DIR / ".selected"
     sel_file.write_text(req.filename.strip(), encoding="utf-8")
     return {"selected": req.filename.strip(), "message": f"已切换到 {req.filename}"}
+
+
+@app.get("/api/admin/user-stats")
+async def get_admin_user_stats(current_user: dict = Depends(verify_token)):
+    """获取每用户操作统计（仅admin可用）"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可用")
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT
+                u.id, u.username, u.display_name, u.role, u.is_active,
+                COALESCE(cr.contact_count, 0) as contact_count,
+                COALESCE(ro.resume_count, 0) as resume_count,
+                COALESCE(cv.conv_count, 0) as conv_count,
+                COALESCE(cd.candidate_count, 0) as candidate_count
+            FROM users u
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as contact_count
+                FROM contact_records WHERE action = 'contacted'
+                GROUP BY user_id
+            ) cr ON cr.user_id = u.id
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as resume_count
+                FROM resume_operations WHERE action = 'downloaded'
+                GROUP BY user_id
+            ) ro ON ro.user_id = u.id
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as conv_count
+                FROM conversations WHERE action = 'auto_reply'
+                GROUP BY user_id
+            ) cv ON cv.user_id = u.id
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as candidate_count
+                FROM candidates
+                GROUP BY user_id
+            ) cd ON cd.user_id = u.id
+            ORDER BY u.id
+        """).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

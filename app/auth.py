@@ -118,3 +118,21 @@ def ensure_admin_user():
                 display_name="管理员",
                 role="admin",
             )
+
+
+def register_user(username: str, password: str, display_name: str = None) -> Dict:
+    """注册新用户"""
+    from app.database import Database
+    with Database() as db:
+        db.init_tables()
+        existing = db.get_user_by_username(username)
+        if existing:
+            return {"status": "error", "message": "用户名已存在"}
+        user = db.create_user(
+            username=username,
+            password_hash=hash_password(password),
+            display_name=display_name or username,
+            role="user",
+        )
+        return {"status": "ok", "user": user}
+

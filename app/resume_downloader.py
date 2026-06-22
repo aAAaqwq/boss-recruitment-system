@@ -56,24 +56,24 @@ _JS_FIND_PDF_DOWNLOAD_ARROW = """
 """
 
 
-def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str, boss_id: str = None):
+def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str, boss_id: str = None, user_id: int = None):
     """更新 candidates 表的简历路径和状态"""
     try:
         db.cursor.execute(
-            """INSERT INTO candidates (boss_id, candidate_name, status, resume_path, updated_at)
-               VALUES (%s, %s, 'resume_downloaded', %s, NOW())
+            """INSERT INTO candidates (boss_id, candidate_name, status, resume_path, updated_at, user_id)
+               VALUES (%s, %s, 'resume_downloaded', %s, NOW(), %s)
                ON CONFLICT(boss_id) DO UPDATE SET
                resume_path = excluded.resume_path,
                status = 'resume_downloaded',
                updated_at = excluded.updated_at""",
-            (boss_id or candidate_name, candidate_name, resume_path),
+            (boss_id or candidate_name, candidate_name, resume_path, user_id),
         )
         db.conn.commit()
     except Exception as e:
         logger.debug(f"[DL] 更新candidates表忽略: {e}")
 
 
-async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
+async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, user_id: int = None) -> Dict:
     """下载已获取的简历 — 主流程
 
     1. 导航聊天页 → 点"已获取简历"筛选 → 拉联系人
@@ -232,7 +232,7 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
                 if file_verified:
                     _update_candidate_resume(db, contact_name,
                                              resume_path=dl_result.get("path", ""),
-                                             boss_id=boss_id)
+                                             boss_id=boss_id, user_id=user_id)
                     downloaded += 1
                     details.append({"name": contact_name, "action": "downloaded",
                                     "file_verified": True, "path": dl_result.get("path")})
@@ -263,7 +263,7 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
                     if dl_result.get("status") == "downloaded":
                         _update_candidate_resume(db, contact_name,
                                                  resume_path=dl_result.get("path", ""),
-                                                 boss_id=boss_id)
+                                                 boss_id=boss_id, user_id=user_id)
                         downloaded += 1
                         details.append({"name": contact_name, "action": "downloaded",
                                         "file_verified": True, "path": dl_result.get("path")})

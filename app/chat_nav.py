@@ -65,13 +65,19 @@ _JS_GET_CONTACTS = """
     try {
         // 从DOM提取BOSS平台唯一ID（增强版：扫描React props + 所有属性 + 链接）
         function extractBossId(el) {
+            // 辅助：如果值是 "数字-数字" 格式（如 data-id="28717495-0"），提取数字部分
+            function cleanId(v) {
+                if (!v) return v;
+                var m = v.match(/^(\d+)-\d+$/);
+                return m ? m[1] : v;
+            }
             // 1. 扫描元素自身所有属性（含 data-uid, data-security-id, data-id 等）
             for (var a = 0; a < (el.attributes || []).length; a++) {
                 var an = el.attributes[a].name;
                 var av = el.attributes[a].value;
                 if (!av || av.length < 5) continue;
-                if (/^(data-)?(uid|userid|user-id|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(an)) {
-                    return av;
+                if (/^(data-)?(uid|userid|user-id|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(an)) {
+                    return cleanId(av);
                 }
             }
             // 2. 从链接href提取 (例: /web/chat/geek?securityId=xxx 或 /chat/xxx)
@@ -91,8 +97,8 @@ _JS_GET_CONTACTS = """
                     var kan = kids[k].attributes[b].name;
                     var kav = kids[k].attributes[b].value;
                     if (!kav || kav.length < 5) continue;
-                    if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(kan)) {
-                        return kav;
+                    if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(kan)) {
+                        return cleanId(kav);
                     }
                 }
             }
@@ -102,8 +108,8 @@ _JS_GET_CONTACTS = """
                     var pn = p.attributes[c].name;
                     var pv = p.attributes[c].value;
                     if (!pv || pv.length < 5) continue;
-                    if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid)$/i.test(pn)) {
-                        return pv;
+                    if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(pn)) {
+                        return cleanId(pv);
                     }
                 }
             }

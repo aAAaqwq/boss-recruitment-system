@@ -93,6 +93,7 @@ class Database:
                 status TEXT DEFAULT 'discovered',
                 contacted_at TEXT,
                 resume_path TEXT,
+                interview_status TEXT DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
@@ -100,6 +101,7 @@ class Database:
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_boss_id ON candidates(boss_id)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_status ON candidates(status)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_school ON candidates(school)")
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_interview_status ON candidates(interview_status)")
 
         # contact_records
         self.cursor.execute("""
@@ -207,17 +209,30 @@ class Database:
 
     def insert_candidate(self, **kwargs):
         fields = ['boss_id', 'candidate_name', 'school', 'degree', 'years',
-                  'current_title', 'expected_role', 'expected_city', 'skills', 'status']
+                  'current_title', 'expected_role', 'expected_city', 'skills', 'status', 'user_id']
         values = {k: kwargs.get(k) for k in fields if k in kwargs}
         if 'skills' in values and isinstance(values['skills'], list):
             values['skills'] = json.dumps(values['skills'])
 
         columns = ', '.join(values.keys())
         placeholders = ', '.join(['%s'] * len(values))
-        self.cursor.execute(
-            f"INSERT INTO candidates ({columns}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
-            tuple(values.values())
-        )
+        # 空字段补全：已有值不覆盖，NULL字段用新值填充
+        coalesce_cols = ['school', 'degree', 'years', 'current_title', 'expected_role', 'expected_city', 'skills']
+        coalesce_clauses = []
+        for col in coalesce_cols:
+            if col in values:
+                coalesce_clauses.append(f"{col} = COALESCE(candidates.{col}, EXCLUDED.{col})")
+        if coalesce_clauses:
+            update_clause = ", ".join(coalesce_clauses + ["updated_at = EXCLUDED.updated_at", "candidate_name = COALESCE(candidates.candidate_name, EXCLUDED.candidate_name)"])
+            self.cursor.execute(
+                f"INSERT INTO candidates ({columns}) VALUES ({placeholders}) ON CONFLICT (boss_id) DO UPDATE SET {update_clause}",
+                tuple(values.values())
+            )
+        else:
+            self.cursor.execute(
+                f"INSERT INTO candidates ({columns}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
+                tuple(values.values())
+            )
         self.conn.commit()
 
     def update_candidate_status(self, boss_id: str, status: str):
@@ -246,11 +261,11 @@ class Database:
 
     # ========== 联系记录操作 ==========
 
-    def insert_contact_record(self, boss_id: str, action: str, success: bool = True, error_message: str = None):
+    def insert_contact_record(self, boss_id: str, action: str, success: bool = True, error_message: str = None, user_id: int = None):
         today = datetime.now().date().isoformat()
         self.cursor.execute(
-            "INSERT INTO contact_records (boss_id, action, action_date, success, error_message) VALUES (%s, %s, %s, %s, %s)",
-            (boss_id, action, today, success, error_message)
+            "INSERT INTO contact_records (boss_id, action, action_date, success, error_message, user_id) VALUES (%s, %s, %s, %s, %s, %s)",
+            (boss_id, action, today, success, error_message, user_id)
         )
         self.conn.commit()
 
@@ -321,12 +336,13 @@ class Database:
     # ========== 简历操作 ==========
 
     def insert_resume_op(self, candidate_name: str, action: str, resume_downloaded: bool = False,
-                         wechat_exchanged: bool = False, detail: str = None, boss_id: str = None):
+                         wechat_exchanged: bool = False, detail: str = None, boss_id: str = None,
+                         user_id: int = None):
         self.cursor.execute(
             """INSERT INTO resume_operations
-               (boss_id, candidate_name, action, resume_downloaded, wechat_exchanged, detail)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
-            (boss_id, candidate_name, action, resume_downloaded, wechat_exchanged, detail)
+               (boss_id, candidate_name, action, resume_downloaded, wechat_exchanged, detail, user_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (boss_id, candidate_name, action, resume_downloaded, wechat_exchanged, detail, user_id)
         )
         self.conn.commit()
 
@@ -477,6 +493,58 @@ class Database:
             "reply_rate": round(replied / contacted * 100, 2) if contacted > 0 else 0,
             "resume_rate": round(resume_downloaded / replied * 100, 2) if replied > 0 else 0
         }
+
+    # ========== 面试状态 ==========
+
+    def set_candidate_interview_status(self, boss_id: str, status: str, user_id: int = None):
+        if user_id is not None:
+            self.cursor.execute(
+                "UPDATE candidates SET interview_status = %s, updated_at = NOW() WHERE boss_id = %s AND user_id = %s",
+                (status, boss_id, user_id)
+            )
+        else:
+            self.cursor.execute(
+                "UPDATE candidates SET interview_status = %s, updated_at = NOW() WHERE boss_id = %s",
+                (status, boss_id)
+            )
+        self.conn.commit()
+
+    def get_recommend_interview_candidates(self, user_id: int = None) -> List[Dict]:
+        if user_id is not None:
+            self.cursor.execute(
+                "SELECT * FROM candidates WHERE interview_status = 'recommend_interview' AND user_id = %s ORDER BY updated_at DESC",
+                (user_id,)
+            )
+        else:
+            self.cursor.execute(
+                "SELECT * FROM candidates WHERE interview_status = 'recommend_interview' ORDER BY updated_at DESC"
+            )
+        return [dict(row) for row in self.cursor.fetchall()]
+
+    def get_candidates_with_resumes(self, user_id: int = None) -> List[Dict]:
+        if user_id is not None:
+            self.cursor.execute(
+                "SELECT * FROM candidates WHERE resume_path IS NOT NULL AND resume_path != '' AND user_id = %s ORDER BY updated_at DESC",
+                (user_id,)
+            )
+        else:
+            self.cursor.execute(
+                "SELECT * FROM candidates WHERE resume_path IS NOT NULL AND resume_path != '' ORDER BY updated_at DESC"
+            )
+        return [dict(row) for row in self.cursor.fetchall()]
+
+    def has_resume_operation(self, boss_id: str, action: str, user_id: int = None) -> bool:
+        if user_id is not None:
+            self.cursor.execute(
+                "SELECT 1 FROM resume_operations WHERE boss_id = %s AND action = %s AND user_id = %s LIMIT 1",
+                (boss_id, action, user_id)
+            )
+        else:
+            self.cursor.execute(
+                "SELECT 1 FROM resume_operations WHERE boss_id = %s AND action = %s LIMIT 1",
+                (boss_id, action)
+            )
+        return self.cursor.fetchone() is not None
 
     # ========== 通用执行（供 api.py 迁移用） ==========
 

@@ -40,34 +40,18 @@ RESUMES_DIR = DATA_DIR / "resumes"
 
 _JS_FIND_RESUME_BTNS = """
 (function() {
-    var vw = Math.max(window.innerWidth, 1000);
     function findInDoc(doc) {
-        var rightArea = null;
-        var panels = doc.querySelectorAll('div, section');
-        for (var p = 0; p < panels.length; p++) {
-            var pr = panels[p].getBoundingClientRect();
-            if (pr.x > vw * 0.35 && pr.width > 200 && pr.height > 300) {
-                rightArea = panels[p]; break;
-            }
-        }
-        var root = rightArea || doc.body;
-        var btns = root.querySelectorAll('button, a, span, div[class*="btn"], div[class*="resume"]');
+        var btns = doc.querySelectorAll('button, a, span, div[class*="btn"], div[class*="resume"]');
         var results = [];
         for (var i = 0; i < btns.length; i++) {
             var t = (btns[i].innerText || '').trim();
-            if (t === '在线简历' || t === '附件简历' || t === '查看简历' || t === '查看附件') {
+            if (t === '附件简历' || t === '查看附件') {
                 var r = btns[i].getBoundingClientRect();
                 if (r.width > 0 && r.height > 0) {
                     results.push({text: t, x: r.x + r.width/2, y: r.y + r.height/2, type: t});
                 }
             }
         }
-        // 优先"附件简历"/"查看附件"
-        results.sort(function(a, b) {
-            var pa = (a.text === '附件简历' || a.text === '查看附件') ? 0 : 1;
-            var pb = (b.text === '附件简历' || b.text === '查看附件') ? 0 : 1;
-            return pa - pb;
-        });
         return results;
     }
     var results = findInDoc(document);
@@ -188,6 +172,28 @@ _JS_DETECT_RESUME_CASE = """
 })()
 """
 
+# JS: 点击BOSS引导提示的"我知道了"按钮，避免遮挡确认按钮
+_JS_CLICK_I_KNOW = """
+(function() {
+    var docs = [document];
+    var iframe = document.querySelector('.frame-box iframe') || document.querySelector('iframe');
+    if (iframe && iframe.contentDocument) docs.push(iframe.contentDocument);
+    for (var d = 0; d < docs.length; d++) {
+        var all = docs[d].querySelectorAll('button, a, span, div');
+        for (var i = 0; i < all.length; i++) {
+            if ((all[i].innerText || '').trim() === '我知道了') {
+                var r = all[i].getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    all[i].click();
+                    return {dismissed: true};
+                }
+            }
+        }
+    }
+    return {dismissed: false};
+})()
+"""
+
 # 验证右侧聊天面板是否已切换（主文档优先）
 _JS_VERIFY_CHAT_PANEL = """
 (function() {
@@ -226,17 +232,18 @@ _JS_VERIFY_CHAT_PANEL = """
 """
 
 
-def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str = "", boss_id: str = "") -> None:
+def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str = "", boss_id: str = "", user_id: int = None) -> None:
     """更新 candidates 表中的简历路径和状态（安全写入，失败不抛异常）。"""
     try:
         db.cursor.execute(
-            """INSERT INTO candidates (boss_id, candidate_name, status, resume_path, updated_at)
-               VALUES (%s, %s, 'resume_downloaded', %s, NOW())
+            """INSERT INTO candidates (boss_id, candidate_name, status, resume_path, updated_at, user_id)
+               VALUES (%s, %s, 'resume_downloaded', %s, NOW(), %s)
                ON CONFLICT(boss_id) DO UPDATE SET
                resume_path = excluded.resume_path,
                status = 'resume_downloaded',
-               updated_at = excluded.updated_at""",
-            (boss_id or candidate_name, candidate_name, resume_path),
+               updated_at = excluded.updated_at,
+               user_id = COALESCE(excluded.user_id, candidates.user_id)""",
+            (boss_id or candidate_name, candidate_name, resume_path, user_id),
         )
         db.conn.commit()
         logger.info(f"[F6] candidates表已更新: {candidate_name} resume={resume_path}")
@@ -244,7 +251,7 @@ def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str
         logger.debug(f"[F6] 更新candidates表忽略: {e}")
 
 
-async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
+async def collect_resumes(max_count: int = 10, dry_run: bool = False, user_id: int = None) -> Dict:
     """收集简历主流程
 
     Args:
@@ -370,7 +377,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
 
         # 检查去重（用平台唯一ID）
         try:
-            existing = db.get_resume_ops(boss_id=boss_id)
+            existing = db.get_resume_ops(boss_id=boss_id, user_id=user_id)
         except Exception:
             existing = []
         if existing:
@@ -459,7 +466,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             if ai_decision == "FAREWELL":
                 # 我们已发过祝福告别，不回复也不取简历
                 logger.info(f"[F6] {contact_name}: 已告别过，跳过")
-                _record_resume_op(db, contact_name, "farewell", btn_text="ai_farewell", boss_id=boss_id)
+                _record_resume_op(db, contact_name, "farewell", btn_text="ai_farewell", boss_id=boss_id, user_id=user_id)
                 skipped += 1
                 details.append({"name": contact_name, "action": "skipped", "reason": "已祝福告别"})
                 continue
@@ -468,7 +475,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
                 logger.info(f"[F6] {contact_name}: 对方拒绝，礼貌回复后跳过")
                 await type_and_send("好的，了解了，打扰您了")
                 await asyncio.sleep(1.5)
-                _record_resume_op(db, contact_name, "rejected", btn_text="ai_rejection", boss_id=boss_id)
+                _record_resume_op(db, contact_name, "rejected", btn_text="ai_rejection", boss_id=boss_id, user_id=user_id)
                 skipped += 1
                 details.append({"name": contact_name, "action": "skipped", "reason": "对方拒绝"})
                 continue
@@ -500,38 +507,29 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
             skipped += 1
             continue
 
-        # 点击第一个简历按钮（使用 CDP viewport 点击）
+        # 点击"附件简历"按钮
         btn = btns[0]
-        logger.info(f"[F6] {contact_name} 点击简历按钮: {btn.get('text')} ({btn.get('type')})")
+        logger.info(f"[F6] {contact_name} 点击: {btn.get('text')}")
+
+        # 点击前先关引导（"我知道了"）
+        guide = await automation.execute_js(_JS_CLICK_I_KNOW)
+        if isinstance(guide, dict) and guide.get("dismissed"):
+            logger.info(f"[F6] {contact_name}: 已关闭引导提示")
+            await asyncio.sleep(0.5)
+
         try:
             ok = await automation.cdp_click_viewport(float(btn["x"]), float(btn["y"]))
             if not ok:
-                logger.warning(f"[F6] CDP点击简历按钮失败: ({btn['x']}, {btn['y']})")
+                logger.warning(f"[F6] CDP点击附件简历失败: ({btn['x']}, {btn['y']})")
                 failed += 1
                 continue
             await asyncio.sleep(3)
         except Exception as e:
-            logger.warning(f"[F6] 点击简历按钮失败: {e}")
+            logger.warning(f"[F6] 点击附件简历失败: {e}")
             failed += 1
             continue
 
-        # 弹窗/模态框出现后，扫描是否有"附件简历"入口
-        # 处理"在线简历"弹窗上也有"附件简历"按钮的情况
-        if btn.get("text") != "附件简历" and btn.get("text") != "查看附件":
-            try:
-                modal_btn = await automation.execute_js(_JS_FIND_MODAL_ATTACHMENT)
-                if isinstance(modal_btn, dict) and modal_btn.get("found"):
-                    logger.info(f"[F6] {contact_name} 弹窗上发现附件入口: {modal_btn.get('text')}")
-                    await automation.cdp_click_viewport(
-                        float(modal_btn["x"]), float(modal_btn["y"])
-                    )
-                    await asyncio.sleep(3)
-                    # 更新 btn 为实际点击的附件按钮
-                    btn = {"text": modal_btn.get("text", "附件简历"), "x": modal_btn["x"], "y": modal_btn["y"]}
-            except Exception as e:
-                logger.debug(f"[F6] 扫描弹窗附件按钮失败: {e}")
-
-        # 检测弹出内容类型 — 区分 4 种 Case
+        # 检测弹出内容
         case_info = await _detect_resume_case()
         case_type = case_info.get("case_type", "unknown")
         logger.info(f"[F6] {contact_name} 弹出类型: {case_type}")
@@ -539,7 +537,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         if case_type == "pdf_preview":
             # Case-1: PDF预览 — 下载
             ok = await _handle_case1_download(
-                contact_name, btn, db, details, downloaded, boss_id=boss_id
+                contact_name, btn, db, details, downloaded, boss_id=boss_id, user_id=user_id
             )
             if ok:
                 downloaded += 1
@@ -550,77 +548,27 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
         elif case_type == "request_popup":
             # Case-2: "向牛人请求简历" 弹窗 — 点确认
             await _handle_case2_confirm(
-                contact_name, case_info, btn, db, details, boss_id=boss_id
+                contact_name, case_info, btn, db, details, boss_id=boss_id, user_id=user_id
             )
             resume_ops += 1
 
         elif case_type == "request_pending":
-            # Case-3: "附件简历请求中" — 跳过
+            # Case-3: "简历请求中" — 跳过
             logger.info(f"[F6] {contact_name}: 简历请求中，跳过")
             details.append({"name": contact_name, "action": "requested_pending"})
             _record_resume_op(db, contact_name, "requested_pending",
-                              btn_text=btn.get("text"), boss_id=boss_id)
+                              btn_text=btn.get("text"), boss_id=boss_id, user_id=user_id)
 
         elif case_type == "need_reply":
-            # Case-4: "双方回复后可以向TA请求" — 跳过
+            # Case-4: "双方回复后可以请求" — 跳过
             logger.info(f"[F6] {contact_name}: 沟通不足，无法索取简历")
             details.append({"name": contact_name, "action": "need_reply"})
             _record_resume_op(db, contact_name, "need_reply",
-                              btn_text=btn.get("text"), boss_id=boss_id)
-
-        elif case_type == "online_resume":
-            # Case-5: 在线简历模态框 — 只有结构化数据，无附件可下载
-            # 先尝试在模态框上再找一次下载/附件按钮（可能之前没扫到）
-            dl = None
-            try:
-                dl = await automation.execute_js(_JS_FIND_DOWNLOAD_BTN)
-            except Exception:
-                pass
-            if dl and dl.get("found"):
-                logger.info(f"[F6] {contact_name}: 在线简历弹窗上找到下载按钮，尝试下载")
-                try:
-                    before_snap = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
-                    await automation.cdp_click_viewport(float(dl["x"]), float(dl["y"]))
-                    dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=30.0, before_files=before_snap)
-                    file_verified = dl_result.get("status") == "downloaded"
-                    if file_verified:
-                        _update_candidate_resume(db, contact_name, resume_path=dl_result.get("path", ""), boss_id=boss_id)
-                        downloaded += 1
-                        resume_ops += 1
-                        details.append({"name": contact_name, "action": "downloaded", "btn_type": btn.get("text"),
-                                        "file_verified": True, "case": "online_resume_then_download"})
-                        db.insert_resume_op(boss_id=boss_id, candidate_name=contact_name, action="downloaded", resume_downloaded=True,
-                                            detail=json.dumps({"case": "online_resume_then_download", "time": datetime.now().isoformat()}))
-                    else:
-                        details.append({"name": contact_name, "action": "online_resume_viewed", "btn_type": btn.get("text")})
-                        _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"), boss_id=boss_id)
-                except Exception:
-                    details.append({"name": contact_name, "action": "online_resume_viewed", "btn_type": btn.get("text")})
-                    _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"), boss_id=boss_id)
-            else:
-                logger.info(f"[F6] {contact_name}: 仅在线简历（无附件），截图记录")
-                details.append({"name": contact_name, "action": "online_resume_viewed", "btn_type": btn.get("text")})
-                _record_resume_op(db, contact_name, "online_resume_viewed", btn_text=btn.get("text"), boss_id=boss_id)
+                              btn_text=btn.get("text"), boss_id=boss_id, user_id=user_id)
 
         else:
-            # 未知: 尝试查找下载按钮，兼容旧逻辑
-            dl = None
-            try:
-                dl = await automation.execute_js(_JS_FIND_DOWNLOAD_BTN)
-            except Exception:
-                pass
-
-            if dl and dl.get("found"):
-                downloaded += 1
-                resume_ops += 1
-                await _click_download(contact_name, btn, db, details, boss_id=boss_id)
-            else:
-                details.append({
-                    "name": contact_name, "action": "unknown_case",
-                    "btn_type": btn.get("text"),
-                })
-                _record_resume_op(db, contact_name, "requested",
-                                  btn_text=btn.get("text"), boss_id=boss_id)
+            logger.info(f"[F6] {contact_name}: 无附件简历 (case={case_type})，跳过")
+            details.append({"name": contact_name, "action": "no_attachment", "case_type": case_type})
 
         # 关闭预览 + 返回聊天列表
         try:
@@ -888,60 +836,27 @@ async def _handle_case2_confirm(
     db: Database,
     details: list,
     boss_id: str = None,
+    user_id: int = None,
 ) -> None:
-    """Case-2: "向牛人请求简历"弹窗 → 点确认 → 检测是否有PDF。"""
+    """Case-2: "向牛人请求简历"弹窗 → 点确认 → 记录已请求。"""
     confirm_x = case_info.get("x")
     confirm_y = case_info.get("y")
 
     if confirm_x is not None and confirm_y is not None:
+        # 先关BOSS引导提示，避免遮挡确认按钮
+        guide = await automation.execute_js(_JS_CLICK_I_KNOW)
+        if isinstance(guide, dict) and guide.get("dismissed"):
+            logger.info(f"[F6] {contact_name}: 已关闭引导提示")
+            await asyncio.sleep(0.5)
         try:
             ok = await automation.cdp_click_viewport(float(confirm_x), float(confirm_y))
             if not ok:
-                logger.warning(f"[F6] CDP点击确认按钮失败")
-            await asyncio.sleep(3)
+                logger.warning(f"[F6] {contact_name}: CDP点击确认按钮失败")
+            await asyncio.sleep(2)
         except Exception as e:
-            logger.warning(f"[F6] 确认按钮点击失败: {e}")
+            logger.warning(f"[F6] {contact_name}: 确认按钮点击失败: {e}")
 
-        # 确认后PDF可能弹出 → 再检测一次
-        post_case = await _detect_resume_case()
-        if post_case.get("case_type") == "pdf_preview":
-            logger.info(f"[F6] {contact_name}: 确认后PDF弹出，尝试下载")
-            try:
-                dl = await automation.execute_js(_JS_FIND_DOWNLOAD_BTN)
-                if dl and dl.get("found"):
-                    ok = await automation.cdp_click_viewport(float(dl["x"]), float(dl["y"]))
-                    if not ok:
-                        logger.warning(f"[F6] CDP点击下载按钮(confirm后)失败")
-                    await asyncio.sleep(4)
-                    # 确认下载
-                    before_snap = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
-                    dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=15.0, before_files=before_snap)
-                    file_verified = dl_result.get("status") == "downloaded"
-                    if file_verified:
-                        _update_candidate_resume(
-                            db, contact_name,
-                            resume_path=dl_result.get("path", ""),
-                            boss_id=boss_id,
-                        )
-                    details.append({
-                        "name": contact_name,
-                        "action": "downloaded_after_confirm",
-                        "btn_type": btn.get("text"),
-                        "file_verified": file_verified,
-                    })
-                    db.insert_resume_op(
-                        boss_id=boss_id, candidate_name=contact_name, action="downloaded",
-                        resume_downloaded=True,
-                        detail=json.dumps({
-                            "case": "request_popup_then_pdf",
-                            "time": datetime.now().isoformat(),
-                        }),
-                    )
-                    return
-            except Exception:
-                pass
-
-    # 确认后无PDF → 记录为已请求
+    # 记录已请求简历
     details.append({
         "name": contact_name, "action": "requested",
         "btn_type": btn.get("text"),
@@ -954,6 +869,7 @@ async def _handle_case2_confirm(
             "btn": btn.get("text"),
             "time": datetime.now().isoformat(),
         }),
+        user_id=user_id,
     )
 
 
@@ -963,6 +879,7 @@ async def _click_download(
     db: Database,
     details: list,
     boss_id: str = None,
+    user_id: int = None,
 ) -> None:
     """旧逻辑兜底: 尝试点击下载按钮。"""
     existing_files = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
@@ -987,6 +904,7 @@ async def _click_download(
                     "file_verified": file_appeared,
                     "time": datetime.now().isoformat(),
                 }),
+                user_id=user_id,
             )
     except Exception as e:
         logger.warning(f"[F6] 兜底下载失败: {e}")
@@ -998,6 +916,7 @@ def _record_resume_op(
     action: str,
     btn_text: str = None,
     boss_id: str = None,
+    user_id: int = None,
 ) -> None:
     """安全记录简历操作到DB。"""
     try:
@@ -1010,6 +929,7 @@ def _record_resume_op(
                 "btn": btn_text,
                 "time": datetime.now().isoformat(),
             }),
+            user_id=user_id,
         )
     except Exception as exc:
         logger.warning(f"[F6] DB记录失败 ({contact_name} {action}): {exc}")

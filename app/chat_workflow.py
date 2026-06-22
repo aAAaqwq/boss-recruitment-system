@@ -180,6 +180,7 @@ async def _batch_reply_impl(
     max_count: int = 10,
     template: Optional[str] = None,
     dry_run: bool = True,
+    user_id: int = None,
 ) -> Dict:
     """批量回复未读消息核心逻辑 (async)
 
@@ -236,22 +237,26 @@ async def _batch_reply_impl(
     db.init_tables()
 
     try:
-        targets = valid_contacts[:max_count]
-        logger.info(f"[F7] 处理前 {len(targets)} 个")
+        logger.info(f"[F7] 候选 {len(valid_contacts)} 个未读联系人，目标回复 {max_count} 个")
 
-        for i, contact in enumerate(targets):
+        contact_idx = 0
+        for contact in valid_contacts:
             # 检查取消信号
             if cancel_event.is_set():
                 logger.info("[F7] 检测到取消信号，停止")
                 break
+            # 已回复够数，退出
+            if replied >= max_count:
+                break
 
+            contact_idx += 1
             name = contact.get("name", "未知")
             subtitle = contact.get("subtitle", "")
             contact_x = contact.get("x", 0)
             contact_y = contact.get("y", 0)
             boss_id = contact.get("boss_id") or name  # 优先使用平台唯一ID
 
-            logger.info(f"[F7] ({i+1}/{len(targets)}) 处理: {name} ({subtitle})")
+            logger.info(f"[F7] ({contact_idx}/{len(valid_contacts)}, 已回复{replied}/{max_count}) 处理: {name} ({subtitle})")
 
             # 0. 限制弹窗检测 — 命中则终止循环
             limit_kw = await check_limit_popup()
@@ -346,10 +351,11 @@ async def _batch_reply_impl(
                         candidate_message=candidate_msg,
                         ai_message=reply,
                         action="auto_reply",
+                        user_id=user_id,
                     )
                     # 同时记录到 contact_records
                     db.insert_contact_record(
-                        boss_id=boss_id, action="replied", success=True,
+                        boss_id=boss_id, action="replied", success=True, user_id=user_id,
                     )
                 except Exception as e:
                     logger.warning(f"[F7] DB保存失败: {e}")
@@ -374,10 +380,10 @@ async def _batch_reply_impl(
             "replied": replied,
             "failed": failed,
             "skipped": skipped,
-            "total_scanned": len(targets),
+            "total_scanned": contact_idx,
             "dry_run": dry_run,
             "results": results,
-            "message": f"批量回复完成: 成功{replied}, 失败{failed}, 跳过{skipped}, 共扫描{len(targets)}人",
+            "message": f"批量回复完成: 成功{replied}, 失败{failed}, 跳过{skipped}, 共扫描{contact_idx}人",
         }
         logger.info(f"[F7] 完成: {summary['message']}")
         return summary
