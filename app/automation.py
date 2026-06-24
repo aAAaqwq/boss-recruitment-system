@@ -236,6 +236,12 @@ class BrowserAutomation:
         display = os.environ.get("DISPLAY", ":1")
         env = {**os.environ, "DISPLAY": display}
 
+        # 清理Chrome僵尸锁文件（上次非正常退出残留）
+        import glob as _glob
+        for _f in _glob.glob(f"{user_data}/Singleton*"):
+            try: os.remove(_f)
+            except OSError: pass
+
         # 找 Chrome 二进制
         chrome_bin = "google-chrome"
         for candidate in ["google-chrome-stable", "google-chrome", "chromium-browser", "chromium"]:

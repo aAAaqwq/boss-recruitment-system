@@ -835,6 +835,8 @@ class BatchResumeRequest(BaseModel):
     candidate_ids: Optional[List[str]] = None  # 指定候选人ID列表
     dry_run: bool = False  # 干跑模式（只扫描不操作）
     interview_type: Optional[str] = None  # "线下" / "线上" / None(不限)
+    interview_time: Optional[str] = None  # "hh:mm" 如 "08:00"
+    interview_date: Optional[str] = None  # "YYYY-MM-DD" 如 "2026-06-25"
 
 
 class ResumeInfo(BaseModel):
@@ -1226,17 +1228,19 @@ async def batch_invite_interview(
 
     user_id = current_user.get("id") or current_user.get("user_id")
     interview_type = req.interview_type
+    interview_time = req.interview_time
+    interview_date = req.interview_date
     import threading as _th
     _th.Thread(
         target=_run_invite_interview_in_thread,
-        args=(req.limit, user_id, interview_type),
+        args=(req.limit, user_id, interview_type, interview_time, interview_date),
         daemon=True,
     ).start()
 
     return {"status": "started", "message": f"批量约面试任务已启动，上限 {req.limit} 人"}
 
 
-def _run_invite_interview_in_thread(max_count: int, user_id: int = None, interview_type: str = None):
+def _run_invite_interview_in_thread(max_count: int, user_id: int = None, interview_type: str = None, interview_time: str = None, interview_date: str = None):
     global _interview_invite_task_status, _active_task_type
     import asyncio as _asyncio
 
@@ -1265,7 +1269,7 @@ def _run_invite_interview_in_thread(max_count: int, user_id: int = None, intervi
                 _interview_invite_task_status["message"] = "BOSS直聘未登录，请先在Dashboard中登录"
                 return
 
-            result = await _batch_invite_interview_impl(max_count, user_id=user_id, interview_type=interview_type)
+            result = await _batch_invite_interview_impl(max_count, user_id=user_id, interview_type=interview_type, interview_time=interview_time, interview_date=interview_date)
             _interview_invite_task_status["status"] = result.get("status", "completed")
             _interview_invite_task_status["invited"] = result.get("invited", 0)
             _interview_invite_task_status["skipped"] = result.get("skipped", 0)

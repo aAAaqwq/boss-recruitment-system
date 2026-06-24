@@ -16,6 +16,7 @@ from app.chat_nav import (
     navigate_to_chat, get_messages,
     type_and_send, click_contact,
     check_limit_popup, dismiss_popup,
+    refind_contact, scroll_contact_into_view,
 )
 from app.chat_service import chat_service
 from app.chat_stage import (
@@ -265,7 +266,18 @@ async def _batch_reply_impl(
                 await dismiss_popup()
                 break
 
-            # a. 点击联系人
+            # a. 重新定位+滚动（消息可能压下去旧联系人）
+            fresh = await refind_contact(name)
+            if fresh and fresh.get("x"):
+                contact_x, contact_y = fresh["x"], fresh["y"]
+            if not fresh or not fresh.get("visible", True):
+                await scroll_contact_into_view(name)
+                await asyncio.sleep(0.5)
+                fresh = await refind_contact(name)
+                if fresh and fresh.get("x"):
+                    contact_x, contact_y = fresh["x"], fresh["y"]
+
+            # b. 点击联系人
             if not await click_contact(name, contact_x, contact_y):
                 logger.warning(f"[F7] 点击联系人失败: {name}")
                 failed += 1
@@ -274,7 +286,7 @@ async def _batch_reply_impl(
 
             await asyncio.sleep(2)
 
-            # b. 获取完整聊天消息
+            # c. 获取完整聊天消息
             messages = await get_messages()
             logger.info(f"[F7] {name}: 提取到 {len(messages)} 条消息")
             for mi, m in enumerate(messages):

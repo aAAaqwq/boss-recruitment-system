@@ -120,8 +120,166 @@ _JS_CLICK_INTERVIEW_TYPE = """
 })()
 """
 
+# JS: 获取日期选择器输入框坐标
+_JS_GET_DATE_TRIGGER = """
+(function() {
+    var dialogs = document.querySelectorAll('[class*="dialog"], [class*="modal"], [class*="popup"]');
+    for (var i = 0; i < dialogs.length; i++) {
+        var d = dialogs[i];
+        if (d.offsetParent === null || (d.style.display && d.style.display === 'none')) continue;
+        var trigger = d.querySelector('.datepicker-wrap .input-wrap') || d.querySelector('.ui-date-picker-v2 .input-wrap') || d.querySelector('.datepicker-wrap input.input');
+        if (trigger && trigger.offsetParent !== null) {
+            var br = trigger.getBoundingClientRect();
+            return {found: true, x: br.x + br.width/2, y: br.y + br.height/2};
+        }
+    }
+    return {found: false};
+})()
+"""
 
-async def _batch_invite_interview_impl(max_count: int = 10, user_id: int = None, interview_type: str = None) -> Dict:
+# JS: 获取"开始时间"下拉框坐标
+_JS_GET_TIME_TRIGGER = """
+(function() {
+    var dialogs = document.querySelectorAll('[class*="dialog"], [class*="modal"], [class*="popup"]');
+    for (var i = 0; i < dialogs.length; i++) {
+        var d = dialogs[i];
+        if (d.offsetParent === null) continue;
+        var trigger = d.querySelector('.time-select-container .dropdown-select') || d.querySelector('.time-select-container input.time-select') || d.querySelector('.time-select-container');
+        if (trigger && trigger.offsetParent !== null) {
+            var br = trigger.getBoundingClientRect();
+            return {found: true, x: br.x + br.width/2, y: br.y + br.height/2};
+        }
+    }
+    return {found: false};
+})()
+"""
+
+# JS: 获取时间面板中指定小时选项坐标（先滚动再获取）
+_JS_GET_HOUR = """
+(function() {
+    var target = '%s';
+    var container = document.querySelector('.time-container');
+    if (!container) return {found: false};
+    var lis = container.querySelectorAll('li');
+    for (var i = 0; i < lis.length; i++) {
+        var t = (lis[i].innerText||'').trim();
+        if (t !== target) continue;
+        var r = lis[i].getBoundingClientRect();
+        if (r.x < 1100) {
+            lis[i].scrollIntoView({block: 'nearest', behavior: 'instant'});
+            r = lis[i].getBoundingClientRect();
+            return {found: true, text: t, x: r.x + r.width/2, y: r.y + r.height/2};
+        }
+    }
+    return {found: false};
+})()
+"""
+
+# JS: 获取时间面板中指定分钟选项坐标（先滚动再获取）
+_JS_GET_MINUTE = """
+(function() {
+    var target = '%s';
+    var container = document.querySelector('.time-container');
+    if (!container) return {found: false};
+    var lis = container.querySelectorAll('li');
+    for (var i = 0; i < lis.length; i++) {
+        var t = (lis[i].innerText||'').trim();
+        if (t !== target) continue;
+        var r = lis[i].getBoundingClientRect();
+        if (r.x >= 1100) {
+            lis[i].scrollIntoView({block: 'nearest', behavior: 'instant'});
+            r = lis[i].getBoundingClientRect();
+            return {found: true, text: t, x: r.x + r.width/2, y: r.y + r.height/2};
+        }
+    }
+    return {found: false};
+})()
+"""
+
+# JS: 获取"今"今天日期坐标
+_JS_CLICK_TODAY = """
+(function() {
+    var cells = document.querySelectorAll('.cell.day.today');
+    for (var i = 0; i < cells.length; i++) {
+        var r = cells[i].getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+            return {found: true, text: '今天', x: r.x + r.width/2, y: r.y + r.height/2};
+        }
+    }
+    return {found: false};
+})()
+"""
+
+# JS: 读取日历面板当前显示的月份/年份（只搜日历容器内部，兼容中文月份）
+_JS_GET_CALENDAR_MONTH = """
+(function() {
+    var CN = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10,'十一':11,'十二':12};
+    var containers = document.querySelectorAll('.datepicker-wrap, .ui-date-picker-v2');
+    for (var i = 0; i < containers.length; i++) {
+        var c = containers[i];
+        var cr = c.getBoundingClientRect();
+        if (cr.width < 100) continue;
+        var els = c.querySelectorAll('span, div');
+        for (var j = 0; j < els.length; j++) {
+            var text = (els[j].innerText || '').trim();
+            // 1) 中文月份优先: "2026年 六月"（用非贪婪避免跳过月份名）
+            var cm = text.match(/(\d{4})\D*?([一二三四五六七八九十]{1,3})月?/);
+            if (cm && CN[cm[2]]) {
+                return {found: true, year: parseInt(cm[1]), month: CN[cm[2]], text: text};
+            }
+            // 2) 数字月份: "2026年6月" 或 "2026/6"（严格限定月紧跟在年后）
+            var m = text.match(/(\d{4})\s*[年\/\-]?\s*(\d{1,2})\s*月/);
+            if (m && parseInt(m[2]) >= 1 && parseInt(m[2]) <= 12) {
+                return {found: true, year: parseInt(m[1]), month: parseInt(m[2]), text: text};
+            }
+        }
+    }
+    return {found: false};
+})()
+"""
+
+# JS: 在日历面板中查找指定日期单元格坐标
+_JS_CLICK_DATE = """
+(function() {
+    var targetDate = '%s';
+    var parts = targetDate.split('-');
+    var targetDay = String(parseInt(parts[2]));
+    // 在所有可见日历面板中搜索
+    var cells = document.querySelectorAll('.cell.day');
+    for (var i = 0; i < cells.length; i++) {
+        var cell = cells[i];
+        var text = (cell.innerText || '').trim();
+        if (text !== targetDay) continue;
+        var cls = cell.className || '';
+        // 只跳过明确置灰/不可用的日期
+        if (cls.indexOf('disabled') >= 0) continue;
+        var r = cell.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+            return {found: true, text: text, x: r.x + r.width/2, y: r.y + r.height/2};
+        }
+    }
+    return {found: false};
+})()
+"""
+
+# JS: 在日历面板中找下个月箭头的坐标（用于CDP点击）
+_JS_FIND_NEXT_MONTH = """
+(function() {
+    // BOSS日历下月箭头是 SPAN.next 或类似元素
+    var arrows = document.querySelectorAll('.next, [class*="next"]');
+    for (var i = 0; i < arrows.length; i++) {
+        var r = arrows[i].getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && r.width < 80 && r.height < 40) {
+            return {found: true, x: r.x + r.width/2, y: r.y + r.height/2,
+                    tag: arrows[i].tagName};
+        }
+    }
+    return {found: false};
+})()
+"""
+
+
+async def _batch_invite_interview_impl(max_count: int = 10, user_id: int = None, interview_type: str = None, interview_time: str = None, interview_date: str = None) -> Dict:
     """批量约面试核心逻辑（测试模式：点取消不真约）"""
     if not await automation._ensure_session():
         return {"status": "error", "message": "浏览器未连接"}
@@ -229,8 +387,111 @@ async def _batch_invite_interview_impl(max_count: int = 10, user_id: int = None,
             if isinstance(type_btn, dict) and type_btn.get("found"):
                 logger.info(f"[F9] {contact_name}: 已点击'{type_btn['text']}'")
                 await asyncio.sleep(0.5)
+
+        # 展开日期选择器：点 datepicker input
+        date_info = await automation.execute_js(_JS_GET_DATE_TRIGGER)
+        if isinstance(date_info, dict) and date_info.get("found"):
+            dx = date_info.get("x"); dy = date_info.get("y")
+            if dx and dy:
+                await automation.cdp_click_viewport(float(dx), float(dy))
+                logger.info(f"[F9] {contact_name}: 已展开日期选择器 → ({dx:.0f},{dy:.0f})")
+            await asyncio.sleep(1.2)
+
+        # 选日期
+        if interview_date:
+            parts = interview_date.split('-')
+            target_year = int(parts[0])
+            target_month = int(parts[1])
+
+            # 先检查日历面板当前显示的是哪个月
+            cal_month = await automation.execute_js(_JS_GET_CALENDAR_MONTH)
+            logger.info(f"[F9] {contact_name}: 日历面板显示 → {cal_month}")
+
+            # 月份不对则切月份
+            if isinstance(cal_month, dict) and cal_month.get("found"):
+                disp_year = cal_month.get("year", 0)
+                disp_month = cal_month.get("month", 0)
+                if target_year != disp_year or target_month != disp_month:
+                    nav = await automation.execute_js(_JS_FIND_NEXT_MONTH)
+                    logger.info(f"[F9] {contact_name}: 需从{disp_month}月切到{target_month}月, 找箭头 → {nav}")
+                    if isinstance(nav, dict) and nav.get("found"):
+                        await automation.cdp_click_viewport(float(nav["x"]), float(nav["y"]))
+                        logger.info(f"[F9] {contact_name}: 已点击下个月箭头 tag={nav.get('tag')} ({nav.get('w')}x{nav.get('h')})")
+                        await asyncio.sleep(0.8)
+                    else:
+                        logger.warning(f"[F9] {contact_name}: 未找到下个月箭头!")
+                else:
+                    logger.info(f"[F9] {contact_name}: 日历已显示{target_month}月，无需切换")
+
+            # 找目标日期单元格
+            date_js = _JS_CLICK_DATE % interview_date
+            date_found = await automation.execute_js(date_js)
+            logger.info(f"[F9] {contact_name}: 查找日期 {interview_date} → {date_found}")
+
+            if isinstance(date_found, dict) and date_found.get("found"):
+                dx = date_found.get("x"); dy = date_found.get("y")
+                if dx and dy:
+                    await automation.cdp_click_viewport(float(dx), float(dy))
+                    logger.info(f"[F9] {contact_name}: 已选日期: {date_found['text']}号 → ({dx:.0f},{dy:.0f})")
+                await asyncio.sleep(0.5)
             else:
-                logger.warning(f"[F9] {contact_name}: 未找到'{interview_type}'按钮")
+                # 回退到"今"
+                logger.warning(f"[F9] {contact_name}: 未找到日期 {interview_date}，回退到今天")
+                today_info = await automation.execute_js(_JS_CLICK_TODAY)
+                if isinstance(today_info, dict) and today_info.get("found"):
+                    tx = today_info.get("x"); ty = today_info.get("y")
+                    if tx and ty:
+                        await automation.cdp_click_viewport(float(tx), float(ty))
+                    await asyncio.sleep(0.5)
+        else:
+            # 默认今天
+            today_info = await automation.execute_js(_JS_CLICK_TODAY)
+            if isinstance(today_info, dict) and today_info.get("found"):
+                tx = today_info.get("x"); ty = today_info.get("y")
+                if tx and ty:
+                    await automation.cdp_click_viewport(float(tx), float(ty))
+                    logger.info(f"[F9] {contact_name}: 已选日期: 今天")
+                await asyncio.sleep(0.5)
+
+        # 展开时间选择器：点"开始时间"下拉框
+        time_info = await automation.execute_js(_JS_GET_TIME_TRIGGER)
+        if isinstance(time_info, dict) and time_info.get("found"):
+            tix = time_info.get("x"); tiy = time_info.get("y")
+            if tix and tiy:
+                await automation.cdp_click_viewport(float(tix), float(tiy))
+                logger.info(f"[F9] {contact_name}: 已展开时间选择器 → ({tix:.0f},{tiy:.0f})")
+            await asyncio.sleep(1.0)
+
+        # 选面试时间：按参数指定的小时和分钟
+        if interview_time and ':' in str(interview_time):
+            parts = str(interview_time).split(':')
+            sel_hour = parts[0]; sel_min = parts[1] if len(parts) > 1 else '05'
+        else:
+            sel_hour = '08'; sel_min = '05'
+
+        hour_js = _JS_GET_HOUR % sel_hour
+        hour_info = await automation.execute_js(hour_js)
+        if isinstance(hour_info, dict) and hour_info.get("found"):
+            hx = hour_info.get("x"); hy = hour_info.get("y")
+            if hx and hy:
+                await asyncio.sleep(0.15)
+                await automation.cdp_click_viewport(float(hx), float(hy))
+                logger.info(f"[F9] {contact_name}: 已选小时: {sel_hour} → ({hx:.0f},{hy:.0f})")
+            await asyncio.sleep(0.3)
+        else:
+            logger.warning(f"[F9] {contact_name}: 未找到小时选项 '{sel_hour}'")
+
+        min_js = _JS_GET_MINUTE % sel_min
+        min_info = await automation.execute_js(min_js)
+        if isinstance(min_info, dict) and min_info.get("found"):
+            mx = min_info.get("x"); my = min_info.get("y")
+            if mx and my:
+                await asyncio.sleep(0.15)
+                await automation.cdp_click_viewport(float(mx), float(my))
+                logger.info(f"[F9] {contact_name}: 已选分钟: {sel_min} → ({mx:.0f},{my:.0f})")
+            await asyncio.sleep(0.5)
+        else:
+            logger.warning(f"[F9] {contact_name}: 未找到分钟选项 '{sel_min}'")
 
         # 找弹窗"取消"按钮
         cancel_btn = await automation.execute_js(_JS_FIND_CANCEL_BTN)
