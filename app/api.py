@@ -69,6 +69,10 @@ app.add_middleware(
 # 模板和静态文件
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+# 挂载 noVNC 静态文件（用于代理 VNC 桌面）
+_novnc_path = "/usr/share/novnc"
+if os.path.isdir(_novnc_path):
+    app.mount("/novnc", StaticFiles(directory=_novnc_path, html=True), name="novnc")
 
 # ============================================================
 # 平台自适应配置
@@ -617,14 +621,14 @@ async def browser_type_send(req: ExecuteScriptRequest):
 
 
 @app.post("/api/browser/open-boss")
-async def open_boss_browser():
+async def open_boss_browser(current_user: dict = Depends(verify_token)):
     """打开BOSS直聘 - 复用已有Chrome或启动新实例，然后导航到zhipin.com
 
     智能流程：
     1. 如果 automation 已连接且有活跃 session → 直接导航
     2. 如果 CDP 9222 端口有 Chrome 但未连接 → connect() 复用
     3. 否则 → connect() 自动启动新 Chrome（带 --no-sandbox）
-    4. 导航到 zhipin.com + 注入 cookie
+    4. 导航到 zhipin.com + 注入当前用户的 cookie
     """
     import socket
 
@@ -649,10 +653,11 @@ async def open_boss_browser():
     nav_result = await automation.navigate("https://www.zhipin.com/")
     await asyncio.sleep(3)
 
-    # Step 5: 注入已保存的 cookie
+    # Step 5: 注入当前用户的 BOSS cookie
+    user_id = current_user.get("id") or current_user.get("user_id")
     cookie_result = None
     try:
-        cookie_result = await automation.import_cookies()
+        cookie_result = await automation.import_cookies(user_id=user_id)
         api_logger.info(f"Cookie注入结果: {cookie_result}")
         if cookie_result and cookie_result.get("imported", 0) > 0:
             await asyncio.sleep(1)
@@ -671,29 +676,32 @@ async def open_boss_browser():
 
 
 @app.get("/api/browser/check-login")
-async def check_browser_login():
+async def check_browser_login(current_user: dict = Depends(verify_token)):
     """检测 BOSS直聘登录状态"""
-    return await automation.check_login()
+    user_id = current_user.get("id") or current_user.get("user_id")
+    return await automation.check_login(user_id=user_id)
 
 
 @app.post("/api/browser/export-cookies")
-async def export_cookies():
-    """导出当前浏览器的所有 cookie 到 /app/data/cookies.json
+async def export_cookies(current_user: dict = Depends(verify_token)):
+    """导出当前浏览器的所有 cookie 到按用户隔离的文件
 
     用于持久化登录态：在浏览器已登录时调用，
     将 cookie 导出为 JSON 文件保存到 Docker volume 中。
     """
-    return await automation.export_cookies()
+    user_id = current_user.get("id") or current_user.get("user_id")
+    return await automation.export_cookies(user_id=user_id)
 
 
 @app.post("/api/browser/import-cookies")
-async def import_cookies():
-    """从 /app/data/cookies.json 恢复 cookie 到浏览器
+async def import_cookies(current_user: dict = Depends(verify_token)):
+    """从按用户隔离的文件恢复 cookie 到浏览器
 
     用于恢复登录态：浏览器启动后调用，
     将之前导出的 cookie 写入浏览器以恢复登录状态。
     """
-    return await automation.import_cookies()
+    user_id = current_user.get("id") or current_user.get("user_id")
+    return await automation.import_cookies(user_id=user_id)
 
 
 # ============================================================
@@ -778,7 +786,7 @@ def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template:
                 _reply_task_status["message"] = "浏览器连接失败"
                 return
 
-            await automation.import_cookies()
+            await automation.import_cookies(user_id=user_id)
 
             result = await _batch_reply_impl(
                 max_count=max_count,
@@ -837,6 +845,7 @@ class BatchResumeRequest(BaseModel):
     interview_type: Optional[str] = None  # "线下" / "线上" / None(不限)
     interview_time: Optional[str] = None  # "hh:mm" 如 "08:00"
     interview_date: Optional[str] = None  # "YYYY-MM-DD" 如 "2026-06-25"
+    boss_id: Optional[str] = None  # 指定候选人 boss_id（约单个）
 
 
 class ResumeInfo(BaseModel):
@@ -927,7 +936,7 @@ def _run_resume_in_thread(max_count: int, dry_run: bool = False, user_id: int = 
                 return
 
             # F6: 检查登录状态（与F7保持一致）
-            login_status = await automation.check_login()
+            login_status = await automation.check_login(user_id=user_id)
             if not login_status.get("logged_in"):
                 resume_task_status["status"] = "error"
                 resume_task_status["message"] = "BOSS直聘未登录，请先在VNC中扫码登录"
@@ -1071,7 +1080,7 @@ def _run_received_resume_in_thread(max_count: int, dry_run: bool = False, user_i
                 _received_resume_task_status["message"] = "浏览器连接失败"
                 return
 
-            login_status = await automation.check_login()
+            login_status = await automation.check_login(user_id=user_id)
             if not login_status.get("logged_in"):
                 _received_resume_task_status["status"] = "error"
                 _received_resume_task_status["message"] = "BOSS直聘未登录，请先在VNC中扫码登录"
@@ -1191,6 +1200,94 @@ async def get_analyze_status(current_user: dict = Depends(verify_token)):
     return _resume_analyze_task_status
 
 
+@app.get("/api/resume/analyze-reports")
+async def list_analyze_reports(current_user: dict = Depends(verify_token)):
+    """列出当前用户的 AI 分析报告"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    rdir = DATA_DIR / "resumes" / str(user_id) if user_id else DATA_DIR / "resumes"
+    reports = []
+    if rdir.exists():
+        for f in sorted(rdir.glob("analyze_*.md"), reverse=True):
+            reports.append({
+                "filename": f.name,
+                "size": f.stat().st_size,
+                "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+            })
+    return reports
+
+
+@app.get("/api/resume/analyze-reports/{filename}")
+async def get_analyze_report(filename: str, current_user: dict = Depends(verify_token)):
+    """读取指定分析报告内容"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    rdir = DATA_DIR / "resumes" / str(user_id) if user_id else DATA_DIR / "resumes"
+    filepath = rdir / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="报告不存在")
+    return {"filename": filename, "content": filepath.read_text(encoding="utf-8")}
+
+
+# ════════════════════════════════════════════════════════════════
+# noVNC 代理 — 通过 8002 端口代理 6901 的 noVNC 服务
+# ════════════════════════════════════════════════════════════════
+
+@app.websocket("/websockify")
+async def proxy_novnc_websocket(ws: Any):
+    """代理 noVNC WebSocket 连接到本地 6901"""
+    await ws.accept()
+    reader, writer = None, None
+    try:
+        # 连接到本地的 websockify
+        reader, writer = await asyncio.open_connection("127.0.0.1", 6901)
+        # 发送 WebSocket 升级请求
+        request = (
+            "GET /websockify HTTP/1.1\r\n"
+            "Host: 127.0.0.1:6901\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        )
+        writer.write(request.encode())
+        await writer.drain()
+        # 读取 websockify 的升级响应
+        response = await reader.readuntil(b"\r\n\r\n")
+        if b"101" not in response:
+            await ws.close(code=1011)
+            return
+
+        async def fwd_cli():
+            while True:
+                try:
+                    data = await ws.receive()
+                    if "text" in data:
+                        writer.write(data["text"].encode())
+                    elif "bytes" in data:
+                        writer.write(data["bytes"])
+                    await writer.drain()
+                except Exception:
+                    break
+        async def fwd_srv():
+            while True:
+                try:
+                    data = await reader.read(65536)
+                    if not data:
+                        break
+                    await ws.send_bytes(data)
+                except Exception:
+                    break
+        await asyncio.gather(fwd_cli(), fwd_srv())
+    except Exception:
+        pass
+    finally:
+        try: await ws.close()
+        except Exception: pass
+        if writer:
+            try: writer.close()
+            except Exception: pass
+
+
 # ════════════════════════════════════════════════════════════════
 # 批量约面试 (F9)
 # ════════════════════════════════════════════════════════════════
@@ -1230,17 +1327,18 @@ async def batch_invite_interview(
     interview_type = req.interview_type
     interview_time = req.interview_time
     interview_date = req.interview_date
+    boss_id = req.boss_id
     import threading as _th
     _th.Thread(
         target=_run_invite_interview_in_thread,
-        args=(req.limit, user_id, interview_type, interview_time, interview_date),
+        args=(req.limit, user_id, interview_type, interview_time, interview_date, boss_id),
         daemon=True,
     ).start()
 
     return {"status": "started", "message": f"批量约面试任务已启动，上限 {req.limit} 人"}
 
 
-def _run_invite_interview_in_thread(max_count: int, user_id: int = None, interview_type: str = None, interview_time: str = None, interview_date: str = None):
+def _run_invite_interview_in_thread(max_count: int, user_id: int = None, interview_type: str = None, interview_time: str = None, interview_date: str = None, boss_id: str = None):
     global _interview_invite_task_status, _active_task_type
     import asyncio as _asyncio
 
@@ -1263,13 +1361,13 @@ def _run_invite_interview_in_thread(max_count: int, user_id: int = None, intervi
                 _interview_invite_task_status["message"] = "浏览器连接失败"
                 return
 
-            login_status = await automation.check_login()
+            login_status = await automation.check_login(user_id=user_id)
             if login_status.get("need_login"):
                 _interview_invite_task_status["status"] = "error"
                 _interview_invite_task_status["message"] = "BOSS直聘未登录，请先在Dashboard中登录"
                 return
 
-            result = await _batch_invite_interview_impl(max_count, user_id=user_id, interview_type=interview_type, interview_time=interview_time, interview_date=interview_date)
+            result = await _batch_invite_interview_impl(max_count, user_id=user_id, interview_type=interview_type, interview_time=interview_time, interview_date=interview_date, target_boss_id=boss_id)
             _interview_invite_task_status["status"] = result.get("status", "completed")
             _interview_invite_task_status["invited"] = result.get("invited", 0)
             _interview_invite_task_status["skipped"] = result.get("skipped", 0)
@@ -1309,6 +1407,31 @@ def _run_invite_interview_in_thread(max_count: int, user_id: int = None, intervi
 async def get_invite_interview_status(current_user: dict = Depends(verify_token)):
     """获取批量约面试任务状态"""
     return _interview_invite_task_status
+
+
+@app.get("/api/candidates/recommend-interview")
+async def list_recommend_interview(current_user: dict = Depends(verify_token)):
+    """获取当前用户可约面的候选人列表（含AI分析理由）"""
+    from app.database import Database
+    user_id = current_user.get("id") or current_user.get("user_id")
+    db = Database()
+    db.connect()
+    db.init_tables()
+    try:
+        candidates = db.get_recommend_interview_candidates(user_id=user_id)
+        return [
+            {
+                "boss_id": c.get("boss_id", ""),
+                "name": c.get("candidate_name", ""),
+                "school": c.get("school", ""),
+                "degree": c.get("degree", ""),
+                "years": c.get("years", 0),
+                "reason": c.get("interview_reason", ""),
+            }
+            for c in candidates
+        ]
+    finally:
+        db.close()
 
 
 @app.get("/api/resume/list")
@@ -1353,8 +1476,9 @@ async def list_resumes(
             file_size = 0
             file_exists = False
 
-            # 尝试匹配简历文件
-            resumes_dir = DATA_DIR / "resumes"
+            # 尝试匹配简历文件（按用户隔离）
+            user_id = current_user.get("id") or current_user.get("user_id")
+            resumes_dir = DATA_DIR / "resumes" / str(user_id) if user_id else DATA_DIR / "resumes"
             if resumes_dir.exists():
                 # 根据候选人名字查找简历文件
                 candidate_name = row["candidate_name"]
@@ -1408,8 +1532,9 @@ async def download_resume(
 
         candidate_name = row["candidate_name"]
 
-        # 查找简历文件
-        resumes_dir = DATA_DIR / "resumes"
+        # 查找简历文件（按用户隔离）
+        user_id = current_user.get("id") or current_user.get("user_id")
+        resumes_dir = DATA_DIR / "resumes" / str(user_id) if user_id else DATA_DIR / "resumes"
         file_path = None
 
         for ext in [".pdf", ".doc", ".docx"]:
@@ -1628,9 +1753,9 @@ def _run_filter_contact_in_thread(
         # 问题：新创建的浏览器实例没有 cookie，check_login 会失败
         # 解决：connect → import_cookies → navigate → wait → check_login → retry
 
-        # Step 1: 立即导入已保存的 cookie
-        await automation.import_cookies()
-        api_logger.info(f"任务 {task_id} 已导入 cookie（连接后立即）")
+        # Step 1: 立即导入当前用户已保存的 cookie
+        await automation.import_cookies(user_id=user_id)
+        api_logger.info(f"任务 {task_id} 已导入 cookie（user_id={user_id}）")
 
         # Step 2: 显式导航到推荐页并等待 cookie 生效
         await automation.navigate("https://www.zhipin.com/web/chat/recommend")
@@ -1640,7 +1765,7 @@ def _run_filter_contact_in_thread(
         # Step 3: 检查登录状态（带重试）
         login_checked = False
         for attempt in range(3):  # 最多 3 次尝试
-            login_status = await automation.check_login()
+            login_status = await automation.check_login(user_id=user_id)
             if login_status.get("logged_in"):
                 login_checked = True
                 api_logger.info(f"任务 {task_id} 登录检测成功 (尝试 {attempt + 1}/3)")
@@ -2234,7 +2359,8 @@ async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
     login_status = {"logged_in": False}
     if automation._connected:
         try:
-            login_result = await automation.check_login()
+            user_id = current_user.get("id") or current_user.get("user_id")
+            login_result = await automation.check_login(user_id=user_id)
             login_status["logged_in"] = login_result.get("logged_in", False)
         except Exception:
             login_status["logged_in"] = False
@@ -2471,6 +2597,16 @@ async def delete_boss_account(account_id: int, current_user: dict = Depends(veri
 JOB_INFO_DIR = BASE_DIR / "job_info"
 
 
+def _user_job_info_dir(user_id: int = None) -> Path:
+    """按用户隔离的岗位信息目录"""
+    if user_id:
+        d = JOB_INFO_DIR / str(user_id)
+    else:
+        d = JOB_INFO_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 class JobInfoSaveRequest(BaseModel):
     """岗位话术保存请求"""
     filename: str   # 不含 .txt 后缀
@@ -2484,12 +2620,14 @@ class JobInfoSelectRequest(BaseModel):
 
 @app.get("/api/job-info/files")
 async def list_job_info_files(current_user: dict = Depends(verify_token)):
-    """列出 job_info/ 下所有 .txt 文件"""
+    """列出当前用户的 job_info/ 下所有 .txt 文件"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    job_dir = _user_job_info_dir(user_id)
     try:
         files = []
-        if JOB_INFO_DIR.exists():
-            for f in sorted(JOB_INFO_DIR.glob("*.txt")):
-                name = f.stem  # 去掉 .txt
+        if job_dir.exists():
+            for f in sorted(job_dir.glob("*.txt")):
+                name = f.stem
                 if name == ".selected":
                     continue
                 stat = f.stat()
@@ -2500,7 +2638,7 @@ async def list_job_info_files(current_user: dict = Depends(verify_token)):
                 })
         # 读取当前选中的岗位
         selected = None
-        sel_file = JOB_INFO_DIR / ".selected"
+        sel_file = job_dir / ".selected"
         if sel_file.exists():
             selected = sel_file.read_text(encoding="utf-8").strip()
         return {"files": files, "selected": selected}
@@ -2511,7 +2649,8 @@ async def list_job_info_files(current_user: dict = Depends(verify_token)):
 @app.get("/api/job-info/files/{filename}")
 async def get_job_info_file(filename: str, current_user: dict = Depends(verify_token)):
     """读取指定 .txt 文件内容"""
-    filepath = JOB_INFO_DIR / f"{filename}.txt"
+    user_id = current_user.get("id") or current_user.get("user_id")
+    filepath = _user_job_info_dir(user_id) / f"{filename}.txt"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail=f"文件 {filename}.txt 不存在")
     try:
@@ -2529,15 +2668,17 @@ async def save_job_info_file(
     current_user: dict = Depends(verify_token),
 ):
     """创建或更新 .txt 文件"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    job_dir = _user_job_info_dir(user_id)
     if not req.filename or not req.filename.strip():
         raise HTTPException(status_code=400, detail="文件名不能为空")
     safe_name = req.filename.strip().replace("/", "_").replace("\\", "_")
-    filepath = JOB_INFO_DIR / f"{safe_name}.txt"
+    filepath = job_dir / f"{safe_name}.txt"
     try:
-        JOB_INFO_DIR.mkdir(parents=True, exist_ok=True)
+        job_dir.mkdir(parents=True, exist_ok=True)
         filepath.write_text(req.content, encoding="utf-8")
         # 如果是第一个文件或没有选中项，自动设为当前岗位
-        sel_file = JOB_INFO_DIR / ".selected"
+        sel_file = job_dir / ".selected"
         if not sel_file.exists():
             sel_file.write_text(safe_name, encoding="utf-8")
         return {"filename": safe_name, "message": f"已保存 {safe_name}.txt"}
@@ -2548,13 +2689,15 @@ async def save_job_info_file(
 @app.delete("/api/job-info/files/{filename}")
 async def delete_job_info_file(filename: str, current_user: dict = Depends(verify_token)):
     """删除指定 .txt 文件"""
-    filepath = JOB_INFO_DIR / f"{filename}.txt"
+    user_id = current_user.get("id") or current_user.get("user_id")
+    job_dir = _user_job_info_dir(user_id)
+    filepath = job_dir / f"{filename}.txt"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail=f"文件 {filename}.txt 不存在")
     try:
         filepath.unlink()
         # 如果删除的是当前选中项，清除选择
-        sel_file = JOB_INFO_DIR / ".selected"
+        sel_file = job_dir / ".selected"
         if sel_file.exists() and sel_file.read_text(encoding="utf-8").strip() == filename:
             sel_file.unlink()
         return {"message": f"已删除 {filename}.txt"}
@@ -2568,10 +2711,12 @@ async def select_job_info(
     current_user: dict = Depends(verify_token),
 ):
     """设置当前使用的岗位话术文件"""
-    filepath = JOB_INFO_DIR / f"{req.filename}.txt"
+    user_id = current_user.get("id") or current_user.get("user_id")
+    job_dir = _user_job_info_dir(user_id)
+    filepath = job_dir / f"{req.filename}.txt"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail=f"文件 {req.filename}.txt 不存在")
-    sel_file = JOB_INFO_DIR / ".selected"
+    sel_file = job_dir / ".selected"
     sel_file.write_text(req.filename.strip(), encoding="utf-8")
     return {"selected": req.filename.strip(), "message": f"已切换到 {req.filename}"}
 

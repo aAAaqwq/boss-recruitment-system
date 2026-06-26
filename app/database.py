@@ -94,6 +94,8 @@ class Database:
                 contacted_at TEXT,
                 resume_path TEXT,
                 interview_status TEXT DEFAULT NULL,
+                interview_reason TEXT DEFAULT NULL,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
@@ -102,6 +104,7 @@ class Database:
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_status ON candidates(status)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_school ON candidates(school)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_interview_status ON candidates(interview_status)")
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_user ON candidates(user_id)")
 
         # contact_records
         self.cursor.execute("""
@@ -496,40 +499,53 @@ class Database:
 
     # ========== 面试状态 ==========
 
-    def set_candidate_interview_status(self, boss_id: str, status: str, user_id: int = None):
-        if user_id is not None:
-            self.cursor.execute(
-                "UPDATE candidates SET interview_status = %s, updated_at = NOW() WHERE boss_id = %s AND user_id = %s",
-                (status, boss_id, user_id)
-            )
+    def set_candidate_interview_status(self, boss_id: str, status: str, user_id: int = None, reason: str = None):
+        if reason is not None:
+            if user_id is not None:
+                self.cursor.execute(
+                    "UPDATE candidates SET interview_status = %s, interview_reason = %s, updated_at = NOW() WHERE boss_id = %s AND user_id = %s",
+                    (status, reason, boss_id, user_id)
+                )
+            else:
+                self.cursor.execute(
+                    "UPDATE candidates SET interview_status = %s, interview_reason = %s, updated_at = NOW() WHERE boss_id = %s",
+                    (status, reason, boss_id)
+                )
         else:
-            self.cursor.execute(
-                "UPDATE candidates SET interview_status = %s, updated_at = NOW() WHERE boss_id = %s",
-                (status, boss_id)
-            )
+            if user_id is not None:
+                self.cursor.execute(
+                    "UPDATE candidates SET interview_status = %s, updated_at = NOW() WHERE boss_id = %s AND user_id = %s",
+                    (status, boss_id, user_id)
+                )
+            else:
+                self.cursor.execute(
+                    "UPDATE candidates SET interview_status = %s, updated_at = NOW() WHERE boss_id = %s",
+                    (status, boss_id)
+                )
         self.conn.commit()
 
     def get_recommend_interview_candidates(self, user_id: int = None) -> List[Dict]:
         if user_id is not None:
             self.cursor.execute(
-                "SELECT * FROM candidates WHERE interview_status = 'recommend_interview' AND user_id = %s ORDER BY updated_at DESC",
+                "SELECT DISTINCT ON (candidate_name) * FROM candidates WHERE interview_status = 'recommend_interview' AND user_id = %s ORDER BY candidate_name, updated_at DESC",
                 (user_id,)
             )
         else:
             self.cursor.execute(
-                "SELECT * FROM candidates WHERE interview_status = 'recommend_interview' ORDER BY updated_at DESC"
+                "SELECT DISTINCT ON (candidate_name) * FROM candidates WHERE interview_status = 'recommend_interview' ORDER BY candidate_name, updated_at DESC"
             )
         return [dict(row) for row in self.cursor.fetchall()]
 
     def get_candidates_with_resumes(self, user_id: int = None) -> List[Dict]:
+        # 用 DISTINCT ON 按名去重，保留最新的
         if user_id is not None:
             self.cursor.execute(
-                "SELECT * FROM candidates WHERE resume_path IS NOT NULL AND resume_path != '' AND user_id = %s ORDER BY updated_at DESC",
+                "SELECT DISTINCT ON (candidate_name) * FROM candidates WHERE resume_path IS NOT NULL AND resume_path != '' AND user_id = %s ORDER BY candidate_name, updated_at DESC",
                 (user_id,)
             )
         else:
             self.cursor.execute(
-                "SELECT * FROM candidates WHERE resume_path IS NOT NULL AND resume_path != '' ORDER BY updated_at DESC"
+                "SELECT DISTINCT ON (candidate_name) * FROM candidates WHERE resume_path IS NOT NULL AND resume_path != '' ORDER BY candidate_name, updated_at DESC"
             )
         return [dict(row) for row in self.cursor.fetchall()]
 

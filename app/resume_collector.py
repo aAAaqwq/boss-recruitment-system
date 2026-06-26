@@ -35,6 +35,15 @@ from app.logging_config import logger
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/app/data"))
 RESUMES_DIR = DATA_DIR / "resumes"
 
+def _resumes_dir(user_id: int = None) -> Path:
+    """按用户隔离的简历目录"""
+    if user_id:
+        d = DATA_DIR / "resumes" / str(user_id)
+    else:
+        d = RESUMES_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 
 # ========== JS 提取脚本（主文档优先，兼容非iframe聊天页） ==========
 
@@ -261,7 +270,7 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False, user_id: i
     Returns:
         {status, downloaded, skipped, failed, total_scanned, details: [...]}
     """
-    RESUMES_DIR.mkdir(parents=True, exist_ok=True)
+    resumes_dir = _resumes_dir(user_id)
 
     # 确保浏览器连接
     if not await automation._ensure_session():
@@ -273,8 +282,8 @@ async def collect_resumes(max_count: int = 10, dry_run: bool = False, user_id: i
 
     # 启用 CDP 下载拦截 — 文件自动保存到 data/resumes/
     if not dry_run:
-        dl_result = await automation.enable_download_interception(str(RESUMES_DIR))
-        logger.info(f"[F6] CDP下载拦截: {dl_result.get('status')} → {RESUMES_DIR}")
+        dl_result = await automation.enable_download_interception(str(resumes_dir))
+        logger.info(f"[F6] CDP下载拦截: {dl_result.get('status')} → {resumes_dir}")
 
     # 导航到聊天页
     nav_result = await navigate_to_chat()
@@ -738,6 +747,7 @@ async def _handle_case1_download(
     details: list,
     current_downloaded: int,
     boss_id: str = None,
+    user_id: int = None,
 ) -> bool:
     """Case-1: PDF预览弹出 → 查找下载按钮 → CDP事件确认下载。
 
@@ -757,10 +767,11 @@ async def _handle_case1_download(
                 logger.warning(f"[F6] CDP点击下载按钮失败")
 
             # Fix 1: 使用 CDP事件+目录轮询双重确认下载
-            before_snap = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
+            rdir = _resumes_dir(user_id)
+            before_snap = set(rdir.iterdir()) if rdir.exists() else set()
             await asyncio.sleep(0.3)
             dl_result = await automation.wait_for_download(
-                str(RESUMES_DIR), timeout=30.0, before_files=before_snap
+                str(rdir), timeout=30.0, before_files=before_snap
             )
             file_verified = dl_result.get("status") == "downloaded"
             verify_method = dl_result.get("method", "unknown")
@@ -882,14 +893,15 @@ async def _click_download(
     user_id: int = None,
 ) -> None:
     """旧逻辑兜底: 尝试点击下载按钮。"""
-    existing_files = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
+    rdir = _resumes_dir(user_id)
+    existing_files = set(rdir.iterdir()) if rdir.exists() else set()
     try:
         dl = await automation.execute_js(_JS_FIND_DOWNLOAD_BTN)
         if dl and dl.get("found"):
             await automation.click(int(dl["x"]), int(dl["y"]))
             await asyncio.sleep(4)
 
-            new_files = set(RESUMES_DIR.iterdir()) if RESUMES_DIR.exists() else set()
+            new_files = set(rdir.iterdir()) if rdir.exists() else set()
             file_appeared = bool(new_files - existing_files)
 
             details.append({

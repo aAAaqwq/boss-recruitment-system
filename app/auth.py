@@ -112,12 +112,26 @@ def ensure_admin_user():
         db.init_tables()
         existing = db.get_user_by_username(admin_username)
         if not existing:
-            db.create_user(
+            user = db.create_user(
                 username=admin_username,
                 password_hash=hash_password(admin_password),
                 display_name="管理员",
                 role="admin",
             )
+            _create_user_dirs(user["id"])
+
+
+def _create_user_dirs(user_id: int):
+    """为新用户创建隔离的资源目录"""
+    from pathlib import Path
+    import os
+    data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
+    dirs = [
+        data_dir / "resumes" / str(user_id),
+        Path("/app/job_info") / str(user_id),
+    ]
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
 
 
 def register_user(username: str, password: str, display_name: str = None) -> Dict:
@@ -134,5 +148,6 @@ def register_user(username: str, password: str, display_name: str = None) -> Dic
             display_name=display_name or username,
             role="user",
         )
+        _create_user_dirs(user["id"])
         return {"status": "ok", "user": user}
 

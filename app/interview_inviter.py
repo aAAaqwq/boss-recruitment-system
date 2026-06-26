@@ -279,8 +279,11 @@ _JS_FIND_NEXT_MONTH = """
 """
 
 
-async def _batch_invite_interview_impl(max_count: int = 10, user_id: int = None, interview_type: str = None, interview_time: str = None, interview_date: str = None) -> Dict:
-    """批量约面试核心逻辑（测试模式：点取消不真约）"""
+async def _batch_invite_interview_impl(max_count: int = 10, user_id: int = None, interview_type: str = None, interview_time: str = None, interview_date: str = None, target_boss_id: str = None) -> Dict:
+    """批量约面试核心逻辑（测试模式：点取消不真约）
+
+    如果指定了 target_boss_id，只约该候选人，跳过候选列表遍历。
+    """
     if not await automation._ensure_session():
         return {"status": "error", "message": "浏览器未连接"}
 
@@ -322,16 +325,36 @@ async def _batch_invite_interview_impl(max_count: int = 10, user_id: int = None,
     details = []
 
     targets = []
-    for c in contacts:
-        name = (c.get("name", "") or "").strip()
-        dedup_boss_id = c.get("boss_id") or name
-        if dedup_boss_id in recommend_ids:
-            if db.has_resume_operation(dedup_boss_id, "interview_invited", user_id=user_id):
-                logger.info(f"[F9] 跳过已约面: {name}")
-                skipped += 1
-                details.append({"name": name, "action": "skipped", "reason": "已约面"})
-            else:
+    # 如果指定了 target_boss_id，只约那一个人
+    if target_boss_id:
+        if target_boss_id not in recommend_ids:
+            db.close()
+            return {"status": "error", "message": f"指定的候选人不在可约面列表中: {target_boss_id}",
+                    "invited": 0, "skipped": 0, "failed": 0, "total_scanned": 0}
+        # 从联系人列表中找匹配的
+        for c in contacts:
+            c_boss_id = (c.get("boss_id", "") or "").strip()
+            if c_boss_id == target_boss_id:
                 targets.append(c)
+                break
+        if not targets:
+            logger.warning(f"[F9] 联系人列表中未找到 boss_id={target_boss_id}，尝试模糊匹配")
+            for c in contacts:
+                c_boss_id = (c.get("boss_id", "") or "").strip()
+                if target_boss_id in c_boss_id or c_boss_id in target_boss_id:
+                    targets.append(c)
+                    break
+    else:
+        for c in contacts:
+            name = (c.get("name", "") or "").strip()
+            dedup_boss_id = c.get("boss_id") or name
+            if dedup_boss_id in recommend_ids:
+                if db.has_resume_operation(dedup_boss_id, "interview_invited", user_id=user_id):
+                    logger.info(f"[F9] 跳过已约面: {name}")
+                    skipped += 1
+                    details.append({"name": name, "action": "skipped", "reason": "已约面"})
+                else:
+                    targets.append(c)
 
     logger.info(f"[F9] 目标 {len(targets)} 人")
 

@@ -22,6 +22,15 @@ from app.logging_config import logger
 
 RESUMES_DIR = Path(__file__).parent.parent / "data" / "resumes"
 
+def _resumes_dir(user_id: int = None) -> Path:
+    """按用户隔离的简历目录"""
+    if user_id:
+        d = RESUMES_DIR / str(user_id)
+    else:
+        d = RESUMES_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 # 在 attachment-resume-btns 工具栏中查找下载按钮（基于真实DOM扫描）
 # 下载图标: SVG use xlink:href="#icon-attacthment-download"，位于主文档 .attachment-resume-btns 内
 _JS_FIND_PDF_DOWNLOAD_ARROW = """
@@ -80,15 +89,15 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, u
     2. 对比数据库跳过已下载过的
     3. 逐个点击 → 点附件简历 → PDF预览 → 点下载箭头 → 关闭预览
     """
-    RESUMES_DIR.mkdir(parents=True, exist_ok=True)
+    resumes_dir = _resumes_dir(user_id)
 
     if not await automation._ensure_session():
         return {"status": "error", "message": "浏览器未连接，请先打开BOSS直聘"}
 
     # 启用 CDP 下载拦截
     if not dry_run:
-        dl_result = await automation.enable_download_interception(str(RESUMES_DIR))
-        logger.info(f"[DL] CDP下载拦截: {dl_result.get('status')} → {RESUMES_DIR}")
+        dl_result = await automation.enable_download_interception(str(resumes_dir))
+        logger.info(f"[DL] CDP下载拦截: {dl_result.get('status')} → {resumes_dir}")
 
     # 导航到聊天页
     nav_result = await navigate_to_chat()
@@ -217,7 +226,7 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, u
             logger.info(f"[DL] {contact_name} 找到下载箭头: {arrow.get('text')} -> ({arrow['x']:.0f},{arrow['y']:.0f})")
             try:
                 # 记录下载前的文件快照（防止关闭预览期间文件已完成）
-                dl_dir = Path(str(RESUMES_DIR))
+                dl_dir = Path(str(resumes_dir))
                 before = set(dl_dir.iterdir()) if dl_dir.exists() else set()
                 await automation.cdp_click_viewport(float(arrow["x"]), float(arrow["y"]))
 
@@ -227,7 +236,7 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, u
                 await asyncio.sleep(1)
 
                 # 等待下载完成
-                dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=30.0, before_files=before)
+                dl_result = await automation.wait_for_download(str(resumes_dir), timeout=30.0, before_files=before)
                 file_verified = dl_result.get("status") == "downloaded"
                 if file_verified:
                     _update_candidate_resume(db, contact_name,
@@ -259,7 +268,7 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, u
                 logger.info(f"[DL] {contact_name} 回退下载按钮: {dl_btn.get('text')}")
                 try:
                     await automation.cdp_click_viewport(float(dl_btn["x"]), float(dl_btn["y"]))
-                    dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=30.0)
+                    dl_result = await automation.wait_for_download(str(resumes_dir), timeout=30.0)
                     if dl_result.get("status") == "downloaded":
                         _update_candidate_resume(db, contact_name,
                                                  resume_path=dl_result.get("path", ""),

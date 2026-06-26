@@ -13,9 +13,13 @@ from app.logging_config import logger
 _MATCH_THRESHOLD = {"high", "medium"}
 
 
-def _load_job_description() -> str:
-    """读取当前注入的岗位描述"""
+def _load_job_description(user_id: int = None) -> str:
+    """读取当前注入的岗位描述（按用户隔离）"""
     job_info_dir = Path(__file__).parent.parent / "job_info"
+    if user_id:
+        user_dir = job_info_dir / str(user_id)
+        if user_dir.exists():
+            job_info_dir = user_dir
     selected_file = job_info_dir / ".selected"
     if selected_file.exists():
         selected = selected_file.read_text("utf-8").strip()
@@ -83,7 +87,7 @@ async def _call_deepseek_analyze(resume_text: str, job_desc: str) -> Dict:
 
 async def _analyze_resumes_impl(limit: int = 20, user_id: int = None) -> Dict:
     """AI简历分析主逻辑"""
-    job_desc = _load_job_description()
+    job_desc = _load_job_description(user_id=user_id)
     if not job_desc:
         return {"status": "error", "message": "未找到岗位描述文件，请先在岗位模板中设置"}
 
@@ -138,24 +142,26 @@ async def _analyze_resumes_impl(limit: int = 20, user_id: int = None) -> Dict:
             fit = result.get("fit", "low")
             reason = result.get("reason", "")
             if fit in _MATCH_THRESHOLD:
-                db.set_candidate_interview_status(boss_id, "recommend_interview", user_id=user_id)
+                db.set_candidate_interview_status(boss_id, "recommend_interview", user_id=user_id, reason=reason)
                 matched += 1
                 logger.info(f"[Analyze] {name}: ✅ {fit} — {reason}")
             else:
-                db.set_candidate_interview_status(boss_id, "not_recommended", user_id=user_id)
+                db.set_candidate_interview_status(boss_id, "not_recommended", user_id=user_id, reason=reason)
                 logger.info(f"[Analyze] {name}: ❌ {fit} — {reason}")
             results.append({"name": name, "fit": fit, "reason": reason, "school": c.get("school", ""), "years": c.get("years", ""), "degree": c.get("degree", "")})
         except Exception as e:
             logger.error(f"[Analyze] {name}: 分析失败 — {e}")
-            db.set_candidate_interview_status(boss_id, "not_recommended", user_id=user_id)
+            db.set_candidate_interview_status(boss_id, "not_recommended", user_id=user_id, reason=str(e))
             results.append({"name": name, "fit": "error", "reason": str(e), "school": c.get("school", ""), "years": c.get("years", ""), "degree": c.get("degree", "")})
 
         analyzed += 1
 
     db.close()
 
-    # 写分析报告到简历目录
+    # 写分析报告到按用户隔离的简历目录
     report_dir = Path(__file__).parent.parent / "data" / "resumes"
+    if user_id:
+        report_dir = report_dir / str(user_id)
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / f"analyze_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
     lines = [f"# AI简历分析报告", f"", f"**时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",

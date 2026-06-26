@@ -15,23 +15,29 @@ from app.logging_config import logger
 _COMPANY_PROFILE_CACHE: Optional[str] = None
 
 
-def _load_company_profile() -> str:
-    """加载公司/岗位背景信息 — 读取 job_info/.selected 中指定的文件"""
-    try:
-        with open('/app/job_info/.selected', encoding='utf-8') as f:
-            selected = f.read().strip()
-        if selected:
-            path = f'/app/job_info/{selected}.txt'
-            with open(path, encoding='utf-8') as f:
+def _load_company_profile(user_id: int = None) -> str:
+    """加载公司/岗位背景信息 — 读取按用户隔离的 job_info/{user_id}/.selected"""
+    bases = []
+    if user_id:
+        bases.append(f'/app/job_info/{user_id}')
+    bases.append('/app/job_info')
+    for base in bases:
+        try:
+            with open(f'{base}/.selected', encoding='utf-8') as f:
+                selected = f.read().strip()
+            if selected:
+                path = f'{base}/{selected}.txt'
+                with open(path, encoding='utf-8') as f:
+                    return f.read().strip()
+        except Exception:
+            pass
+        # 回退
+        try:
+            with open(f'{base}/company_profile.txt', encoding='utf-8') as f:
                 return f.read().strip()
-    except Exception:
-        pass
-    # 兼容回退
-    try:
-        with open('/app/job_info/company_profile.txt', encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception:
-        return ""
+        except Exception:
+            pass
+    return ""
 
 
 class ChatService:
@@ -51,6 +57,7 @@ class ChatService:
         history: Optional[List[Dict]] = None,
         template: Optional[str] = None,
         stage_context: Optional[str] = None,
+        user_id: int = None,
     ) -> Tuple[Optional[str], str]:
         """
         使用DeepSeek生成回复
@@ -73,7 +80,7 @@ class ChatService:
             return None, "DEEPSEEK_API_KEY未配置"
 
         # 与 test_llm.py 完全一致：先加载岗位信息作为前提注入
-        company_context = _load_company_profile()
+        company_context = _load_company_profile(user_id=user_id)
         system_prompt = (
             (company_context + '\n\n' if company_context else '') +
             '你是一名专业的招聘官，正在通过BOSS直聘与候选人交流。'

@@ -6,51 +6,45 @@
     <title>BOSS招聘驾驶舱</title>
     <style>
     /* ═══════════════════════════════════════════
-       Design System — Gemini Deep Space
+       Design System — Lobster Workshop (Warm Paper)
        ═══════════════════════════════════════════ */
     :root {
-        --bg-base: #131314;
-        --bg-surface: #1b1b1f;
-        --bg-elevated: #26262c;
-        --bg-hover: #2f3035;
-        --bg-active: #3a3b42;
-
-        --border: rgba(255,255,255,.06);
-        --border-default: rgba(255,255,255,.10);
-        --border-hover: rgba(255,255,255,.18);
-        --border-accent: rgba(138,180,248,.35);
-
-        --text: #e8eaed;
-        --text-secondary: #bdc1c6;
-        --text-muted: #a0a5ac;  /* bumped from #92979e for WCAG AA on elevated bg (~4.6:1) */
-
-        --accent: #8ab4f8;
-        --accent-light: #aecbfa;
-        --accent-bg: rgba(138,180,248,.08);
-        --accent-glow: rgba(138,180,248,.20);
-        --accent-gradient: linear-gradient(135deg, #8ab4f8, #c58af9, #f5a5c0);
-
-        --green: #81c995;
-        --green-bg: rgba(129,201,149,.08);
-        --orange: #fcad70;
-        --orange-bg: rgba(252,173,112,.08);
-        --red: #f28b82;
-        --red-bg: rgba(242,139,130,.08);
-        --blue: #8ab4f8;
-        --blue-bg: rgba(138,180,248,.08);
-
-        --font-sans: 'Google Sans', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
-        --font-mono: "Google Sans Mono", "SF Mono", "Monaco", "Menlo", monospace;
-
+        --bg-base: #f6f1e6;
+        --bg-surface: #fffdf6;
+        --bg-elevated: #faf5e9;
+        --bg-hover: #efe7d4;
+        --bg-active: #e5d9bf;
+        --border: rgba(60,40,10,.08);
+        --border-default: rgba(60,40,10,.12);
+        --bd2: rgba(60,40,10,.12);
+        --border-hover: rgba(60,40,10,.22);
+        --border-accent: rgba(200,64,31,.35);
+        --text: #221a10;
+        --text2: #5c5140;
+        --text-secondary: #5c5140;
+        --text-muted: #8a7b60;
+        --accent: #c8401f;
+        --accent-light: #d45530;
+        --accent-bg: rgba(200,64,31,.08);
+        --accent-glow: rgba(200,64,31,.18);
+        --accent-gradient: linear-gradient(135deg, #c8401f, #d4703a, #e09050);
+        --green: #2e7d4f;
+        --green-bg: rgba(46,125,79,.08);
+        --orange: #b97d10;
+        --orange-bg: rgba(185,125,16,.08);
+        --red: #b3261e;
+        --red-bg: rgba(179,38,30,.08);
+        --blue: #1f5e54;
+        --blue-bg: rgba(31,94,84,.08);
+        --gold: #9a6b15;
+        --font-sans: -apple-system, "PingFang SC", "SF Pro Display", "Microsoft YaHei", sans-serif;
+        --font-mono: "SF Mono", "Monaco", "Menlo", monospace;
         --radius-sm: 8px;
         --radius-md: 12px;
         --radius-lg: 16px;
         --radius-pill: 20px;
-
-        --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
-        --shadow-md: 0 2px 8px rgba(0,0,0,.4);
-        --shadow-glow: 0 0 24px var(--accent-glow);
-
+        --shadow-sm: 0 1px 2px rgba(60,40,10,.06);
+        --shadow-md: 0 2px 8px rgba(60,40,10,.1);
         --ease-out: cubic-bezier(.2,0,0,1);
         --transition-fast: 100ms var(--ease-out);
         --transition-normal: 200ms var(--ease-out);
@@ -67,15 +61,32 @@
     }
     .btn:focus-visible { outline-offset: 1px; }
 
-    /* ── Deep Space Glow ── */
+    /* ── Selection ── */
+    ::selection {
+        background: var(--accent-bg);
+        color: var(--text);
+    }
+
+    /* ── Warm Glow ── */
     body::before {
         content: '';
         position: fixed;
         top: -20%; left: -10%;
         width: 60%; height: 60%;
-        background: radial-gradient(ellipse at center, rgba(138,180,248,.03) 0%, transparent 70%);
+        background: radial-gradient(ellipse at center, rgba(200,64,31,.04) 0%, transparent 70%);
         pointer-events: none;
         z-index: 0;
+    }
+
+    /* ── Paper Noise Texture ── */
+    body::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        opacity: .18;
+        pointer-events: none;
+        z-index: 0;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.5'/%3E%3C/svg%3E");
     }
 
     /* ── Layout Grid ── */
@@ -99,8 +110,11 @@
     .header {
         grid-column: 1 / -1;
         grid-row: 1;
-        background: var(--bg-surface);
+        background: rgba(246,241,230,.9);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
         border-bottom: 1px solid var(--border-default);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.65);
         display: flex;
         align-items: center;
         padding: 0 16px;
@@ -114,7 +128,7 @@
         bottom: -1px;
         left: 0; right: 0;
         height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(138,180,248,.25), rgba(197,138,249,.15), transparent);
+        background: linear-gradient(90deg, transparent, rgba(200,64,31,.2), rgba(212,112,58,.12), transparent);
         pointer-events: none;
     }
 
@@ -135,7 +149,7 @@
         justify-content: center;
         font-weight: 800;
         font-size: 12px;
-        color: #131314;
+        color: #fff;
         letter-spacing: -.5px;
         flex-shrink: 0;
     }
@@ -170,13 +184,14 @@
         flex-shrink: 0;
     }
     .h-stat {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
+        background: var(--bg-surface);
+        border: 1px solid var(--border-default);
         border-radius: var(--radius-sm);
         padding: 4px 10px;
         display: flex;
         align-items: center;
         gap: 6px;
+        box-shadow: var(--shadow-sm);
     }
     .h-stat-value {
         font-weight: 700;
@@ -210,8 +225,8 @@
     .h-input {
         width: 100px;
         padding: 5px 8px;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-default);
+        background: #fdfaf1;
+        border: 1px solid var(--bd2);
         border-radius: var(--radius-sm);
         color: var(--text);
         font-size: 12px;
@@ -219,8 +234,8 @@
         outline: none;
         transition: border-color var(--transition-fast);
     }
-    .h-input:focus { border-color: var(--accent); }
-    .h-input::placeholder { color: var(--text-muted); }
+    .h-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg); }
+    .h-input::placeholder { color: #b3a586; }
 
     .h-auth-btn {
         padding: 5px 12px;
@@ -236,9 +251,11 @@
         display: flex;
         align-items: center;
         gap: 4px;
+        box-shadow: 0 2px 0 #8a2c13;
     }
-    .h-auth-btn:hover { background: var(--accent-light); }
-    .h-auth-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .h-auth-btn:hover { background: var(--accent-light); transform: translateY(-1px); box-shadow: 0 3px 0 #8a2c13; }
+    .h-auth-btn:active { transform: translateY(0); box-shadow: 0 1px 0 #8a2c13; }
+    .h-auth-btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
     .h-auth-btn.loading .spinner { display: block; }
     .h-auth-btn.loading .btn-text { display: none; }
     .h-auth-btn.loading { pointer-events: none; opacity: .7; }
@@ -247,7 +264,7 @@
         font-size: 12px;
         padding: 4px 10px;
         border-radius: var(--radius-sm);
-        background: var(--bg-elevated);
+        background: var(--bg-surface);
         border: 1px solid var(--border);
         white-space: nowrap;
         display: none;
@@ -272,18 +289,18 @@
     }
     .status-dot.online {
         background: var(--green);
-        box-shadow: 0 0 0 0 rgba(129,201,149,.4);
+        box-shadow: 0 0 0 0 rgba(46,125,79,.4);
         animation: pulse-dot 2.5s ease-in-out infinite;
     }
     .status-dot.offline { background: var(--red); }
     .status-dot.busy { background: var(--orange); animation: pulse-dot-orange 1.5s ease-in-out infinite; }
     @keyframes pulse-dot {
-        0%,100% { box-shadow: 0 0 0 0 rgba(129,201,149,.35); }
-        50% { box-shadow: 0 0 0 5px rgba(129,201,149,0); }
+        0%,100% { box-shadow: 0 0 0 0 rgba(46,125,79,.35); }
+        50% { box-shadow: 0 0 0 5px rgba(46,125,79,0); }
     }
     @keyframes pulse-dot-orange {
-        0%,100% { box-shadow: 0 0 0 0 rgba(252,173,112,.35); }
-        50% { box-shadow: 0 0 0 5px rgba(252,173,112,0); }
+        0%,100% { box-shadow: 0 0 0 0 rgba(185,125,16,.35); }
+        50% { box-shadow: 0 0 0 5px rgba(185,125,16,0); }
     }
     .vnc-text {
         font-size: 12px;
@@ -326,7 +343,7 @@
     }
     .task-spinner {
         width: 12px; height: 12px;
-        border: 2px solid rgba(99,102,241,.25);
+        border: 2px solid rgba(200,64,31,.2);
         border-top-color: var(--accent);
         border-radius: 50%;
         animation: spin .7s linear infinite;
@@ -335,12 +352,12 @@
     .task-bar-name {
         font-size: 12px;
         font-weight: 600;
-        color: var(--accent-light);
+        color: var(--accent);
     }
     .task-bar-track {
         flex: 1;
         height: 5px;
-        background: rgba(99,102,241,.15);
+        background: rgba(200,64,31,.12);
         border-radius: 3px;
         overflow: hidden;
     }
@@ -356,7 +373,7 @@
         content: '';
         position: absolute;
         inset: 0;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,.2), transparent);
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent);
         background-size: 200% 100%;
         animation: shimmer 1.8s ease-in-out infinite;
     }
@@ -367,7 +384,7 @@
     .task-bar-pct {
         font-size: 12px;
         font-weight: 700;
-        color: var(--accent-light);
+        color: var(--accent);
         font-variant-numeric: tabular-nums;
         min-width: 36px;
         text-align: right;
@@ -391,7 +408,7 @@
         position: relative;
     }
     .vnc-toolbar {
-        background: var(--bg-surface);
+        background: var(--bg-elevated);
         border-bottom: 1px solid var(--border);
         padding: 5px 12px;
         display: flex;
@@ -399,8 +416,8 @@
         flex-shrink: 0;
     }
     .vnc-toolbar button {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
+        background: var(--bg-surface);
+        border: 1px solid var(--border-default);
         color: var(--text-secondary);
         padding: 4px 10px;
         border-radius: var(--radius-sm);
@@ -464,8 +481,8 @@
     }
     .cp-scroll::-webkit-scrollbar { width: 5px; }
     .cp-scroll::-webkit-scrollbar-track { background: transparent; }
-    .cp-scroll::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
-    .cp-scroll::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+    .cp-scroll::-webkit-scrollbar-thumb { background: #cdbc99; border-radius: 3px; }
+    .cp-scroll::-webkit-scrollbar-thumb:hover { background: #b3a27f; }
 
     /* Sections */
     .section {
@@ -529,34 +546,80 @@
         position: relative;
         overflow: hidden;
     }
-    .btn:disabled { opacity: .45; cursor: not-allowed; }
-    .btn:active:not(:disabled) { transform: scale(.98); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+    .btn:active:not(:disabled) { transform: translateY(0); }
 
     .btn-primary {
         background: var(--accent);
         color: #fff;
+        box-shadow: 0 3px 0 #8a2c13;
     }
     .btn-primary:hover:not(:disabled) {
         background: var(--accent-light);
-        box-shadow: 0 0 16px var(--accent-glow);
+        transform: translateY(-2px);
+        box-shadow: 0 5px 0 #8a2c13;
     }
-    .btn-success { background: var(--green); color: #fff; }
-    .btn-success:hover:not(:disabled) { background: #0ea472; box-shadow: 0 0 16px rgba(16,185,129,.3); }
-    .btn-info { background: var(--blue); color: #fff; }
-    .btn-info:hover:not(:disabled) { background: #2563eb; box-shadow: 0 0 16px rgba(59,130,246,.3); }
-    .btn-warning { background: var(--orange); color: #000; }
-    .btn-warning:hover:not(:disabled) { background: #d97706; }
-    .btn-danger { background: var(--red); color: #fff; }
-    .btn-danger:hover:not(:disabled) { background: #dc2626; box-shadow: 0 0 16px rgba(239,68,68,.3); }
+    .btn-success {
+        background: var(--green);
+        color: #fff;
+        box-shadow: 0 3px 0 #1e5533;
+    }
+    .btn-success:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 0 #1e5533;
+    }
+    .btn-info {
+        background: var(--blue);
+        color: #fff;
+        box-shadow: 0 3px 0 #15423b;
+    }
+    .btn-info:hover:not(:disabled) {
+        background: #256d5e;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 0 #15423b;
+    }
+    .btn-warning {
+        background: var(--gold);
+        color: #fff;
+        box-shadow: 0 3px 0 #6e4c0a;
+    }
+    .btn-warning:hover:not(:disabled) {
+        background: #b8891d;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 0 #6e4c0a;
+    }
+    .btn-danger {
+        background: var(--red);
+        color: #fff;
+        box-shadow: 0 3px 0 #7d1a14;
+    }
+    .btn-danger:hover:not(:disabled) {
+        background: #d43a30;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 0 #7d1a14;
+    }
     .btn-secondary {
         background: var(--bg-elevated);
         color: var(--text-secondary);
         border: 1px solid var(--border-default);
+        box-shadow: 0 2px 0 rgba(60,40,10,.1);
     }
     .btn-secondary:hover:not(:disabled) {
         background: var(--bg-hover);
         color: var(--text);
         border-color: var(--border-hover);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 0 rgba(60,40,10,.1);
+    }
+    .btn-accent {
+        background: var(--accent);
+        color: #fff;
+        box-shadow: 0 3px 0 #8a2c13;
+    }
+    .btn-accent:hover:not(:disabled) {
+        background: var(--accent-light);
+        transform: translateY(-2px);
+        box-shadow: 0 5px 0 #8a2c13;
     }
 
     .btn-sm { padding: 7px 12px; font-size: 12px; }
@@ -583,8 +646,8 @@
     .input-row input[type="number"] {
         width: 72px;
         padding: 8px 8px;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-default);
+        background: #fdfaf1;
+        border: 1px solid var(--bd2);
         border-radius: var(--radius-sm);
         color: var(--text);
         font-size: 13px;
@@ -595,7 +658,10 @@
         -moz-appearance: textfield;
     }
     .input-row input::-webkit-inner-spin-button { -webkit-appearance: none; }
-    .input-row input:focus { border-color: var(--accent); }
+    .input-row input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-bg);
+    }
     .input-row .btn { flex: 1; margin-bottom: 0; }
 
     .btn-row {
@@ -617,10 +683,11 @@
     }
 
     .config-card {
-        background: var(--bg-elevated);
+        background: var(--bg-surface);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: 14px;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,.8), 0 1px 3px rgba(60,40,10,.05);
     }
     .form-group {
         margin-bottom: 12px;
@@ -637,8 +704,8 @@
     .form-group select,
     .form-group textarea {
         width: 100%;
-        background: var(--bg-base);
-        border: 1px solid var(--border-default);
+        background: #fdfaf1;
+        border: 1px solid var(--bd2);
         border-radius: var(--radius-sm);
         padding: 10px 12px;
         color: var(--text);
@@ -653,6 +720,8 @@
         border-color: var(--accent);
         box-shadow: 0 0 0 2px var(--accent-bg);
     }
+    .form-group input::placeholder,
+    .form-group textarea::placeholder { color: #b3a586; }
 
     .form-group select:hover {
         border-color: var(--border-hover);
@@ -665,7 +734,7 @@
     }
     .form-group select {
         appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238a7b60'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 10px center;
         padding-right: 28px;
@@ -699,7 +768,7 @@
     .template-item:hover { border-color: var(--accent); }
     .template-name {
         font-size: 12px;
-        color: var(--accent-light);
+        color: var(--accent);
         font-weight: 500;
     }
     .template-text {
@@ -796,7 +865,8 @@
     }
     .log-body::-webkit-scrollbar { width: 5px; }
     .log-body::-webkit-scrollbar-track { background: transparent; }
-    .log-body::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+    .log-body::-webkit-scrollbar-thumb { background: #cdbc99; border-radius: 3px; }
+    .log-body::-webkit-scrollbar-thumb:hover { background: #b3a27f; }
 
     .log-line {
         margin: 2px 0;
@@ -836,7 +906,7 @@
             animation-iteration-count: 1 !important;
             transition-duration: 0.01ms !important;
         }
-        body::before { display: none; }
+        body::before, body::after { display: none; }
     }
 
     /* ── Tab Editor Styles ── */
@@ -874,6 +944,10 @@
             <div class="h-stat">
                 <span class="h-stat-value" id="statProcessed">0</span>
                 <span class="h-stat-label">已处理</span>
+            </div>
+            <div class="h-stat">
+                <span class="h-stat-value" id="statApplied">0</span>
+                <span class="h-stat-label">已申请</span>
             </div>
             <div class="h-stat">
                 <span class="h-stat-value" id="statResumes">0</span>
@@ -959,10 +1033,6 @@
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">🌐 连接桌面</span>
                     </button>
-                    <button class="btn btn-info action-grid-full" onclick="checkLogin(event)">
-                        <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">✅ 检查登录状态</span>
-                    </button>
                     <button class="btn btn-secondary btn-sm" onclick="exportCookies(event)">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">💾 导出Cookie</span>
@@ -990,7 +1060,7 @@
                     <input type="number" id="resumeLimit" value="10" placeholder="人数" aria-label="获取简历人数上限" min="1" max="200">
                     <button class="btn btn-warning" onclick="batchGetResumes()" id="btnGetResumes">
                         <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">📄 批量获取简历</span>
+                        <span class="btn-text">📄 批量申请简历</span>
                     </button>
                 </div>
                 <div class="input-row">
@@ -1015,16 +1085,63 @@
                     </button>
                 </div>
                 <div class="input-row">
-                    <input type="number" id="interviewLimit" value="10" placeholder="人数" aria-label="约面试人数上限" min="1" max="200">
-                    <select id="interviewType" aria-label="面试类型">
-                        <option value="">不限</option>
-                        <option value="线下">线下面试</option>
-                        <option value="线上">线上面试</option>
-                    </select>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('interviewConfig')" style="font-size:12px;padding:4px 10px;border:1px solid var(--border-default);border-radius:8px;background:var(--bg-surface);flex:none;width:72px;">⚙ 配置</button>
                     <button class="btn btn-accent" onclick="batchInviteInterview()" id="btnInviteInterview">
                         <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">💼 批量约面试</span>
+                        <span class="btn-text">💼 约面试</span>
                     </button>
+                </div>
+                <div class="config-content" id="interviewConfig">
+                    <div class="input-row" style="margin-top:4px;">
+                        <select id="interviewType" aria-label="面试类型">
+                            <option value="">不限</option>
+                            <option value="线下">线下面试</option>
+                            <option value="线上">线上面试</option>
+                        </select>
+                        <input type="date" id="interviewDate" aria-label="面试日期" style="width:140px">
+                        <select id="interviewTime" aria-label="面试时间">
+                            <option value="">默认</option>
+                            <option>08:05</option><option>08:30</option>
+                            <option>09:05</option><option>09:30</option>
+                            <option>10:05</option><option>10:30</option>
+                            <option>11:05</option><option>11:30</option>
+                            <option>12:05</option><option>12:30</option>
+                            <option>13:05</option><option>13:30</option>
+                            <option>14:05</option><option>14:30</option>
+                            <option>15:05</option><option>15:30</option>
+                            <option>16:05</option><option>16:30</option>
+                            <option>17:05</option><option>17:30</option>
+                            <option>18:05</option><option>18:30</option>
+                            <option>19:05</option><option>19:30</option>
+                            <option>20:05</option><option>20:30</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 可约面候选人 -->
+            <div class="section" id="interviewCandidatesSection" style="display:none;">
+                <div class="section-header">
+                    <span class="section-label">🎯 可约面候选人</span>
+                    <span id="interviewCandidateCount" style="font-size:12px;color:var(--text-muted);margin-right:8px;"></span>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('interviewCandidateList')">候选人</button>
+                </div>
+                <div class="config-content" id="interviewCandidateList" style="max-height:300px;overflow-y:auto;"></div>
+            </div>
+
+            <!-- AI分析报告 -->
+            <div class="section">
+                <div class="section-header">
+                    <span class="section-label">📊 分析报告</span>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('reportConfig')">报告</button>
+                </div>
+                <div class="config-content" id="reportConfig">
+                    <div class="config-card">
+                        <select id="reportSelect" onchange="loadReportContent()" style="width:100%;margin-bottom:8px;">
+                            <option value="">-- 选择报告 --</option>
+                        </select>
+                        <div id="reportContent" style="max-height:400px;overflow-y:auto;font-size:12px;line-height:1.7;white-space:pre-wrap;color:var(--text);background:var(--bg-base);padding:10px;border-radius:8px;display:none;"></div>
+                    </div>
                 </div>
             </div>
 
@@ -1032,9 +1149,9 @@
             <div class="section">
                 <div class="section-header">
                     <span class="section-label">筛选条件</span>
-                    <button class="section-toggle expanded" aria-expanded="true" onclick="toggleConfig('filterConfig')">筛选条件</button>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('filterConfig')">筛选条件</button>
                 </div>
-                <div class="config-content show" id="filterConfig">
+                <div class="config-content" id="filterConfig">
                     <div class="config-card">
                         <div class="form-group">
                             <label>学历要求</label>
@@ -1148,17 +1265,6 @@
                 </div>
             </div>
 
-            <!-- 快捷操作 -->
-            <div class="section">
-                <div class="section-header">
-                    <span class="section-label">快捷操作</span>
-                </div>
-                <div class="btn-row">
-                    <button class="btn btn-secondary btn-sm" onclick="navigateToChat()">💬 聊天页</button>
-                    <button class="btn btn-secondary btn-sm" onclick="navigateToList()">📋 候选人</button>
-                </div>
-            </div>
-
         </div>
     </aside>
 
@@ -1184,12 +1290,13 @@
         // API_BASE: Docker 容器服务 (8002→容器内8001)
         // 自动检测 API 地址: Docker 环境用 8002，本地用 8001
         const API_BASE = (() => {
+            const p = window.location.port;
+            if (p === '8321' || p === '3000' || p === '3101') {
+                return window.location.origin.replace(':' + p, ':8002');
+            }
+            if (p === '8002') return window.location.origin;
             if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-                // 优先尝试当前 host 的端口推断
-                const p = window.location.port;
-                if (p === '8321' || p === '3000' || p === '3101') return 'http://localhost:8002'; // Docker
-                if (p === '8002') return 'http://localhost:8002';
-                return 'http://localhost:8001'; // 本地
+                return 'http://localhost:8001';
             }
             return window.location.origin; // 同源部署
         })();
@@ -2050,7 +2157,10 @@
                 if (btn) setLoading(btn, false);
                 if (!vncConfig) { log('获取VNC配置失败', 'error'); return; }
                 // 使用 vnc_lite.html（自动连接，不弹密码框）+ scale=true 自动缩放到适应容器
-                const novncUrl = `http://${window.location.hostname}:6901/vnc_lite.html?password=${encodeURIComponent(vncConfig.password)}&scale=true`;
+                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                const novncUrl = isLocal
+                    ? `http://${window.location.hostname}:6901/vnc_lite.html?password=${encodeURIComponent(vncConfig.password)}&scale=true`
+                    : `http://${window.location.hostname}/novnc/vnc_lite.html?password=${encodeURIComponent(vncConfig.password)}&scale=true`;
                 document.getElementById('vncPlaceholder').style.display = 'none';
                 const iframe = document.getElementById('vncFrame');
                 iframe.src = novncUrl;
@@ -2386,8 +2496,9 @@
                     const data = await apiCall('/api/resume/status', null, 'GET');
                     if (!data) { clearInterval(interval); return; }
                     if (data.status === 'completed') {
-                        log(`✅ 简历下载任务完成`, 'info');
-                        loadResumeList();
+                        const applied = (data.processed || 0);
+                        log(`✅ 简历申请任务完成，申请: ${applied} 人`, 'info');
+                        document.getElementById('statApplied').textContent = parseInt(document.getElementById('statApplied').textContent) + applied;
                         clearInterval(interval);
                         clearTaskStatus();
                         setLoading(btn, false);
@@ -2529,16 +2640,100 @@
             }, 3000);
         }
 
-        // ── 批量约面试 ──
+        // ── 可约面候选人列表 ──
+        let recommendCandidates = [];
+        async function loadRecommendCandidates() {
+            try {
+                const data = await apiCall('/api/candidates/recommend-interview', null, 'GET');
+                recommendCandidates = data || [];
+                renderRecommendCandidates();
+            } catch (e) {
+                console.error('加载可约面候选人失败:', e);
+            }
+        }
+        function renderRecommendCandidates() {
+            const section = document.getElementById('interviewCandidatesSection');
+            const list = document.getElementById('interviewCandidateList');
+            const count = document.getElementById('interviewCandidateCount');
+            section.style.display = '';
+            count.textContent = recommendCandidates.length ? `共 ${recommendCandidates.length} 人` : '暂无';
+            if (recommendCandidates.length === 0) {
+                list.innerHTML = '<div style=\"padding:10px;color:var(--text-muted);font-size:12px;text-align:center;\">暂无推荐约面的候选人<br>运行「AI分析简历」后可产生推荐</div>';
+                return;
+            }
+            list.innerHTML = recommendCandidates.map((c, i) => `
+                <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;margin:2px 0;border-radius:8px;cursor:pointer;background:var(--bg-surface);border:1px solid var(--border);transition:border-color .15s;"
+                       onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border)'">
+                    <input type="radio" name="selectedCandidate" value="${c.boss_id}" style="margin-top:3px;flex:none;"
+                           ${i===0?'checked':''}>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:var(--text);">${c.name}</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${c.school||'?'} · ${c.degree||'?'} · ${c.years||0}年</div>
+                        ${c.reason ? `<div style="font-size:11px;color:var(--green);margin-top:2px;line-height:1.4;">${c.reason}</div>` : ''}
+                    </div>
+                </label>
+            `).join('');
+        }
+        function getSelectedCandidateBossId() {
+            const radio = document.querySelector('input[name="selectedCandidate"]:checked');
+            return radio ? radio.value : null;
+        }
+        // 页面加载时拉取 + 轮询刷新
+        loadRecommendCandidates();
+        setInterval(loadRecommendCandidates, 30000);
+
+        // ── AI分析报告 ──
+        async function loadReportList() {
+            try {
+                const data = await apiCall('/api/resume/analyze-reports', null, 'GET');
+                const sel = document.getElementById('reportSelect');
+                sel.innerHTML = '<option value="">-- 选择报告 --</option>';
+                (data || []).forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r.filename;
+                    opt.textContent = r.filename + ' (' + new Date(r.modified).toLocaleString('zh-CN') + ')';
+                    sel.appendChild(opt);
+                });
+            } catch (e) { console.error('加载报告列表失败:', e); }
+        }
+        async function loadReportContent() {
+            const filename = document.getElementById('reportSelect').value;
+            const div = document.getElementById('reportContent');
+            if (!filename) { div.style.display = 'none'; return; }
+            try {
+                const data = await apiCall('/api/resume/analyze-reports/' + encodeURIComponent(filename), null, 'GET');
+                div.textContent = data.content;
+                div.style.display = '';
+            } catch (e) {
+                div.textContent = '加载失败: ' + e;
+                div.style.display = '';
+            }
+        }
+        // 折叠展开时加载报告列表
+        document.getElementById('reportConfig').addEventListener('transitionend', loadReportList);
+        document.getElementById('reportSelect').addEventListener('focus', loadReportList);
+        loadReportList();
+        // ── 约面试 ──
         function batchInviteInterview() {
             const btn = document.getElementById('btnInviteInterview');
-            const limit = parseInt(document.getElementById('interviewLimit').value) || 10;
+            const limit = 1;
             const interviewType = document.getElementById('interviewType').value;
+            const interviewTime = document.getElementById('interviewTime').value;
+            const interviewDate = document.getElementById('interviewDate').value;
+            const bossId = getSelectedCandidateBossId();
             const typeLabel = interviewType === '线下' ? '线下面试' : (interviewType === '线上' ? '线上面试' : '不限');
-            if (!confirm(`确认对最多 ${limit} 位候选人发起约面试（测试模式）？\n\n面试类型: ${typeLabel}\n仅测试流程，会点击"取消"而不会真正发送面试邀请。`)) return;
+            const timeLabel = interviewTime || '默认';
+            const dateLabel = interviewDate || '今天';
+            const selectedCandidate = recommendCandidates.find(c => c.boss_id === bossId);
+            const candidateLabel = selectedCandidate ? selectedCandidate.name : '未选择';
+            if (!bossId) {
+                alert('请先在可约面候选人列表中勾选一位候选人');
+                return;
+            }
+            if (!confirm(`确认对「${candidateLabel}」发起约面试（测试模式）？\n\n面试类型: ${typeLabel} | 面试日期: ${dateLabel} | 面试时间: ${timeLabel}\n仅测试流程，会点击"取消"而不会真正发送面试邀请。`)) return;
             setLoading(btn, true);
-            log(`💼 开始批量约面试，上限 ${limit} 人，类型: ${typeLabel}...`, 'info');
-            apiCall('/api/workflow/invite-interview', { limit: limit, dry_run: false, interview_type: interviewType || null }).then(data => {
+            log(`💼 开始约面试「${candidateLabel}」，类型: ${typeLabel}，日期: ${dateLabel}，时间: ${timeLabel}...`, 'info');
+            apiCall('/api/workflow/invite-interview', { limit: limit, dry_run: false, interview_type: interviewType || null, interview_time: interviewTime || null, interview_date: interviewDate || null, boss_id: bossId }).then(data => {
                 if (data && data.status === 'started') {
                     log(`✅ 任务已启动，预计处理 ${limit} 人`, 'info');
                     currentTask = { type: 'interview', taskId: null, active: true };

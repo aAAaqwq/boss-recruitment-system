@@ -56,9 +56,14 @@ def _build_history_from_filtered(filtered: List[Dict]) -> List[Dict]:
     return history
 
 
-def _load_company_context() -> str:
-    """加载公司/岗位背景信息 — 读取 job_info/.selected 中指定的文件"""
-    for base in ['/app/job_info', 'job_info']:
+def _load_company_context(user_id: int = None) -> str:
+    """加载公司/岗位背景信息 — 读取按用户隔离的 job_info/{user_id}/.selected"""
+    bases = []
+    if user_id:
+        bases.append(f'/app/job_info/{user_id}')
+        bases.append(f'job_info/{user_id}')
+    bases.extend(['/app/job_info', 'job_info'])
+    for base in bases:
         try:
             sel_path = f'{base}/.selected'
             with open(sel_path, encoding='utf-8') as f:
@@ -317,7 +322,7 @@ async def _batch_reply_impl(
             # 构建对话历史
             history = _build_history_from_filtered(filtered)
             # 加载公司岗位信息
-            company_context = _load_company_context()
+            company_context = _load_company_context(user_id=user_id)
             # 构建LLM messages
             llm_messages = _build_llm_messages(history, candidate_msg, company_context)
 
