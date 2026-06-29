@@ -13,6 +13,13 @@ from app.logging_config import logger
 
 COOKIE_FILE = Path(os.environ.get("DATA_DIR", "/app/data")) / "cookies.json"
 
+def _cookie_file(user_id: int = None) -> Path:
+    """按用户隔离的 cookie 文件路径"""
+    base = Path(os.environ.get("DATA_DIR", "/app/data"))
+    if user_id:
+        return base / f"cookies_{user_id}.json"
+    return base / "cookies.json"
+
 try:
     import nodriver as uc
 except ImportError:
@@ -236,6 +243,12 @@ class BrowserAutomation:
         display = os.environ.get("DISPLAY", ":1")
         env = {**os.environ, "DISPLAY": display}
 
+        # 清理Chrome僵尸锁文件（上次非正常退出残留）
+        import glob as _glob
+        for _f in _glob.glob(f"{user_data}/Singleton*"):
+            try: os.remove(_f)
+            except OSError: pass
+
         # 找 Chrome 二进制
         chrome_bin = "google-chrome"
         for candidate in ["google-chrome-stable", "google-chrome", "chromium-browser", "chromium"]:
@@ -394,8 +407,8 @@ class BrowserAutomation:
 
     # ===== Cookie 持久化 =====
 
-    async def export_cookies(self) -> Dict:
-        """通过 CDP 导出所有 cookie 到 /app/data/cookies.json
+    async def export_cookies(self, user_id: int = None) -> Dict:
+        """通过 CDP 导出所有 cookie 到按用户隔离的文件
 
         只在检测到登录态 cookie (wt2/wbg/zp_at/bst) 时才覆盖备份文件，
         防止在登录页等未认证页面导出时污染已保存的有效 cookie。
@@ -404,6 +417,8 @@ class BrowserAutomation:
             return {"status": "error", "message": "浏览器未连接或重连失败"}
         try:
             from nodriver.cdp import network as cdp_network
+
+            cookie_file = _cookie_file(user_id)
 
             # 使用 nodriver CDP 模块获取所有 cookie
             cookie_objects = await self.page.send(cdp_network.get_all_cookies())
@@ -439,23 +454,24 @@ class BrowserAutomation:
                 cookies.append(ck_dict)
 
             # 确保目标目录存在
-            COOKIE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            cookie_file.parent.mkdir(parents=True, exist_ok=True)
 
             payload = {
                 "cookies": cookies,
                 "exported_at": datetime.now().isoformat(),
                 "count": len(cookies),
+                "user_id": user_id,
             }
 
             # 验证：只在包含登录态 cookie 时才覆盖备份文件
             cookie_names = {c["name"] for c in cookies}
             auth_present = [n for n in self._LOGIN_COOKIE_NAMES if n in cookie_names]
             if auth_present:
-                COOKIE_FILE.write_text(
+                cookie_file.write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
-                logger.info(f"已导出 {len(cookies)} 条 cookie (含认证: {auth_present}) 到 {COOKIE_FILE}")
+                logger.info(f"已导出 {len(cookies)} 条 cookie (含认证: {auth_present}) 到 {cookie_file}")
             else:
                 logger.warning(
                     f"跳过导出: 当前页面无登录态 cookie ({len(cookies)} 条, "
@@ -465,24 +481,63 @@ class BrowserAutomation:
             return {
                 "status": "ok",
                 "count": len(cookies),
-                "path": str(COOKIE_FILE),
+                "path": str(cookie_file),
                 "saved": bool(auth_present),
             }
         except Exception as e:
             logger.error(f"导出 cookie 失败: {e}")
             return {"status": "error", "message": str(e)}
 
-    async def import_cookies(self) -> Dict:
-        """从 /app/data/cookies.json 导入 cookie 到浏览器"""
+    async def import_cookies(self, user_id: int = None, clear_first: bool = True) -> Dict:
+        """从按用户隔离的 cookie 文件导入 cookie 到浏览器
+
+        Args:
+            user_id: 用户ID，用于加载对应 cookie 文件
+            clear_first: 导入前是否先清除 BOSS 域名的旧 cookie（防止串号）
+        """
         if not await self._ensure_session():
             return {"status": "error", "message": "浏览器未连接或重连失败"}
-        if not COOKIE_FILE.exists():
-            return {"status": "error", "message": f"cookie 文件不存在: {COOKIE_FILE}"}
         try:
             from nodriver.cdp import network as cdp_network
             from nodriver.cdp.network import CookieSameSite
 
-            payload = json.loads(COOKIE_FILE.read_text(encoding="utf-8"))
+            # Step 0: 先清除 BOSS 域名的旧 cookie，防止切换用户时串号
+            if clear_first:
+                try:
+                    existing = await self.page.send(cdp_network.get_all_cookies())
+                    cleared = 0
+                    for ck in existing:
+                        domain = (ck.domain or "").lower()
+                        if "zhipin.com" in domain:
+                            try:
+                                # 用 CDP Network.deleteCookies 按 name+domain+path 精确删除
+                                delete_params = {
+                                    "name": ck.name,
+                                    "domain": ck.domain,
+                                }
+                                if ck.path:
+                                    delete_params["path"] = ck.path
+                                await self.page.send(cdp_network.delete_cookies(**delete_params))
+                                cleared += 1
+                            except Exception:
+                                # 回退：用 url 参数
+                                try:
+                                    await self.page.send(cdp_network.delete_cookies(
+                                        name=ck.name, url=f"https://{ck.domain}{ck.path or '/'}"
+                                    ))
+                                    cleared += 1
+                                except Exception:
+                                    pass
+                    if cleared > 0:
+                        logger.info(f"已清除 {cleared} 条 BOSS 旧 cookie")
+                except Exception as e:
+                    logger.warning(f"清除旧 cookie 时出错（非致命）: {e}")
+
+            cookie_file = _cookie_file(user_id)
+            if not cookie_file.exists():
+                return {"status": "error", "message": f"cookie 文件不存在: {cookie_file}"}
+
+            payload = json.loads(cookie_file.read_text(encoding="utf-8"))
             cookies = payload.get("cookies", [])
             if not cookies:
                 return {"status": "ok", "imported": 0, "message": "cookie 文件为空"}
@@ -553,7 +608,7 @@ class BrowserAutomation:
                 "status": "ok",
                 "imported": imported,
                 "total": len(cookies),
-                "source": str(COOKIE_FILE),
+                "source": str(cookie_file),
             }
         except Exception as e:
             logger.error(f"导入 cookie 失败: {e}")
@@ -623,7 +678,7 @@ class BrowserAutomation:
         except Exception:
             return ""
 
-    async def check_login(self) -> Dict:
+    async def check_login(self, user_id: int = None) -> Dict:
         """检测 BOSS直聘登录状态
 
         检测策略（按优先级）:
@@ -721,7 +776,7 @@ class BrowserAutomation:
             if recruiter_found:
                 logger.info("iframe 内含招聘者内容，判定已登录")
                 try:
-                    await self.export_cookies()
+                    await self.export_cookies(user_id=user_id)
                 except Exception:
                     pass
                 return {"logged_in": True, "message": "已登录（iframe内容检测）"}
@@ -729,7 +784,7 @@ class BrowserAutomation:
             if has_sidebar and not on_login_page:
                 logger.info("侧边栏含招聘者菜单，判定已登录")
                 try:
-                    await self.export_cookies()
+                    await self.export_cookies(user_id=user_id)
                 except Exception:
                     pass
                 return {"logged_in": True, "message": "已登录（侧边栏检测）"}
@@ -739,10 +794,11 @@ class BrowserAutomation:
                 return {"logged_in": True, "message": "已登录（cookie检测，页面加载中）"}
 
             # --- Step 6: 未检测到登录态 → 尝试 cookie 恢复 ---
-            if COOKIE_FILE.exists():
-                logger.info("尝试导入备份cookie恢复登录态...")
+            cookie_file = _cookie_file(user_id)
+            if cookie_file.exists():
+                logger.info(f"尝试导入备份cookie恢复登录态 (user_id={user_id})...")
                 try:
-                    import_result = await self.import_cookies()
+                    import_result = await self.import_cookies(user_id=user_id)
                     logger.info(f"导入: {import_result.get('imported',0)}/{import_result.get('total',0)}")
                     if import_result.get("imported", 0) > 0:
                         try:
@@ -757,7 +813,7 @@ class BrowserAutomation:
                             if "职位管理" in retry_text or "牛人管理" in retry_text:
                                 logger.info("Cookie恢复成功")
                                 try:
-                                    await self.export_cookies()
+                                    await self.export_cookies(user_id=user_id)
                                 except Exception:
                                     pass
                                 return {"logged_in": True, "message": "已登录（cookie恢复）"}
@@ -1138,9 +1194,9 @@ class BrowserAutomation:
         if cdp_result and cdp_result.get("status") == "downloaded":
             return {**cdp_result, "method": "cdp_event"}
 
-        # 方法2: 目录轮询 — 等待新文件出现且大小稳定
+        # 方法2: 目录轮询 — 等待新文件出现且大小>0
         deadline = asyncio.get_event_loop().time() + timeout
-        checked_files = {}  # path -> (size, stable_count)
+        seen_sizes = {}  # path -> (size, count) — 用于检测文件写入完成
 
         while asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(poll_interval)
@@ -1152,6 +1208,9 @@ class BrowserAutomation:
             for f in new_files:
                 if not f.is_file():
                     continue
+                # 跳过临时文件（.crdownload / .tmp / .part）
+                if f.suffix.lower() in ('.crdownload', '.tmp', '.part'):
+                    continue
                 try:
                     current_size = f.stat().st_size
                 except OSError:
@@ -1159,7 +1218,16 @@ class BrowserAutomation:
                 if current_size == 0:
                     continue
 
-                prev = checked_files.get(str(f))
+                prev = seen_sizes.get(str(f))
+                # 小文件(<100KB)一次检测即确认；大文件等大小稳定
+                if current_size < 100 * 1024:
+                    logger.info(f"[CDP] 目录轮询确认下载(小文件): {f.name} ({current_size} bytes)")
+                    return {
+                        "status": "downloaded",
+                        "path": str(f),
+                        "size": current_size,
+                        "method": "poll_small",
+                    }
                 if prev is not None and prev[0] == current_size:
                     logger.info(f"[CDP] 目录轮询确认下载: {f.name} ({current_size} bytes)")
                     return {
@@ -1168,7 +1236,18 @@ class BrowserAutomation:
                         "size": current_size,
                         "method": "poll",
                     }
-                checked_files[str(f)] = (current_size, (prev[1] + 1) if prev else 1)
+                seen_sizes[str(f)] = (current_size, (prev[1] + 1) if prev else 1)
+
+            # 也检查所有文件（包括 before_files 中已存在的），防止文件在 before 快照后被覆盖写入
+            all_files = after
+            for f in all_files:
+                if not f.is_file():
+                    continue
+                if f.suffix.lower() in ('.crdownload', '.tmp', '.part'):
+                    continue
+                fpath = str(f)
+                if fpath in {str(x) for x in before}:
+                    continue  # 跳过之前就有的文件
 
         return {"status": "timeout", "message": f"下载未在 {timeout}s 内完成", "method": "timeout"}
 

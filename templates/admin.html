@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BOSS招聘自动化 - 管理后台</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        :root {
+            --bg: #131314; --surface: #1b1b1f; --elevated: #26262c;
+            --text: #e8eaed; --text2: #bdc1c6; --accent: #8ab4f8;
+            --green: #81c995; --red: #f28b82; --border: rgba(255,255,255,.08);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg); color: var(--text); padding: 24px;
+            display: grid; grid-template-rows: auto 1fr; height: 100vh;
+        }
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 24px;
+        }
+        .header h1 { font-size: 18px; }
+        .header-right { display: flex; gap: 12px; align-items: center; }
+        .btn {
+            padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
+            font-size: 13px; font-weight: 500;
+        }
+        .btn-accent { background: var(--accent); color: #131314; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text2); }
+        .btn-danger { background: var(--red); color: #131314; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; margin-right: 4px; }
+        .tab-bar { display: flex; gap: 8px; margin-bottom: 20px; }
+        .tab {
+            padding: 8px 20px; background: var(--elevated); border: 1px solid var(--border);
+            border-radius: 8px 8px 0 0; color: var(--text2); cursor: pointer; font-size: 13px;
+        }
+        .tab.active { background: var(--surface); border-bottom-color: var(--surface); color: var(--accent); }
+        .panel { background: var(--surface); border-radius: 0 12px 12px 12px; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; color: var(--text2); padding: 10px 12px; border-bottom: 1px solid var(--border); font-weight: 500; }
+        td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.04); }
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+            font-weight: 500;
+        }
+        .badge-admin { background: rgba(138,180,248,.15); color: var(--accent); }
+        .badge-user { background: rgba(129,201,149,.15); color: var(--green); }
+        .badge-active { background: rgba(129,201,149,.15); color: var(--green); }
+        .badge-inactive { background: rgba(242,139,130,.15); color: var(--red); }
+        input {
+            padding: 8px 12px; background: var(--elevated); border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text); font-size: 13px; margin-right: 8px;
+        }
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,.6);
+            display: flex; justify-content: center; align-items: center; z-index: 100;
+        }
+        .modal {
+            background: var(--surface); border-radius: 12px; padding: 24px; width: 360px;
+        }
+        .modal h3 { margin-bottom: 16px; }
+        .modal input { width: 100%; margin-bottom: 10px; }
+        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+        .hidden { display: none !important; }
+        .msg { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-top: 12px; }
+        .msg.ok { background: rgba(129,201,149,.1); color: var(--green); }
+        .msg.err { background: rgba(242,139,130,.1); color: var(--red); }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>🔧 管理后台</h1>
+    <div class="header-right">
+        <span style="color:var(--text2);font-size:13px;" id="loginUser"></span>
+        <button class="btn btn-outline" onclick="location.href='/'">驾驶舱</button>
+        <button class="btn btn-outline" onclick="location.href='/dashboard'">👤 我的工作台</button>
+        <button class="btn btn-outline" onclick="logout()">退出</button>
+    </div>
+</div>
+
+<div>
+    <div class="tab-bar">
+        <button class="tab active" onclick="switchPanel('users')" id="tabUsers">👥 用户管理</button>
+        <button class="tab" onclick="switchPanel('stats')" id="tabStats">📊 数据统计</button>
+    </div>
+
+    <!-- 用户管理面板 -->
+    <div class="panel" id="panelUsers">
+        <div style="margin-bottom:16px;">
+            <button class="btn btn-accent" onclick="showAddUser()">+ 添加用户</button>
+            <button class="btn btn-outline" onclick="refreshUsers()" style="margin-left:8px;">🔄 刷新</button>
+        </div>
+        <table>
+            <thead>
+                <tr><th>ID</th><th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            </thead>
+            <tbody id="userTable"></tbody>
+        </table>
+        <div id="userMsg"></div>
+    </div>
+
+    <!-- 数据统计面板 -->
+    <div class="panel hidden" id="panelStats">
+        <div style="margin-bottom:8px;color:var(--text2);font-size:13px;">
+            每用户操作统计（打招呼/下载简历/AI回复/候选人库）
+        </div>
+        <table>
+            <thead>
+                <tr><th>用户</th><th>显示名</th><th>角色</th><th>打招呼</th><th>下载简历</th><th>AI回复</th><th>候选人</th><th>状态</th></tr>
+            </thead>
+            <tbody id="statsTable"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 添加用户弹窗 -->
+<div class="modal-overlay hidden" id="addUserModal">
+    <div class="modal">
+        <h3 id="modalTitle">添加用户</h3>
+        <input type="text" id="modalUser" placeholder="用户名">
+        <input type="text" id="modalName" placeholder="显示名（选填）">
+        <input type="password" id="modalPass" placeholder="密码">
+        <input type="hidden" id="modalUserId">
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal()">取消</button>
+            <button class="btn btn-accent" onclick="saveUser()">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const API = '';
+let token = localStorage.getItem('token');
+if (!token) { location.href = '/login'; }
+
+async function fetchAPI(url, opts={}) {
+    opts.headers = opts.headers || {};
+    opts.headers['Authorization'] = 'Bearer ' + token;
+    const r = await fetch(API + url, opts);
+    if (r.status === 401) { localStorage.clear(); location.href = '/login'; return null; }
+    return r;
+}
+
+function logout() { localStorage.clear(); location.href = '/login'; }
+
+function switchPanel(p) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab' + (p==='users'?'Users':'Stats')).classList.add('active');
+    document.getElementById('panelUsers').classList.toggle('hidden', p!=='users');
+    document.getElementById('panelStats').classList.toggle('hidden', p!=='stats');
+    if (p === 'users') refreshUsers();
+    if (p === 'stats') refreshStats();
+}
+
+// ── 用户管理 ──
+async function refreshUsers() {
+    const r = await fetchAPI('/api/users');
+    if (!r || !r.ok) return;
+    const data = await r.json();
+    const tbody = document.getElementById('userTable');
+    tbody.innerHTML = (data.users || []).map(u => `
+        <tr>
+            <td>${u.id}</td>
+            <td>${u.username}</td>
+            <td>${u.display_name || ''}</td>
+            <td><span class="badge badge-${u.role==='admin'?'admin':'user'}">${u.role}</span></td>
+            <td><span class="badge badge-${u.is_active?'active':'inactive'}">${u.is_active?'正常':'已停用'}</span></td>
+            <td>${(u.created_at||'').substring(0,16)}</td>
+            <td>
+                <button class="btn btn-outline btn-sm" onclick="editUser(${u.id},'${u.username}','${u.display_name||''}','${u.role}')">编辑</button>
+                <button class="btn btn-outline btn-sm" onclick="toggleUser(${u.id}, ${u.is_active})">${u.is_active?'停用':'启用'}</button>
+                ${u.role!=='admin' ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">删除</button>` : ''}
+            </td>
+        </tr>`).join('');
+}
+
+function showAddUser() {
+    document.getElementById('modalTitle').textContent = '添加用户';
+    document.getElementById('modalUserId').value = '';
+    document.getElementById('modalUser').value = '';
+    document.getElementById('modalName').value = '';
+    document.getElementById('modalPass').value = '';
+    document.getElementById('addUserModal').classList.remove('hidden');
+}
+
+function editUser(id, username, displayName, role) {
+    document.getElementById('modalTitle').textContent = '编辑用户';
+    document.getElementById('modalUserId').value = id;
+    document.getElementById('modalUser').value = username;
+    document.getElementById('modalName').value = displayName;
+    document.getElementById('modalPass').value = '';
+    document.getElementById('addUserModal').classList.remove('hidden');
+}
+
+function closeModal() { document.getElementById('addUserModal').classList.add('hidden'); }
+
+async function saveUser() {
+    const id = document.getElementById('modalUserId').value;
+    const username = document.getElementById('modalUser').value.trim();
+    const display_name = document.getElementById('modalName').value.trim();
+    const password = document.getElementById('modalPass').value;
+    if (!username) return msg('请输入用户名', 'err');
+
+    if (id) {
+        const body = { username, display_name };
+        if (password) body.password = password;
+        const r = await fetchAPI(`/api/users/${id}`, { method:'PUT', body:JSON.stringify(body), headers:{'Content-Type':'application/json'} });
+        if (r && r.ok) { closeModal(); refreshUsers(); msg('用户已更新', 'ok'); }
+        else msg('更新失败', 'err');
+    } else {
+        if (!password) return msg('请输入密码', 'err');
+        const r = await fetch(API + '/api/auth/register', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({username, password, display_name})
+        });
+        if (r.ok) { closeModal(); refreshUsers(); msg('用户已创建', 'ok'); }
+        else { const d = await r.json(); msg(d.detail || '创建失败', 'err'); }
+    }
+}
+
+async function toggleUser(id, current) {
+    const r = await fetchAPI(`/api/users/${id}`, { method:'PUT', body:JSON.stringify({is_active:!current}), headers:{'Content-Type':'application/json'} });
+    if (r && r.ok) refreshUsers();
+}
+
+async function deleteUser(id) {
+    if (!confirm('确认删除此用户？')) return;
+    const r = await fetchAPI(`/api/users/${id}`, { method:'DELETE' });
+    if (r && r.ok) { refreshUsers(); msg('用户已删除', 'ok'); }
+}
+
+async function refreshStats() {
+    const r = await fetchAPI('/api/admin/user-stats');
+    if (!r || !r.ok) return;
+    const data = await r.json();
+    document.getElementById('statsTable').innerHTML = (data || []).map(u => `
+        <tr>
+            <td>${u.username}</td>
+            <td>${u.display_name||''}</td>
+            <td><span class="badge badge-${u.role==='admin'?'admin':'user'}">${u.role}</span></td>
+            <td>${u.contact_count||0}</td>
+            <td>${u.resume_count||0}</td>
+            <td>${u.conv_count||0}</td>
+            <td>${u.candidate_count||0}</td>
+            <td><span class="badge badge-${u.is_active?'active':'inactive'}">${u.is_active?'正常':'已停用'}</span></td>
+        </tr>
+    `).join('');
+}
+
+function msg(t, cls) {
+    const m = document.getElementById('userMsg');
+    m.innerHTML = `<div class="msg ${cls}">${t}</div>`;
+    setTimeout(() => m.innerHTML='', 3000);
+}
+
+// init
+document.getElementById('loginUser').textContent = 'admin';
+refreshUsers();
+</script>
+</body>
+</html>

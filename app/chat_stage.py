@@ -87,7 +87,7 @@ def load_candidate_context(
         # 按姓名查找（非唯一，取第一条）
         try:
             db.cursor.execute(
-                "SELECT * FROM candidates WHERE candidate_name = ? LIMIT 1",
+                "SELECT * FROM candidates WHERE candidate_name = %s LIMIT 1",
                 (name,),
             )
             row = db.cursor.fetchone()

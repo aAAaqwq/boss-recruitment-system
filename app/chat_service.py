@@ -15,23 +15,29 @@ from app.logging_config import logger
 _COMPANY_PROFILE_CACHE: Optional[str] = None
 
 
-def _load_company_profile() -> str:
-    """加载公司/岗位背景信息 — 读取 job_info/.selected 中指定的文件"""
-    try:
-        with open('/app/job_info/.selected', encoding='utf-8') as f:
-            selected = f.read().strip()
-        if selected:
-            path = f'/app/job_info/{selected}.txt'
-            with open(path, encoding='utf-8') as f:
+def _load_company_profile(user_id: int = None) -> str:
+    """加载公司/岗位背景信息 — 读取按用户隔离的 job_info/{user_id}/.selected"""
+    bases = []
+    if user_id:
+        bases.append(f'/app/job_info/{user_id}')
+    bases.append('/app/job_info')
+    for base in bases:
+        try:
+            with open(f'{base}/.selected', encoding='utf-8') as f:
+                selected = f.read().strip()
+            if selected:
+                path = f'{base}/{selected}.txt'
+                with open(path, encoding='utf-8') as f:
+                    return f.read().strip()
+        except Exception:
+            pass
+        # 回退
+        try:
+            with open(f'{base}/company_profile.txt', encoding='utf-8') as f:
                 return f.read().strip()
-    except Exception:
-        pass
-    # 兼容回退
-    try:
-        with open('/app/job_info/company_profile.txt', encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception:
-        return ""
+        except Exception:
+            pass
+    return ""
 
 
 class ChatService:
@@ -51,6 +57,7 @@ class ChatService:
         history: Optional[List[Dict]] = None,
         template: Optional[str] = None,
         stage_context: Optional[str] = None,
+        user_id: int = None,
     ) -> Tuple[Optional[str], str]:
         """
         使用DeepSeek生成回复
@@ -73,7 +80,7 @@ class ChatService:
             return None, "DEEPSEEK_API_KEY未配置"
 
         # 与 test_llm.py 完全一致：先加载岗位信息作为前提注入
-        company_context = _load_company_profile()
+        company_context = _load_company_profile(user_id=user_id)
         system_prompt = (
             (company_context + '\n\n' if company_context else '') +
             '你是一名专业的招聘官，正在通过BOSS直聘与候选人交流。'
@@ -157,7 +164,8 @@ class ChatService:
         candidate_name: str,
         candidate_message: str,
         ai_message: str,
-        action: str = "auto_reply"
+        action: str = "auto_reply",
+        user_id: int = None,
     ) -> int:
         """
         保存对话记录到数据库
@@ -175,18 +183,19 @@ class ChatService:
         with self.db as db:
             db.cursor.execute("""
                 INSERT INTO conversations
-                (candidate_name, action, ai_message, candidate_message, detail, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (candidate_name, action, ai_message, candidate_message, detail, created_at, user_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
             """, (
                 candidate_name,
                 action,
                 ai_message,
                 candidate_message,
                 json.dumps({"boss_id": boss_id}),
-                datetime.now().isoformat()
+                datetime.now().isoformat(),
+                user_id,
             ))
             db.conn.commit()
-            return db.cursor.lastrowid
+            row = db.cursor.fetchone(); return row[0] if row else None
 
     def get_conversation_history(
         self,
@@ -205,18 +214,20 @@ class ChatService:
         """
         with self.db as db:
             if candidate_name:
-                rows = db.cursor.execute("""
+                db.cursor.execute("""
                     SELECT * FROM conversations
-                    WHERE candidate_name = ?
+                    WHERE candidate_name = %s
                     ORDER BY created_at DESC
-                    LIMIT ?
-                """, (candidate_name, limit)).fetchall()
+                    LIMIT %s
+                """, (candidate_name, limit))
+                rows = db.cursor.fetchall()
             else:
-                rows = db.cursor.execute("""
+                db.cursor.execute("""
                     SELECT * FROM conversations
                     ORDER BY created_at DESC
-                    LIMIT ?
-                """, (limit,)).fetchall()
+                    LIMIT %s
+                """, (limit,))
+                rows = db.cursor.fetchall()
 
             return [dict(row) for row in rows]
 
@@ -229,12 +240,13 @@ class ChatService:
         """
         with self.db as db:
             # 从candidates表获取需要回复的候选人
-            rows = db.cursor.execute("""
+            db.cursor.execute("""
                 SELECT c.* FROM candidates c
                 WHERE c.status IN ('replied', 'chatting')
                 ORDER BY c.updated_at DESC
                 LIMIT 100
-            """).fetchall()
+            """)
+            rows = db.cursor.fetchall()
 
             return [dict(row) for row in rows]
 
@@ -251,47 +263,27 @@ class ChatService:
             template_id
         """
         with self.db as db:
-            # 确保reply_templates表存在
             db.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS reply_templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    user_id TEXT DEFAULT 'default',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(name, user_id)
-                )
-            """)
-
-            db.cursor.execute("""
-                INSERT OR REPLACE INTO reply_templates (name, content, user_id, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO reply_templates (name, content, user_id, updated_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (name, user_id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING id
             """, (name, content, user_id, datetime.now().isoformat()))
 
             db.conn.commit()
-            return db.cursor.lastrowid
+            row = db.cursor.fetchone(); return row['id'] if row else None
 
     def get_templates(self, user_id: str = "default") -> List[Dict]:
         """获取所有回复模板"""
         with self.db as db:
             db.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS reply_templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    user_id TEXT DEFAULT 'default',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(name, user_id)
-                )
-            """)
-
-            rows = db.cursor.execute("""
                 SELECT * FROM reply_templates
-                WHERE user_id = ?
+                WHERE user_id = %s
                 ORDER BY updated_at DESC
-            """, (user_id,)).fetchall()
+            """, (user_id,))
+            rows = db.cursor.fetchall()
 
             return [dict(row) for row in rows]
 

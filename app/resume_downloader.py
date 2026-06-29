@@ -22,6 +22,15 @@ from app.logging_config import logger
 
 RESUMES_DIR = Path(__file__).parent.parent / "data" / "resumes"
 
+def _resumes_dir(user_id: int = None) -> Path:
+    """按用户隔离的简历目录"""
+    if user_id:
+        d = RESUMES_DIR / str(user_id)
+    else:
+        d = RESUMES_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 # 在 attachment-resume-btns 工具栏中查找下载按钮（基于真实DOM扫描）
 # 下载图标: SVG use xlink:href="#icon-attacthment-download"，位于主文档 .attachment-resume-btns 内
 _JS_FIND_PDF_DOWNLOAD_ARROW = """
@@ -56,39 +65,39 @@ _JS_FIND_PDF_DOWNLOAD_ARROW = """
 """
 
 
-def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str, boss_id: str = None):
+def _update_candidate_resume(db: Database, candidate_name: str, resume_path: str, boss_id: str = None, user_id: int = None):
     """更新 candidates 表的简历路径和状态"""
     try:
         db.cursor.execute(
-            """INSERT INTO candidates (boss_id, candidate_name, status, resume_path, updated_at)
-               VALUES (?, ?, 'resume_downloaded', ?, datetime('now'))
+            """INSERT INTO candidates (boss_id, candidate_name, status, resume_path, updated_at, user_id)
+               VALUES (%s, %s, 'resume_downloaded', %s, NOW(), %s)
                ON CONFLICT(boss_id) DO UPDATE SET
                resume_path = excluded.resume_path,
                status = 'resume_downloaded',
                updated_at = excluded.updated_at""",
-            (boss_id or candidate_name, candidate_name, resume_path),
+            (boss_id or candidate_name, candidate_name, resume_path, user_id),
         )
         db.conn.commit()
     except Exception as e:
         logger.debug(f"[DL] 更新candidates表忽略: {e}")
 
 
-async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -> Dict:
+async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, user_id: int = None) -> Dict:
     """下载已获取的简历 — 主流程
 
     1. 导航聊天页 → 点"已获取简历"筛选 → 拉联系人
     2. 对比数据库跳过已下载过的
     3. 逐个点击 → 点附件简历 → PDF预览 → 点下载箭头 → 关闭预览
     """
-    RESUMES_DIR.mkdir(parents=True, exist_ok=True)
+    resumes_dir = _resumes_dir(user_id)
 
     if not await automation._ensure_session():
         return {"status": "error", "message": "浏览器未连接，请先打开BOSS直聘"}
 
     # 启用 CDP 下载拦截
     if not dry_run:
-        dl_result = await automation.enable_download_interception(str(RESUMES_DIR))
-        logger.info(f"[DL] CDP下载拦截: {dl_result.get('status')} → {RESUMES_DIR}")
+        dl_result = await automation.enable_download_interception(str(resumes_dir))
+        logger.info(f"[DL] CDP下载拦截: {dl_result.get('status')} → {resumes_dir}")
 
     # 导航到聊天页
     nav_result = await navigate_to_chat()
@@ -119,14 +128,15 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
     failed = 0
     details = []
 
-    # 过滤已下载过的
+    # 过滤已下载过的（用平台唯一ID去重）
     targets = []
     for c in contacts:
         name = (c.get("name", "") or "").strip()
         if not name:
             continue
+        dedup_boss_id = c.get("boss_id") or name
         try:
-            ops = db.get_resume_ops(name)
+            ops = db.get_resume_ops(boss_id=dedup_boss_id)
         except Exception:
             ops = []
         already_done = any(
@@ -152,6 +162,9 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
             break
 
         contact_name = (contact.get("name", "") or "").strip()
+        boss_id = contact.get("boss_id") or contact_name  # 优先使用BOSS平台唯一ID
+        if contact_name == "__DIAG__":
+            logger.info(f"[DL] 🔍 诊断: subtitle={contact.get('subtitle', '')}")
         logger.info(f"[DL] 处理 ({i+1}/{len(targets)}, 已下载{downloaded}/{max_count}): {contact_name}")
 
         # 限制弹窗检测
@@ -206,13 +219,14 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
             failed += 1
             continue
 
-        # PDF预览出现 → 找灰色下载箭头
+        # PDF预览出现 → 等待内容加载完成再找下载箭头
+        await asyncio.sleep(3)
         arrow = await automation.execute_js(_JS_FIND_PDF_DOWNLOAD_ARROW)
         if isinstance(arrow, dict) and arrow.get("found"):
             logger.info(f"[DL] {contact_name} 找到下载箭头: {arrow.get('text')} -> ({arrow['x']:.0f},{arrow['y']:.0f})")
             try:
                 # 记录下载前的文件快照（防止关闭预览期间文件已完成）
-                dl_dir = Path(str(RESUMES_DIR))
+                dl_dir = Path(str(resumes_dir))
                 before = set(dl_dir.iterdir()) if dl_dir.exists() else set()
                 await automation.cdp_click_viewport(float(arrow["x"]), float(arrow["y"]))
 
@@ -222,17 +236,17 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
                 await asyncio.sleep(1)
 
                 # 等待下载完成
-                dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=30.0, before_files=before)
+                dl_result = await automation.wait_for_download(str(resumes_dir), timeout=30.0, before_files=before)
                 file_verified = dl_result.get("status") == "downloaded"
                 if file_verified:
                     _update_candidate_resume(db, contact_name,
                                              resume_path=dl_result.get("path", ""),
-                                             boss_id=contact_name)
+                                             boss_id=boss_id, user_id=user_id)
                     downloaded += 1
                     details.append({"name": contact_name, "action": "downloaded",
                                     "file_verified": True, "path": dl_result.get("path")})
                     db.insert_resume_op(
-                        candidate_name=contact_name, action="downloaded",
+                        boss_id=boss_id, candidate_name=contact_name, action="downloaded",
                         resume_downloaded=True,
                         detail=json.dumps({"time": datetime.now().isoformat(),
                                            "path": dl_result.get("path", "")}),
@@ -254,15 +268,15 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False) -
                 logger.info(f"[DL] {contact_name} 回退下载按钮: {dl_btn.get('text')}")
                 try:
                     await automation.cdp_click_viewport(float(dl_btn["x"]), float(dl_btn["y"]))
-                    dl_result = await automation.wait_for_download(str(RESUMES_DIR), timeout=30.0)
+                    dl_result = await automation.wait_for_download(str(resumes_dir), timeout=30.0)
                     if dl_result.get("status") == "downloaded":
                         _update_candidate_resume(db, contact_name,
                                                  resume_path=dl_result.get("path", ""),
-                                                 boss_id=contact_name)
+                                                 boss_id=boss_id, user_id=user_id)
                         downloaded += 1
                         details.append({"name": contact_name, "action": "downloaded",
                                         "file_verified": True, "path": dl_result.get("path")})
-                        db.insert_resume_op(candidate_name=contact_name, action="downloaded",
+                        db.insert_resume_op(boss_id=boss_id, candidate_name=contact_name, action="downloaded",
                                             resume_downloaded=True,
                                             detail=json.dumps({"time": datetime.now().isoformat()}))
                 except Exception:

@@ -2,7 +2,7 @@
 BOSS直聘三位一体系统 - Web API v2.0
 FastAPI后端，提供统一的RESTful接口 + 自动化任务控制
 """
-import os, sys, json, subprocess, sqlite3, asyncio, platform
+import os, sys, json, subprocess, asyncio, platform
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
@@ -21,11 +21,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import authentication module
-from app.auth import verify_token, create_access_token, verify_credentials
+from app.auth import verify_token, create_access_token, verify_credentials, ensure_admin_user, register_user
 # Import logging
 from app.logging_config import api_logger
 # Import automation singleton
 from app.automation import automation
+# Import database
+from app.database import Database
 # Import school whitelists for filter config (lightweight, no heavy deps)
 from app.filter_criteria import DOMESTIC_ELITE_SCHOOLS, US_ELITE_SCHOOLS, UK_ELITE_SCHOOLS, OTHER_ELITE_SCHOOLS, FilterCriteria
 
@@ -38,7 +40,6 @@ INTERNATIONAL_ELITE_SCHOOLS = US_ELITE_SCHOOLS + UK_ELITE_SCHOOLS + OTHER_ELITE_
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 LOGS_DIR = BASE_DIR / "logs"
-DB_PATH = DATA_DIR / "boss_recruitment.db"
 
 DATA_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
@@ -68,6 +69,10 @@ app.add_middleware(
 # 模板和静态文件
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+# 挂载 noVNC 静态文件（用于代理 VNC 桌面）
+_novnc_path = "/usr/share/novnc"
+if os.path.isdir(_novnc_path):
+    app.mount("/novnc", StaticFiles(directory=_novnc_path, html=True), name="novnc")
 
 # ============================================================
 # 平台自适应配置
@@ -237,107 +242,14 @@ async def cancel_current_task(current_user: dict = Depends(verify_token)):
 # 数据库
 # ============================================================
 def get_db():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+    """获取数据库连接（PostgreSQL）"""
+    db = Database()
+    db.connect()
+    return db
 
-def init_db():
-    """初始化数据库表 — 与 database.py 中 Database.init_tables() 保持一致"""
-    conn = get_db()
-    # 候选人表
-    conn.execute('''CREATE TABLE IF NOT EXISTS candidates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        boss_id TEXT NOT NULL UNIQUE,
-        candidate_name TEXT,
-        school TEXT,
-        degree TEXT,
-        years INTEGER,
-        current_role TEXT,
-        expected_role TEXT,
-        expected_city TEXT,
-        skills TEXT,
-        status TEXT DEFAULT 'discovered',
-        contacted_at TEXT,
-        resume_path TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id ON candidates(boss_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON candidates(status)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_school ON candidates(school)")
-
-    # 联系记录表
-    conn.execute('''CREATE TABLE IF NOT EXISTS contact_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        boss_id TEXT NOT NULL,
-        action TEXT NOT NULL,
-        action_date TEXT NOT NULL,
-        success BOOLEAN DEFAULT 1,
-        error_message TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id_action ON contact_records(boss_id, action)")
-
-    # 聊天会话表
-    conn.execute('''CREATE TABLE IF NOT EXISTS chat_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        boss_id TEXT NOT NULL UNIQUE,
-        candidate_name TEXT,
-        current_round_id TEXT,
-        round_index INTEGER DEFAULT 0,
-        history TEXT,
-        last_screen_text TEXT,
-        rounds_sent_today INTEGER DEFAULT 0,
-        last_sent_date TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_id_chat ON chat_sessions(boss_id)")
-
-    # 简历操作表
-    conn.execute('''CREATE TABLE IF NOT EXISTS resume_operations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        candidate_name TEXT,
-        action TEXT,
-        resume_downloaded INTEGER DEFAULT 0,
-        wechat_exchanged INTEGER DEFAULT 0,
-        detail TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_resume_candidate ON resume_operations(candidate_name)")
-
-    # 对话记录表
-    conn.execute('''CREATE TABLE IF NOT EXISTS conversations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        candidate_name TEXT,
-        action TEXT,
-        ai_message TEXT,
-        candidate_message TEXT,
-        detail TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # 运行时状态表
-    conn.execute('''CREATE TABLE IF NOT EXISTS runtime_state (
-        key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-    # 已处理候选人表 (去重用)
-    conn.execute('''CREATE TABLE IF NOT EXISTS processed_candidates (
-        candidate_key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-    # 回复模板表 (岗位话术库)
-    conn.execute('''CREATE TABLE IF NOT EXISTS reply_templates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        content TEXT NOT NULL,
-        user_id TEXT DEFAULT 'default',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(name, user_id)
-    )''')
-
-    conn.commit()
-    conn.close()
-
-init_db()
+@app.on_event("startup")
+def on_startup():
+    ensure_admin_user()
 
 # ============================================================
 # API端点
@@ -347,6 +259,28 @@ async def root(request: Request):
     """主页 - 简化版Web UI"""
     html_path = BASE_DIR / "templates" / "index.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """登录/注册页"""
+    html_path = BASE_DIR / "templates" / "login.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request):
+    """管理后台（需admin角色）"""
+    html_path = BASE_DIR / "templates" / "admin.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
+    """用户驾驶舱"""
+    html_path = BASE_DIR / "templates" / "index.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
 
 @app.get("/api/automation/status")
 async def automation_status(current_user: dict = Depends(verify_token)):
@@ -406,7 +340,7 @@ async def get_candidates(
                 FROM resume_operations
             ) ro ON (ro.candidate_name = c.boss_id AND ro.rn = 1)
             ORDER BY c.updated_at DESC
-            LIMIT ?
+            LIMIT %s
         """
         rows = conn.execute(query, (limit,)).fetchall()
 
@@ -441,6 +375,7 @@ async def get_candidates(
                 "resume_path": resume_path,
                 "resume_filename": resume_filename,
                 "resume_action": row_dict["resume_action"] or "",
+                "interview_status": row_dict.get("interview_status") or "",
                 "contacted_at": row_dict["contacted_at"],
                 "created_at": row_dict["created_at"],
             })
@@ -449,7 +384,7 @@ async def get_candidates(
         if not candidates:
             rows = conn.execute(
                 "SELECT candidate_name as boss_id, candidate_name, action, resume_downloaded, detail, created_at "
-                "FROM resume_operations ORDER BY created_at DESC LIMIT ?",
+                "FROM resume_operations ORDER BY created_at DESC LIMIT %s",
                 (limit,),
             ).fetchall()
             for row in rows:
@@ -500,7 +435,7 @@ async def get_stats(current_user: dict = Depends(verify_token)):
                 "SELECT action as status, COUNT(*) as count FROM contact_records GROUP BY action"
             ).fetchall()
             today_processed = conn.execute(
-                "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE action = 'contacted' AND date(action_date) = date('now')"
+                "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE action = 'contacted' AND action_date = CURRENT_DATE::text"
             ).fetchone()[0]
             return {
                 "total_candidates": total,
@@ -511,11 +446,11 @@ async def get_stats(current_user: dict = Depends(verify_token)):
         # 回退: processed_candidates
         total = conn.execute("SELECT COUNT(*) FROM processed_candidates").fetchone()[0]
         today_processed = conn.execute(
-            "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = date('now')"
+            "SELECT COUNT(*) FROM processed_candidates WHERE created_at::date = CURRENT_DATE"
         ).fetchone()[0]
         # 简历下载统计
         resume_count = conn.execute(
-            "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1"
+            "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = true"
         ).fetchone()[0]
         return {
             "total_candidates": total,
@@ -536,18 +471,36 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str
+    role: str = "user"
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
 async def login(req: LoginRequest):
     """用户登录 - 返回JWT访问令牌"""
-    if verify_credentials(req.username, req.password):
-        token = create_access_token({"sub": req.username})
-        return LoginResponse(access_token=token, token_type="bearer")
+    user = verify_credentials(req.username, req.password)
+    if user:
+        token = create_access_token({
+            "sub": user["username"],
+            "user_id": user["id"],
+            "role": user["role"],
+        })
+        return LoginResponse(access_token=token, token_type="bearer", role=user.get("role", "user"))
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="认证失败：用户名或密码错误"
     )
+
+
+@app.post("/api/auth/register")
+async def register(req: LoginRequest):
+    """用户注册"""
+    result = register_user(req.username, req.password)
+    if result["status"] == "error":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"]
+        )
+    return {"status": "ok", "user": result["user"]}
 
 
 @app.get("/health")
@@ -668,14 +621,14 @@ async def browser_type_send(req: ExecuteScriptRequest):
 
 
 @app.post("/api/browser/open-boss")
-async def open_boss_browser():
+async def open_boss_browser(current_user: dict = Depends(verify_token)):
     """打开BOSS直聘 - 复用已有Chrome或启动新实例，然后导航到zhipin.com
 
     智能流程：
     1. 如果 automation 已连接且有活跃 session → 直接导航
     2. 如果 CDP 9222 端口有 Chrome 但未连接 → connect() 复用
     3. 否则 → connect() 自动启动新 Chrome（带 --no-sandbox）
-    4. 导航到 zhipin.com + 注入 cookie
+    4. 导航到 zhipin.com + 注入当前用户的 cookie
     """
     import socket
 
@@ -700,10 +653,11 @@ async def open_boss_browser():
     nav_result = await automation.navigate("https://www.zhipin.com/")
     await asyncio.sleep(3)
 
-    # Step 5: 注入已保存的 cookie
+    # Step 5: 注入当前用户的 BOSS cookie
+    user_id = current_user.get("id") or current_user.get("user_id")
     cookie_result = None
     try:
-        cookie_result = await automation.import_cookies()
+        cookie_result = await automation.import_cookies(user_id=user_id)
         api_logger.info(f"Cookie注入结果: {cookie_result}")
         if cookie_result and cookie_result.get("imported", 0) > 0:
             await asyncio.sleep(1)
@@ -722,29 +676,32 @@ async def open_boss_browser():
 
 
 @app.get("/api/browser/check-login")
-async def check_browser_login():
+async def check_browser_login(current_user: dict = Depends(verify_token)):
     """检测 BOSS直聘登录状态"""
-    return await automation.check_login()
+    user_id = current_user.get("id") or current_user.get("user_id")
+    return await automation.check_login(user_id=user_id)
 
 
 @app.post("/api/browser/export-cookies")
-async def export_cookies():
-    """导出当前浏览器的所有 cookie 到 /app/data/cookies.json
+async def export_cookies(current_user: dict = Depends(verify_token)):
+    """导出当前浏览器的所有 cookie 到按用户隔离的文件
 
     用于持久化登录态：在浏览器已登录时调用，
     将 cookie 导出为 JSON 文件保存到 Docker volume 中。
     """
-    return await automation.export_cookies()
+    user_id = current_user.get("id") or current_user.get("user_id")
+    return await automation.export_cookies(user_id=user_id)
 
 
 @app.post("/api/browser/import-cookies")
-async def import_cookies():
-    """从 /app/data/cookies.json 恢复 cookie 到浏览器
+async def import_cookies(current_user: dict = Depends(verify_token)):
+    """从按用户隔离的文件恢复 cookie 到浏览器
 
     用于恢复登录态：浏览器启动后调用，
     将之前导出的 cookie 写入浏览器以恢复登录状态。
     """
-    return await automation.import_cookies()
+    user_id = current_user.get("id") or current_user.get("user_id")
+    return await automation.import_cookies(user_id=user_id)
 
 
 # ============================================================
@@ -788,12 +745,13 @@ async def reply_messages(req: WorkflowRequest, current_user: dict = Depends(veri
         "results": [],
         "start_time": datetime.now().isoformat(),
     }
+    user_id = current_user.get("user_id")
     api_logger.info(f"[F7] 启动批量回复任务，上限 {req.limit} 人")
 
     import threading as _th
     _th.Thread(
         target=_run_reply_in_thread,
-        args=(req.limit, req.dry_run, req.custom_template),
+        args=(req.limit, req.dry_run, req.custom_template, user_id),
         daemon=True,
     ).start()
 
@@ -803,7 +761,7 @@ async def reply_messages(req: WorkflowRequest, current_user: dict = Depends(veri
     }
 
 
-def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template: Optional[str] = None):
+def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template: Optional[str] = None, user_id: int = None):
     """在独立线程中运行批量回复工作流"""
     global _reply_task_status, _active_task_type
     import asyncio as _asyncio
@@ -828,12 +786,13 @@ def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template:
                 _reply_task_status["message"] = "浏览器连接失败"
                 return
 
-            await automation.import_cookies()
+            await automation.import_cookies(user_id=user_id)
 
             result = await _batch_reply_impl(
                 max_count=max_count,
                 template=custom_template,
                 dry_run=dry_run,
+                user_id=user_id,
             )
 
             _reply_task_status["status"] = result.get("status", "completed")
@@ -883,6 +842,10 @@ class BatchResumeRequest(BaseModel):
     limit: int = 10
     candidate_ids: Optional[List[str]] = None  # 指定候选人ID列表
     dry_run: bool = False  # 干跑模式（只扫描不操作）
+    interview_type: Optional[str] = None  # "线下" / "线上" / None(不限)
+    interview_time: Optional[str] = None  # "hh:mm" 如 "08:00"
+    interview_date: Optional[str] = None  # "YYYY-MM-DD" 如 "2026-06-25"
+    boss_id: Optional[str] = None  # 指定候选人 boss_id（约单个）
 
 
 class ResumeInfo(BaseModel):
@@ -930,13 +893,14 @@ async def batch_download_resumes(
         "message": f"正在处理 {req.limit} 个候选人...",
         "start_time": datetime.now().isoformat()
     }
+    user_id = current_user.get("user_id")
     api_logger.info(f"启动批量简历下载任务，上限 {req.limit} 人")
 
     # 在独立线程中运行（nodriver 对象绑定到事件循环）
     import threading as _th
     _th.Thread(
         target=_run_resume_in_thread,
-        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False),
+        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False, user_id),
         daemon=True
     ).start()
 
@@ -946,7 +910,7 @@ async def batch_download_resumes(
     }
 
 
-def _run_resume_in_thread(max_count: int, dry_run: bool = False):
+def _run_resume_in_thread(max_count: int, dry_run: bool = False, user_id: int = None):
     """在独立线程中运行简历收集"""
     global resume_task_status, _active_task_type
     import asyncio as _asyncio
@@ -972,13 +936,13 @@ def _run_resume_in_thread(max_count: int, dry_run: bool = False):
                 return
 
             # F6: 检查登录状态（与F7保持一致）
-            login_status = await automation.check_login()
+            login_status = await automation.check_login(user_id=user_id)
             if not login_status.get("logged_in"):
                 resume_task_status["status"] = "error"
                 resume_task_status["message"] = "BOSS直聘未登录，请先在VNC中扫码登录"
                 return
 
-            result = await collect_resumes(max_count=max_count, dry_run=dry_run)
+            result = await collect_resumes(max_count=max_count, dry_run=dry_run, user_id=user_id)
 
             resume_task_status["status"] = result.get("status", "completed")
             resume_task_status["processed"] = result.get("downloaded", 0)
@@ -1028,6 +992,18 @@ _received_resume_task_status: Dict[str, Any] = {
     "total": 0, "message": "", "details": [],
 }
 
+# === F9 批量约面试任务状态 ===
+_interview_invite_task_status: Dict[str, Any] = {
+    "status": "idle", "invited": 0, "skipped": 0, "failed": 0,
+    "total": 0, "message": "", "details": [],
+}
+
+# === AI简历分析任务状态 ===
+_resume_analyze_task_status: Dict[str, Any] = {
+    "status": "idle", "analyzed": 0, "matched": 0, "not_matched": 0,
+    "total": 0, "message": "",
+}
+
 
 @app.post("/api/resume/received")
 async def download_received_resumes(
@@ -1064,12 +1040,13 @@ async def download_received_resumes(
         "details": [],
         "start_time": datetime.now().isoformat(),
     }
+    user_id = current_user.get("user_id")
     api_logger.info(f"[F8] 启动已获取简历下载任务，上限 {req.limit} 人")
 
     import threading as _th
     _th.Thread(
         target=_run_received_resume_in_thread,
-        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False),
+        args=(req.limit, req.dry_run if hasattr(req, 'dry_run') else False, user_id),
         daemon=True,
     ).start()
 
@@ -1079,7 +1056,7 @@ async def download_received_resumes(
     }
 
 
-def _run_received_resume_in_thread(max_count: int, dry_run: bool = False):
+def _run_received_resume_in_thread(max_count: int, dry_run: bool = False, user_id: int = None):
     """在独立线程中运行已获取简历下载"""
     global _received_resume_task_status, _active_task_type
     import asyncio as _asyncio
@@ -1103,13 +1080,13 @@ def _run_received_resume_in_thread(max_count: int, dry_run: bool = False):
                 _received_resume_task_status["message"] = "浏览器连接失败"
                 return
 
-            login_status = await automation.check_login()
+            login_status = await automation.check_login(user_id=user_id)
             if not login_status.get("logged_in"):
                 _received_resume_task_status["status"] = "error"
                 _received_resume_task_status["message"] = "BOSS直聘未登录，请先在VNC中扫码登录"
                 return
 
-            result = await collect_received_resumes(max_count=max_count, dry_run=dry_run)
+            result = await collect_received_resumes(max_count=max_count, dry_run=dry_run, user_id=user_id)
 
             _received_resume_task_status["status"] = result.get("status", "completed")
             _received_resume_task_status["downloaded"] = result.get("downloaded", 0)
@@ -1154,6 +1131,309 @@ async def get_received_resume_status(current_user: dict = Depends(verify_token))
     return _received_resume_task_status
 
 
+# ════════════════════════════════════════════════════════════════
+# AI 简历分析
+# ════════════════════════════════════════════════════════════════
+
+@app.post("/api/resume/analyze")
+async def start_resume_analyze(
+    req: BatchResumeRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """AI分析简历与岗位匹配度"""
+    global _resume_analyze_task_status
+
+    if _resume_analyze_task_status.get("status") == "running":
+        return {"status": "error", "message": "已有分析任务正在运行"}
+
+    _resume_analyze_task_status = {
+        "status": "running",
+        "analyzed": 0, "matched": 0, "not_matched": 0,
+        "total": req.limit,
+        "message": f"正在分析最多 {req.limit} 份简历...",
+        "start_time": datetime.now().isoformat(),
+    }
+    api_logger.info(f"[Analyze] 启动AI简历分析，上限 {req.limit} 人")
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    import threading as _th
+    _th.Thread(
+        target=_run_analyze_in_thread,
+        args=(req.limit, user_id),
+        daemon=True,
+    ).start()
+
+    return {"status": "started", "message": f"简历分析任务已启动，上限 {req.limit} 人"}
+
+
+def _run_analyze_in_thread(limit: int, user_id: int = None):
+    global _resume_analyze_task_status
+    import asyncio as _asyncio
+
+    async def _main():
+        try:
+            from app.resume_analyzer import _analyze_resumes_impl
+            result = await _analyze_resumes_impl(limit, user_id=user_id)
+            _resume_analyze_task_status["status"] = result.get("status", "completed")
+            _resume_analyze_task_status["analyzed"] = result.get("analyzed", 0)
+            _resume_analyze_task_status["matched"] = result.get("matched", 0)
+            _resume_analyze_task_status["not_matched"] = result.get("not_matched", 0)
+            _resume_analyze_task_status["message"] = result.get("message", "")
+            _resume_analyze_task_status["end_time"] = datetime.now().isoformat()
+            api_logger.info(f"[Analyze] 完成: {_resume_analyze_task_status['message']}")
+        except Exception as e:
+            import traceback
+            _resume_analyze_task_status["status"] = "error"
+            _resume_analyze_task_status["message"] = str(e)
+            api_logger.error(f"[Analyze] 失败: {e}\n{traceback.format_exc()}")
+
+    try:
+        _asyncio.run(_main())
+    except Exception as e:
+        _resume_analyze_task_status["status"] = "error"
+        _resume_analyze_task_status["message"] = str(e)
+
+
+@app.get("/api/resume/analyze-status")
+async def get_analyze_status(current_user: dict = Depends(verify_token)):
+    """获取AI简历分析任务状态"""
+    return _resume_analyze_task_status
+
+
+@app.get("/api/resume/analyze-reports")
+async def list_analyze_reports(current_user: dict = Depends(verify_token)):
+    """列出当前用户的 AI 分析报告"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    rdir = DATA_DIR / "resumes" / str(user_id) if user_id else DATA_DIR / "resumes"
+    reports = []
+    if rdir.exists():
+        for f in sorted(rdir.glob("analyze_*.md"), reverse=True):
+            reports.append({
+                "filename": f.name,
+                "size": f.stat().st_size,
+                "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+            })
+    return reports
+
+
+@app.get("/api/resume/analyze-reports/{filename}")
+async def get_analyze_report(filename: str, current_user: dict = Depends(verify_token)):
+    """读取指定分析报告内容"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    rdir = DATA_DIR / "resumes" / str(user_id) if user_id else DATA_DIR / "resumes"
+    filepath = rdir / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="报告不存在")
+    return {"filename": filename, "content": filepath.read_text(encoding="utf-8")}
+
+
+# ════════════════════════════════════════════════════════════════
+# noVNC 代理 — 通过 8002 端口代理 6901 的 noVNC 服务
+# ════════════════════════════════════════════════════════════════
+
+@app.websocket("/websockify")
+async def proxy_novnc_websocket(ws: Any):
+    """代理 noVNC WebSocket 连接到本地 6901"""
+    await ws.accept()
+    reader, writer = None, None
+    try:
+        # 连接到本地的 websockify
+        reader, writer = await asyncio.open_connection("127.0.0.1", 6901)
+        # 发送 WebSocket 升级请求
+        request = (
+            "GET /websockify HTTP/1.1\r\n"
+            "Host: 127.0.0.1:6901\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        )
+        writer.write(request.encode())
+        await writer.drain()
+        # 读取 websockify 的升级响应
+        response = await reader.readuntil(b"\r\n\r\n")
+        if b"101" not in response:
+            await ws.close(code=1011)
+            return
+
+        async def fwd_cli():
+            while True:
+                try:
+                    data = await ws.receive()
+                    if "text" in data:
+                        writer.write(data["text"].encode())
+                    elif "bytes" in data:
+                        writer.write(data["bytes"])
+                    await writer.drain()
+                except Exception:
+                    break
+        async def fwd_srv():
+            while True:
+                try:
+                    data = await reader.read(65536)
+                    if not data:
+                        break
+                    await ws.send_bytes(data)
+                except Exception:
+                    break
+        await asyncio.gather(fwd_cli(), fwd_srv())
+    except Exception:
+        pass
+    finally:
+        try: await ws.close()
+        except Exception: pass
+        if writer:
+            try: writer.close()
+            except Exception: pass
+
+
+# ════════════════════════════════════════════════════════════════
+# 批量约面试 (F9)
+# ════════════════════════════════════════════════════════════════
+
+@app.post("/api/workflow/invite-interview")
+async def batch_invite_interview(
+    req: BatchResumeRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """批量约面试 — 对标记为可约面的候选人发起约面试（测试模式）"""
+    global _interview_invite_task_status, _active_task_type, _lock_acquired_at
+
+    _force_unlock_if_stale()
+    if not _browser_task_lock.acquire(blocking=False):
+        return {"status": "error", "message": f"浏览器正被 {_active_task_type} 任务占用，请稍后重试"}
+
+    if _interview_invite_task_status.get("status") == "running":
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
+        return {"status": "error", "message": "已有约面试任务正在运行"}
+
+    _active_task_type = "F9-interview"
+    _lock_acquired_at = __import__('time').time()
+    _interview_invite_task_status = {
+        "status": "running",
+        "invited": 0, "skipped": 0, "failed": 0,
+        "total": req.limit,
+        "message": f"正在处理最多 {req.limit} 个候选人...",
+        "details": [],
+        "start_time": datetime.now().isoformat(),
+    }
+    api_logger.info(f"[F9] 启动批量约面试任务，上限 {req.limit} 人")
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    interview_type = req.interview_type
+    interview_time = req.interview_time
+    interview_date = req.interview_date
+    boss_id = req.boss_id
+    import threading as _th
+    _th.Thread(
+        target=_run_invite_interview_in_thread,
+        args=(req.limit, user_id, interview_type, interview_time, interview_date, boss_id),
+        daemon=True,
+    ).start()
+
+    return {"status": "started", "message": f"批量约面试任务已启动，上限 {req.limit} 人"}
+
+
+def _run_invite_interview_in_thread(max_count: int, user_id: int = None, interview_type: str = None, interview_time: str = None, interview_date: str = None, boss_id: str = None):
+    global _interview_invite_task_status, _active_task_type
+    import asyncio as _asyncio
+
+    async def _main():
+        from app.automation import cancel_event
+        cancel_event.clear()
+        try:
+            from app.interview_inviter import _batch_invite_interview_impl
+        except ImportError as e:
+            _interview_invite_task_status["status"] = "error"
+            _interview_invite_task_status["message"] = f"模块未就绪: {e}"
+            api_logger.error(f"[F9] 失败: 模块导入错误: {e}")
+            return
+
+        try:
+            automation.reset_for_thread()
+            conn = await automation.connect()
+            if conn.get("status") not in ("connected", "already_connected"):
+                _interview_invite_task_status["status"] = "error"
+                _interview_invite_task_status["message"] = "浏览器连接失败"
+                return
+
+            login_status = await automation.check_login(user_id=user_id)
+            if login_status.get("need_login"):
+                _interview_invite_task_status["status"] = "error"
+                _interview_invite_task_status["message"] = "BOSS直聘未登录，请先在Dashboard中登录"
+                return
+
+            result = await _batch_invite_interview_impl(max_count, user_id=user_id, interview_type=interview_type, interview_time=interview_time, interview_date=interview_date, target_boss_id=boss_id)
+            _interview_invite_task_status["status"] = result.get("status", "completed")
+            _interview_invite_task_status["invited"] = result.get("invited", 0)
+            _interview_invite_task_status["skipped"] = result.get("skipped", 0)
+            _interview_invite_task_status["failed"] = result.get("failed", 0)
+            _interview_invite_task_status["total"] = result.get("total_scanned", 0)
+            _interview_invite_task_status["message"] = (
+                f"已约面:{result.get('invited',0)} "
+                f"跳过:{result.get('skipped',0)} "
+                f"失败:{result.get('failed',0)}"
+            )
+            _interview_invite_task_status["details"] = result.get("details", [])
+            _interview_invite_task_status["end_time"] = datetime.now().isoformat()
+            api_logger.info(f"[F9] 完成: {_interview_invite_task_status['message']}")
+        except Exception as e:
+            import traceback
+            _interview_invite_task_status["status"] = "error"
+            _interview_invite_task_status["message"] = str(e)
+            api_logger.error(f"[F9] 失败: {e}\n{traceback.format_exc()}")
+
+    try:
+        _asyncio.run(_main())
+    except Exception as e:
+        _interview_invite_task_status["status"] = "error"
+        _interview_invite_task_status["message"] = str(e)
+        api_logger.error(f"[F9] 线程失败: {e}")
+    finally:
+        global _active_task_type, _lock_acquired_at
+        _active_task_type = None
+        _lock_acquired_at = None
+        try:
+            _browser_task_lock.release()
+        except RuntimeError:
+            pass
+
+
+@app.get("/api/workflow/invite-interview-status")
+async def get_invite_interview_status(current_user: dict = Depends(verify_token)):
+    """获取批量约面试任务状态"""
+    return _interview_invite_task_status
+
+
+@app.get("/api/candidates/recommend-interview")
+async def list_recommend_interview(current_user: dict = Depends(verify_token)):
+    """获取当前用户可约面的候选人列表（含AI分析理由）"""
+    from app.database import Database
+    user_id = current_user.get("id") or current_user.get("user_id")
+    db = Database()
+    db.connect()
+    db.init_tables()
+    try:
+        candidates = db.get_recommend_interview_candidates(user_id=user_id)
+        return [
+            {
+                "boss_id": c.get("boss_id", ""),
+                "name": c.get("candidate_name", ""),
+                "school": c.get("school", ""),
+                "degree": c.get("degree", ""),
+                "years": c.get("years", 0),
+                "reason": c.get("interview_reason", ""),
+            }
+            for c in candidates
+        ]
+    finally:
+        db.close()
+
+
 @app.get("/api/resume/list")
 async def list_resumes(
     status: Optional[str] = None,
@@ -1176,16 +1456,16 @@ async def list_resumes(
         if status:
             rows = conn.execute(
                 """SELECT * FROM resume_operations
-                   WHERE action LIKE ?
+                   WHERE action LIKE %s
                    ORDER BY created_at DESC
-                   LIMIT ?""",
+                   LIMIT %s""",
                 (f"%{status}%", limit)
             ).fetchall()
         else:
             rows = conn.execute(
                 """SELECT * FROM resume_operations
                    ORDER BY created_at DESC
-                   LIMIT ?""",
+                   LIMIT %s""",
                 (limit,)
             ).fetchall()
 
@@ -1196,8 +1476,9 @@ async def list_resumes(
             file_size = 0
             file_exists = False
 
-            # 尝试匹配简历文件
-            resumes_dir = DATA_DIR / "resumes"
+            # 尝试匹配简历文件（按用户隔离）
+            user_id = current_user.get("id") or current_user.get("user_id")
+            resumes_dir = DATA_DIR / "resumes" / str(user_id) if user_id else DATA_DIR / "resumes"
             if resumes_dir.exists():
                 # 根据候选人名字查找简历文件
                 candidate_name = row["candidate_name"]
@@ -1242,7 +1523,7 @@ async def download_resume(
     try:
         # 获取简历记录
         row = conn.execute(
-            "SELECT * FROM resume_operations WHERE id = ?",
+            "SELECT * FROM resume_operations WHERE id = %s",
             (resume_id,)
         ).fetchone()
 
@@ -1251,8 +1532,9 @@ async def download_resume(
 
         candidate_name = row["candidate_name"]
 
-        # 查找简历文件
-        resumes_dir = DATA_DIR / "resumes"
+        # 查找简历文件（按用户隔离）
+        user_id = current_user.get("id") or current_user.get("user_id")
+        resumes_dir = DATA_DIR / "resumes" / str(user_id) if user_id else DATA_DIR / "resumes"
         file_path = None
 
         for ext in [".pdf", ".doc", ".docx"]:
@@ -1288,7 +1570,7 @@ async def get_resume_stats(current_user: dict = Depends(verify_token)):
 
         rows = conn.execute("SELECT action, resume_downloaded FROM resume_operations").fetchall()
         for row in rows:
-            if row["resume_downloaded"] == 1:
+            if row["resume_downloaded"]:
                 downloaded += 1
             elif "requested" in row["action"]:
                 requested += 1
@@ -1407,10 +1689,11 @@ async def start_filter_contact(
 
         # 在独立线程中运行，避免阻塞 FastAPI 事件循环
         # nodriver 对象绑定到事件循环，必须在独立线程中创建新的事件循环
+        user_id = current_user.get("user_id")
         import threading
         thread = threading.Thread(
             target=_run_filter_contact_in_thread,
-            args=(task_id, req.daily_cap, req.batch_limit, criteria, req.dry_run),
+            args=(task_id, req.daily_cap, req.batch_limit, criteria, req.dry_run, user_id),
             daemon=True
         )
 
@@ -1441,7 +1724,8 @@ def _run_filter_contact_in_thread(
     daily_cap: int,
     batch_limit: int,
     criteria: "FilterCriteria",
-    dry_run: bool
+    dry_run: bool,
+    user_id: int = None,
 ):
     """在独立线程中运行筛选打招呼任务，避免阻塞 FastAPI 事件循环。
 
@@ -1469,9 +1753,9 @@ def _run_filter_contact_in_thread(
         # 问题：新创建的浏览器实例没有 cookie，check_login 会失败
         # 解决：connect → import_cookies → navigate → wait → check_login → retry
 
-        # Step 1: 立即导入已保存的 cookie
-        await automation.import_cookies()
-        api_logger.info(f"任务 {task_id} 已导入 cookie（连接后立即）")
+        # Step 1: 立即导入当前用户已保存的 cookie
+        await automation.import_cookies(user_id=user_id)
+        api_logger.info(f"任务 {task_id} 已导入 cookie（user_id={user_id}）")
 
         # Step 2: 显式导航到推荐页并等待 cookie 生效
         await automation.navigate("https://www.zhipin.com/web/chat/recommend")
@@ -1481,7 +1765,7 @@ def _run_filter_contact_in_thread(
         # Step 3: 检查登录状态（带重试）
         login_checked = False
         for attempt in range(3):  # 最多 3 次尝试
-            login_status = await automation.check_login()
+            login_status = await automation.check_login(user_id=user_id)
             if login_status.get("logged_in"):
                 login_checked = True
                 api_logger.info(f"任务 {task_id} 登录检测成功 (尝试 {attempt + 1}/3)")
@@ -1519,6 +1803,7 @@ def _run_filter_contact_in_thread(
             min_years=criteria.min_years,
             dry_run=dry_run,
             criteria=criteria,
+            user_id=user_id,
         )
 
         _filter_tasks[task_id]["status"] = result.get("status", "unknown")
@@ -1630,7 +1915,7 @@ async def get_filter_config(current_user: dict = Depends(verify_token)):
     try:
         conn = get_db()
         row = conn.execute(
-            "SELECT value FROM runtime_state WHERE key = ?", ("filter_config",)
+            "SELECT value FROM runtime_state WHERE key = %s", ("filter_config",)
         ).fetchone()
         conn.close()
         if row:
@@ -1676,7 +1961,8 @@ async def update_filter_config(
 
         # 保存到runtime_state表
         conn.execute(
-            "INSERT OR REPLACE INTO runtime_state (key, value, updated_at) VALUES (?, ?, ?)",
+            "INSERT INTO runtime_state (key, value, updated_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
             ("filter_config", config_json, datetime.now().isoformat())
         )
         conn.commit()
@@ -1842,22 +2128,21 @@ async def get_daily_trend(
     try:
         trend = []
         for i in range(days - 1, -1, -1):
-            # Compute date label via SQLite, then reuse as parameter
-            row = conn.execute("SELECT date('now', ?)", (f'-{int(i)} days',)).fetchone()
-            date_label = row[0]
+            from datetime import date as _date, timedelta as _td
+            date_label = (_date.today() - _td(days=i)).strftime("%Y-%m-%d")
 
             contacted = conn.execute(
-                "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = ?",
+                "SELECT COUNT(*) FROM processed_candidates WHERE created_at::date = %s",
                 (date_label,),
             ).fetchone()[0]
 
             resumes = conn.execute(
-                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1 AND date(created_at) = ?",
+                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = true AND created_at::date = %s",
                 (date_label,),
             ).fetchone()[0]
 
             replies = conn.execute(
-                "SELECT COUNT(*) FROM conversations WHERE action = 'auto_reply' AND date(created_at) = ?",
+                "SELECT COUNT(*) FROM conversations WHERE action = 'auto_reply' AND created_at::date = %s",
                 (date_label,),
             ).fetchone()[0]
 
@@ -1893,16 +2178,16 @@ async def get_contact_records(
         params: list = []
 
         if action:
-            conditions.append("action = ?")
+            conditions.append("action = %s")
             params.append(action)
         if date:
-            conditions.append("date(action_date) = ?")
+            conditions.append("action_date = %s")
             params.append(date)
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        query += " ORDER BY created_at DESC LIMIT ?"
+        query += " ORDER BY created_at DESC LIMIT %s"
         params.append(limit)
 
         rows = conn.execute(query, params).fetchall()
@@ -1930,7 +2215,7 @@ async def get_conversation_sessions(
                FROM conversations
                GROUP BY candidate_name
                ORDER BY last_at DESC
-               LIMIT ?""",
+               LIMIT %s""",
             (limit * 3,),  # 多取3倍数据，清洗后再截断
         ).fetchall()
 
@@ -1986,7 +2271,8 @@ async def update_daily_caps(
             "daily_chat_rounds_cap": req.daily_chat_rounds_cap,
         }
         conn.execute(
-            "INSERT OR REPLACE INTO runtime_state (key, value, updated_at) VALUES (?, ?, ?)",
+            "INSERT INTO runtime_state (key, value, updated_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
             ("daily_caps", json.dumps(caps), datetime.now().isoformat()),
         )
         conn.commit()
@@ -2073,7 +2359,8 @@ async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
     login_status = {"logged_in": False}
     if automation._connected:
         try:
-            login_result = await automation.check_login()
+            user_id = current_user.get("id") or current_user.get("user_id")
+            login_result = await automation.check_login(user_id=user_id)
             login_status["logged_in"] = login_result.get("logged_in", False)
         except Exception:
             login_status["logged_in"] = False
@@ -2082,6 +2369,8 @@ async def get_all_tasks_status(current_user: dict = Depends(verify_token)):
         "f5_filter": f5_status,
         "f6_resume": f6_status,
         "f8_received": _received_resume_task_status,
+        "f9_interview": _interview_invite_task_status,
+        "resume_analyze": _resume_analyze_task_status,
         "f7_reply": f7_status,
         "browser": browser_status,
         "login": login_status,
@@ -2114,24 +2403,24 @@ async def get_daily_trend(
             cr_count = conn.execute("SELECT COUNT(*) FROM contact_records").fetchone()[0]
             if cr_count > 0:
                 contacted = conn.execute(
-                    "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE date(action_date) = ?",
+                    "SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE action_date = %s",
                     (d,)
                 ).fetchone()[0]
             else:
                 contacted = conn.execute(
-                    "SELECT COUNT(*) FROM processed_candidates WHERE date(created_at) = ?",
+                    "SELECT COUNT(*) FROM processed_candidates WHERE created_at::date = %s",
                     (d,)
                 ).fetchone()[0]
 
             # 简历下载数
             resumes = conn.execute(
-                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = 1 AND date(created_at) = ?",
+                "SELECT COUNT(*) FROM resume_operations WHERE resume_downloaded = true AND created_at::date = %s",
                 (d,)
             ).fetchone()[0]
 
             # AI回复数（conversations 中 ai_message 非空）
             replies = conn.execute(
-                "SELECT COUNT(*) FROM conversations WHERE date(created_at) = ? AND ai_message IS NOT NULL AND ai_message != ''",
+                "SELECT COUNT(*) FROM conversations WHERE created_at::date = %s AND ai_message IS NOT NULL AND ai_message != ''",
                 (d,)
             ).fetchone()[0]
 
@@ -2156,10 +2445,166 @@ async def get_daily_trend(
 
 
 # ============================================================
+# 用户管理
+# ============================================================
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    role: str = "user"
+
+class UpdateUserRequest(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@app.get("/api/users")
+async def list_users(current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    with Database() as db:
+        return {"users": db.list_users()}
+
+
+@app.post("/api/users")
+async def create_user(req: CreateUserRequest, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    from app.auth import hash_password
+    with Database() as db:
+        existing = db.get_user_by_username(req.username)
+        if existing:
+            raise HTTPException(status_code=400, detail=f"用户名 {req.username} 已存在")
+        user = db.create_user(
+            username=req.username,
+            password_hash=hash_password(req.password),
+            display_name=req.display_name,
+            role=req.role,
+        )
+        return {"user": user}
+
+
+@app.put("/api/users/{user_id}")
+async def update_user(user_id: int, req: UpdateUserRequest, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    updates = {}
+    if req.username is not None:
+        updates["username"] = req.username
+    if req.password is not None:
+        from app.auth import hash_password
+        updates["password_hash"] = hash_password(req.password)
+    if req.display_name is not None:
+        updates["display_name"] = req.display_name
+    if req.role is not None:
+        updates["role"] = req.role
+    if req.is_active is not None:
+        updates["is_active"] = req.is_active
+    if not updates:
+        raise HTTPException(status_code=400, detail="无更新内容")
+    with Database() as db:
+        ok = db.update_user(user_id, **updates)
+        if not ok:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        return {"message": "用户已更新"}
+
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(user_id: int, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    with Database() as db:
+        ok = db.delete_user(user_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        return {"message": "用户已删除"}
+
+
+# ============================================================
+# BOSS账号管理
+# ============================================================
+class CreateBossAccountRequest(BaseModel):
+    user_id: int
+    account_name: Optional[str] = None
+    cdp_host: str = "127.0.0.1"
+    cdp_port: int = 9222
+    profile_dir: Optional[str] = None
+    cookies_file: Optional[str] = None
+    use_external_browser: bool = False
+    is_default: bool = False
+    enabled: bool = True
+
+class UpdateBossAccountRequest(BaseModel):
+    account_name: Optional[str] = None
+    boss_identity: Optional[str] = None
+    cdp_host: Optional[str] = None
+    cdp_port: Optional[int] = None
+    profile_dir: Optional[str] = None
+    cookies_file: Optional[str] = None
+    use_external_browser: Optional[bool] = None
+    is_default: Optional[bool] = None
+    enabled: Optional[bool] = None
+
+
+@app.get("/api/boss-accounts")
+async def list_boss_accounts(
+    user_id: Optional[int] = None,
+    current_user: dict = Depends(verify_token),
+):
+    with Database() as db:
+        return {"accounts": db.list_boss_accounts(user_id=user_id)}
+
+
+@app.post("/api/boss-accounts")
+async def create_boss_account(req: CreateBossAccountRequest, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    with Database() as db:
+        account = db.create_boss_account(**req.dict(exclude_none=True))
+        return {"account": account}
+
+
+@app.put("/api/boss-accounts/{account_id}")
+async def update_boss_account(account_id: int, req: UpdateBossAccountRequest, current_user: dict = Depends(verify_token)):
+    updates = {k: v for k, v in req.dict().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="无更新内容")
+    with Database() as db:
+        ok = db.update_boss_account(account_id, **updates)
+        if not ok:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        return {"message": "账号已更新"}
+
+
+@app.delete("/api/boss-accounts/{account_id}")
+async def delete_boss_account(account_id: int, current_user: dict = Depends(verify_token)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作")
+    with Database() as db:
+        ok = db.delete_boss_account(account_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        return {"message": "账号已删除"}
+
+
+# ============================================================
 # 岗位话术文件管理 — 绑定 job_info/ 文件夹
 # ============================================================
 
 JOB_INFO_DIR = BASE_DIR / "job_info"
+
+
+def _user_job_info_dir(user_id: int = None) -> Path:
+    """按用户隔离的岗位信息目录"""
+    if user_id:
+        d = JOB_INFO_DIR / str(user_id)
+    else:
+        d = JOB_INFO_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 class JobInfoSaveRequest(BaseModel):
@@ -2175,12 +2620,14 @@ class JobInfoSelectRequest(BaseModel):
 
 @app.get("/api/job-info/files")
 async def list_job_info_files(current_user: dict = Depends(verify_token)):
-    """列出 job_info/ 下所有 .txt 文件"""
+    """列出当前用户的 job_info/ 下所有 .txt 文件"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    job_dir = _user_job_info_dir(user_id)
     try:
         files = []
-        if JOB_INFO_DIR.exists():
-            for f in sorted(JOB_INFO_DIR.glob("*.txt")):
-                name = f.stem  # 去掉 .txt
+        if job_dir.exists():
+            for f in sorted(job_dir.glob("*.txt")):
+                name = f.stem
                 if name == ".selected":
                     continue
                 stat = f.stat()
@@ -2191,7 +2638,7 @@ async def list_job_info_files(current_user: dict = Depends(verify_token)):
                 })
         # 读取当前选中的岗位
         selected = None
-        sel_file = JOB_INFO_DIR / ".selected"
+        sel_file = job_dir / ".selected"
         if sel_file.exists():
             selected = sel_file.read_text(encoding="utf-8").strip()
         return {"files": files, "selected": selected}
@@ -2202,7 +2649,8 @@ async def list_job_info_files(current_user: dict = Depends(verify_token)):
 @app.get("/api/job-info/files/{filename}")
 async def get_job_info_file(filename: str, current_user: dict = Depends(verify_token)):
     """读取指定 .txt 文件内容"""
-    filepath = JOB_INFO_DIR / f"{filename}.txt"
+    user_id = current_user.get("id") or current_user.get("user_id")
+    filepath = _user_job_info_dir(user_id) / f"{filename}.txt"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail=f"文件 {filename}.txt 不存在")
     try:
@@ -2220,15 +2668,17 @@ async def save_job_info_file(
     current_user: dict = Depends(verify_token),
 ):
     """创建或更新 .txt 文件"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    job_dir = _user_job_info_dir(user_id)
     if not req.filename or not req.filename.strip():
         raise HTTPException(status_code=400, detail="文件名不能为空")
     safe_name = req.filename.strip().replace("/", "_").replace("\\", "_")
-    filepath = JOB_INFO_DIR / f"{safe_name}.txt"
+    filepath = job_dir / f"{safe_name}.txt"
     try:
-        JOB_INFO_DIR.mkdir(parents=True, exist_ok=True)
+        job_dir.mkdir(parents=True, exist_ok=True)
         filepath.write_text(req.content, encoding="utf-8")
         # 如果是第一个文件或没有选中项，自动设为当前岗位
-        sel_file = JOB_INFO_DIR / ".selected"
+        sel_file = job_dir / ".selected"
         if not sel_file.exists():
             sel_file.write_text(safe_name, encoding="utf-8")
         return {"filename": safe_name, "message": f"已保存 {safe_name}.txt"}
@@ -2239,13 +2689,15 @@ async def save_job_info_file(
 @app.delete("/api/job-info/files/{filename}")
 async def delete_job_info_file(filename: str, current_user: dict = Depends(verify_token)):
     """删除指定 .txt 文件"""
-    filepath = JOB_INFO_DIR / f"{filename}.txt"
+    user_id = current_user.get("id") or current_user.get("user_id")
+    job_dir = _user_job_info_dir(user_id)
+    filepath = job_dir / f"{filename}.txt"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail=f"文件 {filename}.txt 不存在")
     try:
         filepath.unlink()
         # 如果删除的是当前选中项，清除选择
-        sel_file = JOB_INFO_DIR / ".selected"
+        sel_file = job_dir / ".selected"
         if sel_file.exists() and sel_file.read_text(encoding="utf-8").strip() == filename:
             sel_file.unlink()
         return {"message": f"已删除 {filename}.txt"}
@@ -2259,12 +2711,58 @@ async def select_job_info(
     current_user: dict = Depends(verify_token),
 ):
     """设置当前使用的岗位话术文件"""
-    filepath = JOB_INFO_DIR / f"{req.filename}.txt"
+    user_id = current_user.get("id") or current_user.get("user_id")
+    job_dir = _user_job_info_dir(user_id)
+    filepath = job_dir / f"{req.filename}.txt"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail=f"文件 {req.filename}.txt 不存在")
-    sel_file = JOB_INFO_DIR / ".selected"
+    sel_file = job_dir / ".selected"
     sel_file.write_text(req.filename.strip(), encoding="utf-8")
     return {"selected": req.filename.strip(), "message": f"已切换到 {req.filename}"}
+
+
+@app.get("/api/admin/user-stats")
+async def get_admin_user_stats(current_user: dict = Depends(verify_token)):
+    """获取每用户操作统计（仅admin可用）"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可用")
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT
+                u.id, u.username, u.display_name, u.role, u.is_active,
+                COALESCE(cr.contact_count, 0) as contact_count,
+                COALESCE(ro.resume_count, 0) as resume_count,
+                COALESCE(cv.conv_count, 0) as conv_count,
+                COALESCE(cd.candidate_count, 0) as candidate_count
+            FROM users u
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as contact_count
+                FROM contact_records WHERE action = 'contacted'
+                GROUP BY user_id
+            ) cr ON cr.user_id = u.id
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as resume_count
+                FROM resume_operations WHERE action = 'downloaded'
+                GROUP BY user_id
+            ) ro ON ro.user_id = u.id
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as conv_count
+                FROM conversations WHERE action = 'auto_reply'
+                GROUP BY user_id
+            ) cv ON cv.user_id = u.id
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as candidate_count
+                FROM candidates
+                GROUP BY user_id
+            ) cd ON cd.user_id = u.id
+            ORDER BY u.id
+        """).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
