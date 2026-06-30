@@ -185,12 +185,33 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, u
             if not fresh:
                 fresh = contact
 
-        # 点击联系人
-        if not await click_contact(contact_name, fresh.get("x", 0), fresh.get("y", 0)):
-            logger.warning(f"[DL] 点击联系人失败: {contact_name}")
+        # 点击联系人 + 验证名字匹配（防止点错人）
+        clicked_ok = False
+        for retry in range(3):
+            if retry > 0:
+                await scroll_contact_into_view(contact_name)
+                await asyncio.sleep(0.8)
+                fresh = await refind_contact(contact_name)
+                if not fresh:
+                    fresh = contact
+            if not await click_contact(contact_name, fresh.get("x", 0), fresh.get("y", 0)):
+                continue
+            await asyncio.sleep(2)
+            # 验证聊天框顶部名字
+            from app.chat_workflow import _JS_GET_CHAT_NAME
+            chat_name = await automation.execute_js(_JS_GET_CHAT_NAME)
+            current = (chat_name.get("name") or "").strip() if isinstance(chat_name, dict) else ""
+            if current and (contact_name in current or current in contact_name):
+                clicked_ok = True
+                logger.info(f"[DL] 联系人匹配: {current} == {contact_name}")
+                break
+            logger.warning(f"[DL] 名字不匹配: 期望={contact_name} 实际={current}，重试{retry+1}/3")
+            await automation.press_key("Escape")
+            await asyncio.sleep(1)
+        if not clicked_ok:
+            logger.warning(f"[DL] 点击联系人失败或名字不匹配: {contact_name}")
             failed += 1
             continue
-        await asyncio.sleep(2)
 
         if dry_run:
             details.append({"name": contact_name, "action": "would_download"})
@@ -221,6 +242,20 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, u
 
         # PDF预览出现 → 等待内容加载完成再找下载箭头
         await asyncio.sleep(3)
+
+        # 去重：检查文件是否已存在
+        file_exists = any(
+            (resumes_dir / f"{contact_name}{ext}").exists()
+            for ext in [".pdf", ".doc", ".docx"]
+        )
+        if file_exists:
+            logger.info(f"[DL] 跳过: {contact_name} 文件已存在")
+            skipped += 1
+            details.append({"name": contact_name, "action": "skipped", "reason": "文件已存在"})
+            await automation.press_key("Escape")
+            await asyncio.sleep(1)
+            continue
+
         arrow = await automation.execute_js(_JS_FIND_PDF_DOWNLOAD_ARROW)
         if isinstance(arrow, dict) and arrow.get("found"):
             logger.info(f"[DL] {contact_name} 找到下载箭头: {arrow.get('text')} -> ({arrow['x']:.0f},{arrow['y']:.0f})")
@@ -250,6 +285,7 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, u
                         resume_downloaded=True,
                         detail=json.dumps({"time": datetime.now().isoformat(),
                                            "path": dl_result.get("path", "")}),
+                        user_id=user_id,
                     )
                     logger.info(f"[DL] {contact_name} 下载成功 ({dl_result.get('size', 0)} bytes)")
                 else:
@@ -278,7 +314,8 @@ async def collect_received_resumes(max_count: int = 10, dry_run: bool = False, u
                                         "file_verified": True, "path": dl_result.get("path")})
                         db.insert_resume_op(boss_id=boss_id, candidate_name=contact_name, action="downloaded",
                                             resume_downloaded=True,
-                                            detail=json.dumps({"time": datetime.now().isoformat()}))
+                                            detail=json.dumps({"time": datetime.now().isoformat()}),
+                                            user_id=user_id)
                 except Exception:
                     failed += 1
             else:

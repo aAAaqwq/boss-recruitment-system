@@ -812,6 +812,7 @@ async def _handle_case1_download(
                     "download_result": dl_result,
                     "time": datetime.now().isoformat(),
                 }),
+                user_id=user_id,
             )
             return file_verified
         except Exception as e:
@@ -819,7 +820,7 @@ async def _handle_case1_download(
             details.append({"name": contact_name, "action": "download_failed"})
             db.insert_resume_op(
                 boss_id=boss_id, candidate_name=contact_name, action="download_failed",
-                resume_downloaded=False, detail=str(e),
+                resume_downloaded=False, detail=str(e), user_id=user_id,
             )
             return False
     else:

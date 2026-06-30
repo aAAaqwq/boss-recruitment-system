@@ -1795,6 +1795,9 @@ def _run_filter_contact_in_thread(
 
         api_logger.info(f"任务 {task_id} 开始执行筛选打招呼 (独立线程, 已连接浏览器)")
 
+        def _on_progress(pct):
+            _filter_tasks[task_id]["progress"] = pct
+
         result = await _auto_contact_impl(
             daily_cap=daily_cap,
             batch_limit=batch_limit,
@@ -1804,6 +1807,7 @@ def _run_filter_contact_in_thread(
             dry_run=dry_run,
             criteria=criteria,
             user_id=user_id,
+            progress_cb=_on_progress,
         )
 
         _filter_tasks[task_id]["status"] = result.get("status", "unknown")
@@ -2719,6 +2723,63 @@ async def select_job_info(
     sel_file = job_dir / ".selected"
     sel_file.write_text(req.filename.strip(), encoding="utf-8")
     return {"selected": req.filename.strip(), "message": f"已切换到 {req.filename}"}
+
+
+@app.post("/api/auth/logout")
+async def logout(current_user: dict = Depends(verify_token)):
+    """退出登录：清理浏览器 BOSS cookie"""
+    try:
+        await automation.clear_boss_cookies()
+    except Exception:
+        pass
+    return {"status": "ok", "message" : "已退出"}
+
+
+@app.get("/api/user/stats")
+async def get_user_stats(current_user: dict = Depends(verify_token)):
+    """获取当前用户操作统计"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    db = get_db()
+    try:
+        def q(sql, params=(user_id,)):
+            try:
+                db.cursor.execute(sql, params)
+                r = db.cursor.fetchone()
+                return r[0] if r else 0
+            except Exception as e:
+                api_logger.error(f"[user-stats] query failed: {e}, sql={sql}")
+                return 0
+        return {
+            "contacted": q("SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE user_id = %s AND action = 'contacted'"),
+            "replied": q("SELECT COUNT(DISTINCT boss_id) FROM contact_records WHERE user_id = %s AND action = 'replied'"),
+            "applied": q("SELECT COUNT(*) FROM resume_operations WHERE user_id = %s AND action LIKE 'requested%%'"),
+            "downloaded": q("SELECT COUNT(*) FROM resume_operations WHERE user_id = %s AND action = 'downloaded'"),
+            "recommend": q("SELECT COUNT(*) FROM candidates WHERE user_id = %s AND interview_status = 'recommend_interview'"),
+            "invited": q("SELECT COUNT(*) FROM resume_operations WHERE user_id = %s AND action = 'interview_invited'"),
+        }
+    finally:
+        db.close()
+
+
+@app.get("/api/user/candidates")
+async def get_user_candidates(current_user: dict = Depends(verify_token)):
+    """获取当前用户的全部候选人数据"""
+    user_id = current_user.get("id") or current_user.get("user_id")
+    db = get_db()
+    try:
+        db.cursor.execute("""
+            SELECT DISTINCT ON (c.candidate_name) c.*,
+                EXISTS(SELECT 1 FROM contact_records cr WHERE cr.boss_id = c.boss_id AND cr.action = 'contacted' AND cr.user_id = %s) as is_contacted,
+                EXISTS(SELECT 1 FROM contact_records cr WHERE cr.boss_id = c.boss_id AND cr.action = 'replied' AND cr.user_id = %s) as is_replied,
+                EXISTS(SELECT 1 FROM resume_operations ro WHERE ro.boss_id = c.boss_id AND ro.action = 'downloaded' AND (ro.user_id = %s OR ro.user_id IS NULL)) as is_downloaded,
+                EXISTS(SELECT 1 FROM resume_operations ro WHERE ro.boss_id = c.boss_id AND ro.action LIKE 'requested%%' AND (ro.user_id = %s OR ro.user_id IS NULL)) as is_applied
+            FROM candidates c
+            WHERE c.user_id = %s
+            ORDER BY c.candidate_name, c.updated_at DESC
+        """, (user_id, user_id, user_id, user_id, user_id))
+        return [dict(r) for r in db.cursor.fetchall()]
+    finally:
+        db.close()
 
 
 @app.get("/api/admin/user-stats")

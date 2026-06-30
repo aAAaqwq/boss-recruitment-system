@@ -614,6 +614,30 @@ class BrowserAutomation:
             logger.error(f"导入 cookie 失败: {e}")
             return {"status": "error", "message": str(e)}
 
+    async def clear_boss_cookies(self) -> Dict:
+        """清除 BOSS 域名的所有 cookie（退出登录时调用）"""
+        if not await self._ensure_session():
+            return {"status": "error", "message": "浏览器未连接"}
+        try:
+            from nodriver.cdp import network as cdp_network
+            existing = await self.page.send(cdp_network.get_all_cookies())
+            cleared = 0
+            for ck in existing:
+                domain = (ck.domain or "").lower()
+                if "zhipin.com" in domain:
+                    try:
+                        await self.page.send(cdp_network.delete_cookies(
+                            name=ck.name, domain=ck.domain, path=ck.path or "/"
+                        ))
+                        cleared += 1
+                    except Exception:
+                        pass
+            logger.info(f"已清除 {cleared} 条 BOSS cookie")
+            return {"status": "ok", "cleared": cleared}
+        except Exception as e:
+            logger.error(f"清除 BOSS cookie 失败: {e}")
+            return {"status": "error", "message": str(e)}
+
     # ===== 登录检测 =====
 
     # BOSS直聘登录页 URL（扫码登录）

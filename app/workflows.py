@@ -4,7 +4,7 @@ import json
 import random
 import re
 import time as _time
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Callable
 
 from app.config import settings
 from app.automation import automation, cancel_event
@@ -402,6 +402,7 @@ async def _auto_contact_impl(
     daily_cap: int, school_whitelist: List[str], min_degree: str,
     min_years: int, dry_run: bool, criteria: Optional[FilterCriteria],
     batch_limit: int = 20, user_id: int = None,
+    progress_cb: Callable = None,
 ) -> Dict:
     """批量打招呼核心逻辑 (async)"""
     if criteria is None:
@@ -410,6 +411,12 @@ async def _auto_contact_impl(
             min_degree=min_degree, min_years=min_years,
         )
     logger.info(f"[F5] 启动 | 每日上限={daily_cap} 本次={batch_limit} dry={dry_run} filters={criteria.get_active_filters()}")
+
+    def _report(pct):
+        if progress_cb:
+            progress_cb(pct)
+
+    _report(10)
 
     # 检查浏览器(使用 _ensure_session 进行健康探测)
     if not await automation._ensure_session():
@@ -563,6 +570,7 @@ async def _auto_contact_impl(
             if dry_run:
                 contacted += 1
                 contacted_ids.add(boss_id)
+                _report(20 + int(contacted / target * 70))
                 logger.info(f"[F5] dry_run 模拟点击: ({gx:.0f},{gy:.0f}) btn={card.get('greet_text')}")
                 clicked_this_round = True
                 break
@@ -572,6 +580,7 @@ async def _auto_contact_impl(
             if await automation.cdp_click_viewport(float(gx), float(gy)):
                 contacted += 1
                 contacted_ids.add(boss_id)
+                _report(20 + int(contacted / target * 70))
                 try:
                     with Database() as db:
                         db.init_tables()
