@@ -63,8 +63,102 @@ _JS_CLICK_CHAT_NAV = """
 _JS_GET_CONTACTS = """
 (function() {
     try {
+        // 从DOM提取BOSS平台唯一ID（增强版：扫描React props + 所有属性 + 链接）
+        function extractBossId(el) {
+            // 辅助：如果值是 "数字-数字" 格式（如 data-id="28717495-0"），提取数字部分
+            function cleanId(v) {
+                if (!v) return v;
+                var m = v.match(/^(\d+)-\d+$/);
+                return m ? m[1] : v;
+            }
+            // 1. 扫描元素自身所有属性（含 data-uid, data-security-id, data-id 等）
+            for (var a = 0; a < (el.attributes || []).length; a++) {
+                var an = el.attributes[a].name;
+                var av = el.attributes[a].value;
+                if (!av || av.length < 5) continue;
+                if (/^(data-)?(uid|userid|user-id|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(an)) {
+                    return cleanId(av);
+                }
+            }
+            // 2. 从链接href提取 (例: /web/chat/geek?securityId=xxx 或 /chat/xxx)
+            var links = el.querySelectorAll('a[href]');
+            for (var l = 0; l < links.length; l++) {
+                var h = links[l].getAttribute('href') || '';
+                var m = h.match(/[?&](securityId|encryptId|encryptBossId|uid|userId|bossId)=([^&?#]+)/i);
+                if (m && m[2]) return m[2];
+                // 路径中的ID: /geek/abc123 或 /chat/abc123
+                var pm = h.match(/\/(geek|chat|boss|user)\/([a-zA-Z0-9_-]{10,})/i);
+                if (pm && pm[2]) return pm[2];
+            }
+            // 3. 扫描所有子元素的属性（2层深度）
+            var kids = el.querySelectorAll('[data-uid],[data-security-id],[data-encrypt-id],[data-id],[data-user-id]');
+            for (var k = 0; k < kids.length; k++) {
+                for (var b = 0; b < (kids[k].attributes || []).length; b++) {
+                    var kan = kids[k].attributes[b].name;
+                    var kav = kids[k].attributes[b].value;
+                    if (!kav || kav.length < 5) continue;
+                    if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(kan)) {
+                        return cleanId(kav);
+                    }
+                }
+            }
+            // 4. 扫描父元素（向上3层）
+            for (var p = el.parentElement, d = 0; p && d < 3; p = p.parentElement, d++) {
+                for (var c = 0; c < (p.attributes || []).length; c++) {
+                    var pn = p.attributes[c].name;
+                    var pv = p.attributes[c].value;
+                    if (!pv || pv.length < 5) continue;
+                    if (/^(data-)?(uid|userid|securityid|security-id|encryptid|encrypt-id|encrypt_uid|eid|geekid|chatid|id)$/i.test(pn)) {
+                        return cleanId(pv);
+                    }
+                }
+            }
+            // 5. React内部状态 (__reactFiber / __reactProps)
+            try {
+                var fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'); });
+                if (fiberKey) {
+                    var fiber = el[fiberKey];
+                    // 遍历fiber树查找memoizedProps中的用户ID
+                    for (var ff = fiber, fd = 0; ff && fd < 10; ff = ff.return || ff._debugOwner, fd++) {
+                        var mp = ff.memoizedProps;
+                        if (mp) {
+                            var idSource = mp.securityId || mp.encryptId || mp.encryptBossId || mp.uid || mp.userId || mp.bossId || mp.geekId;
+                            if (idSource && typeof idSource === 'string' && idSource.length > 5) return idSource;
+                            // 检查children中是否包含ID字段
+                            if (mp.children && typeof mp.children === 'object') {
+                                var cid = mp.children.securityId || mp.children.encryptId || mp.children.uid;
+                                if (cid && typeof cid === 'string' && cid.length > 5) return cid;
+                            }
+                        }
+                    }
+                }
+            } catch(e) {}
+            return null;
+        }
         var contacts = [];
         var items = document.querySelectorAll('.geek-item-wrap');
+        // 诊断：打印第一个联系人的完整DOM信息
+        if (items.length > 0) {
+            var diag = items[0];
+            var diagInfo = {tag: diag.tagName, classes: diag.className, attrCount: diag.attributes.length};
+            var attrs = [];
+            for (var da = 0; da < diag.attributes.length; da++) {
+                attrs.push(diag.attributes[da].name + '=' + (diag.attributes[da].value || '').substring(0, 80));
+            }
+            diagInfo.attrs = attrs;
+            diagInfo.innerText = (diag.innerText || '').substring(0, 100);
+            // 检查React属性
+            var reactKeys = Object.keys(diag).filter(function(k) { return k.startsWith('__react'); });
+            diagInfo.reactKeys = reactKeys;
+            // 内部链接
+            var dLinks = diag.querySelectorAll('a[href]');
+            var dHrefs = [];
+            for (var dl = 0; dl < Math.min(dLinks.length, 3); dl++) {
+                dHrefs.push(dLinks[dl].getAttribute('href'));
+            }
+            diagInfo.linkHrefs = dHrefs;
+            contacts.push({name: '__DIAG__', subtitle: JSON.stringify(diagInfo), text: '', x: 0, y: 0, w: 0, h: 0, hasUnread: false, boss_id: null});
+        }
         for (var i = 0; i < items.length; i++) {
             try {
                 var r = items[i].getBoundingClientRect();
@@ -80,6 +174,7 @@ _JS_GET_CONTACTS = """
                         if (topParts[0]) name = topParts[0].trim();
                         if (topParts.length > 1) subtitle = topParts.slice(1).join(' ').trim();
                     }
+                    var bossId = extractBossId(items[i]);
                     contacts.push({
                         name: name,
                         subtitle: subtitle,
@@ -88,7 +183,8 @@ _JS_GET_CONTACTS = """
                         y: r.y + r.height / 2,
                         w: r.width,
                         h: r.height,
-                        hasUnread: t.indexOf('\\u25cf') >= 0 || t.indexOf('未读') >= 0
+                        hasUnread: t.indexOf('\\u25cf') >= 0 || t.indexOf('未读') >= 0,
+                        boss_id: bossId
                     });
                 }
             } catch(e2) {}
@@ -169,6 +265,9 @@ _JS_GET_MESSAGES = """
         var cls = (el.className || '').toString().toLowerCase();
         if (cls.indexOf('input') >= 0 || cls.indexOf('editor') >= 0) return;
         if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return;
+        // 排除输入框附近区域（系统快捷回复等UI元素，Y > chatBox底部-100px）
+        var chatBottom = chatBox.getBoundingClientRect().bottom;
+        if (r.y > chatBottom - 120) return;
         var key = text.substring(0, 40) + '@' + Math.round(r.y / 5);
         if (seen[key]) return;
         seen[key] = true;

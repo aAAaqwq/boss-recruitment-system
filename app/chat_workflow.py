@@ -16,6 +16,7 @@ from app.chat_nav import (
     navigate_to_chat, get_messages,
     type_and_send, click_contact,
     check_limit_popup, dismiss_popup,
+    refind_contact, scroll_contact_into_view,
 )
 from app.chat_service import chat_service
 from app.chat_stage import (
@@ -32,6 +33,15 @@ _DEFAULT_FALLBACK_TEMPLATES = [
     "感谢您的来信！我会仔细查看并尽快给您回复。祝好！",
 ]
 
+
+# JS: 读取当前聊天框顶部显示的联系人名字
+_JS_GET_CHAT_NAME = """
+(function() {
+    var el = document.querySelector('.name-container,.name-box,[class*=\"name-contet\"],.contact-name');
+    if (el) { var t = (el.innerText||'').trim(); if (t) return {name: t}; }
+    return {name: ''};
+})()
+"""
 
 # ===== 与 test_batch_reply.py 完全一致的 LLM pipeline =====
 
@@ -55,9 +65,14 @@ def _build_history_from_filtered(filtered: List[Dict]) -> List[Dict]:
     return history
 
 
-def _load_company_context() -> str:
-    """加载公司/岗位背景信息 — 读取 job_info/.selected 中指定的文件"""
-    for base in ['/app/job_info', 'job_info']:
+def _load_company_context(user_id: int = None) -> str:
+    """加载公司/岗位背景信息 — 读取按用户隔离的 job_info/{user_id}/.selected"""
+    bases = []
+    if user_id:
+        bases.append(f'/app/job_info/{user_id}')
+        bases.append(f'job_info/{user_id}')
+    bases.extend(['/app/job_info', 'job_info'])
+    for base in bases:
         try:
             sel_path = f'{base}/.selected'
             with open(sel_path, encoding='utf-8') as f:
@@ -133,6 +148,13 @@ _UI_SKIP_EXACT: set = {
     "简历请求已发送",
     "您可以在线预览牛人简历， 设置邮箱 后投递的简历会同时发送到您的邮箱。",
     "您可以在线预览牛人简历，设置邮箱后投递的简历会同时发送到您的邮箱。",
+    # BOSS系统快捷回复（输入框预置，非候选人真实消息）
+    "不好意思，不太合适哦",
+    "好的，我们再聊聊",
+    "抱歉，暂时不考虑",
+    "我对这个职位很感兴趣",
+    "我们加个微信详细聊吧",
+    "请问这个职位还招人吗",
 }
 
 
@@ -173,6 +195,7 @@ async def _batch_reply_impl(
     max_count: int = 10,
     template: Optional[str] = None,
     dry_run: bool = True,
+    user_id: int = None,
 ) -> Dict:
     """批量回复未读消息核心逻辑 (async)
 
@@ -229,22 +252,36 @@ async def _batch_reply_impl(
     db.init_tables()
 
     try:
-        targets = valid_contacts[:max_count]
-        logger.info(f"[F7] 处理前 {len(targets)} 个")
+        logger.info(f"[F7] 候选 {len(valid_contacts)} 个未读联系人，目标回复 {max_count} 个")
 
-        for i, contact in enumerate(targets):
-            # 检查取消信号
+        replied_ids = set()  # 防止重复回复
+        contact_idx = 0
+        consecutive_skips = 0  # 连续跳过计数，超过阈值提前结束
+        for contact in valid_contacts:
             if cancel_event.is_set():
                 logger.info("[F7] 检测到取消信号，停止")
                 break
+            if replied >= max_count:
+                break
+            if consecutive_skips >= 5:
+                logger.info("[F7] 连续5个联系人失败/跳过，提前结束")
+                break
 
+            contact_idx += 1
             name = contact.get("name", "未知")
             subtitle = contact.get("subtitle", "")
             contact_x = contact.get("x", 0)
             contact_y = contact.get("y", 0)
-            boss_id = name  # 使用姓名作为boss_id
+            boss_id = contact.get("boss_id") or name
 
-            logger.info(f"[F7] ({i+1}/{len(targets)}) 处理: {name} ({subtitle})")
+            # 跳过已回复过的
+            if boss_id in replied_ids:
+                logger.info(f"[F7] 跳过已回复: {name} (boss_id={boss_id})")
+                skipped += 1
+                consecutive_skips += 1
+                continue
+
+            logger.info(f"[F7] ({contact_idx}/{len(valid_contacts)}, 已回复{replied}/{max_count}) 处理: {name} ({subtitle})")
 
             # 0. 限制弹窗检测 — 命中则终止循环
             limit_kw = await check_limit_popup()
@@ -253,16 +290,47 @@ async def _batch_reply_impl(
                 await dismiss_popup()
                 break
 
-            # a. 点击联系人
-            if not await click_contact(name, contact_x, contact_y):
-                logger.warning(f"[F7] 点击联系人失败: {name}")
+            # a. 重新定位+滚动（消息可能压下去旧联系人）
+            fresh = await refind_contact(name)
+            if fresh and fresh.get("x"):
+                contact_x, contact_y = fresh["x"], fresh["y"]
+            if not fresh or not fresh.get("visible", True):
+                await scroll_contact_into_view(name)
+                await asyncio.sleep(0.5)
+                fresh = await refind_contact(name)
+                if fresh and fresh.get("x"):
+                    contact_x, contact_y = fresh["x"], fresh["y"]
+
+            # b. 点击联系人 + 验证名字匹配（最多重试3次）
+            clicked_ok = False
+            for retry in range(3):
+                if retry > 0:
+                    # 重试：先滚动再重定位
+                    await scroll_contact_into_view(name)
+                    await asyncio.sleep(0.8)
+                    fresh = await refind_contact(name)
+                    if fresh and fresh.get("x"):
+                        contact_x, contact_y = fresh["x"], fresh["y"]
+                    else:
+                        break
+                if not await click_contact(name, contact_x, contact_y):
+                    continue
+                await asyncio.sleep(2)
+                chat_name = await automation.execute_js(_JS_GET_CHAT_NAME)
+                current = (chat_name.get("name") or "").strip() if isinstance(chat_name, dict) else ""
+                if current and (name in current or current in name):
+                    clicked_ok = True
+                    logger.info(f"[F7] 联系人匹配: {current} == {name}")
+                    break
+                logger.warning(f"[F7] 名字不匹配: 期望={name} 实际={current}，重试{retry+1}/3")
+            if not clicked_ok:
+                logger.warning(f"[F7] 点击联系人失败或名字不匹配: {name}")
                 failed += 1
+                consecutive_skips += 1
                 results.append({"name": name, "success": False, "error": "点击联系人失败"})
                 continue
 
-            await asyncio.sleep(2)
-
-            # b. 获取完整聊天消息
+            # c. 获取完整聊天消息
             messages = await get_messages()
             logger.info(f"[F7] {name}: 提取到 {len(messages)} 条消息")
             for mi, m in enumerate(messages):
@@ -282,6 +350,7 @@ async def _batch_reply_impl(
             if not candidate_msg:
                 logger.info(f"[F7] {name}: 未找到候选人消息，跳过")
                 skipped += 1
+                consecutive_skips += 1
                 results.append({"name": name, "success": False, "error": "未找到候选人消息"})
                 continue
 
@@ -293,7 +362,7 @@ async def _batch_reply_impl(
             # 构建对话历史
             history = _build_history_from_filtered(filtered)
             # 加载公司岗位信息
-            company_context = _load_company_context()
+            company_context = _load_company_context(user_id=user_id)
             # 构建LLM messages
             llm_messages = _build_llm_messages(history, candidate_msg, company_context)
 
@@ -316,11 +385,14 @@ async def _batch_reply_impl(
             if dry_run:
                 logger.info(f"[F7] [DRY-RUN] 将发送: {reply}")
                 replied += 1
+                replied_ids.add(boss_id)
+                consecutive_skips = 0
             else:
                 send_result = await type_and_send(reply)
                 if send_result.get("status") != "ok":
                     logger.warning(f"[F7] 发送失败: {send_result.get('message')}")
                     failed += 1
+                    consecutive_skips += 1
                     results.append({
                         "name": name, "success": False,
                         "error": send_result.get("message", "发送失败"),
@@ -328,6 +400,8 @@ async def _batch_reply_impl(
                     })
                     continue
                 replied += 1
+                replied_ids.add(boss_id)
+                consecutive_skips = 0
                 logger.info(f"[F7] 已发送回复给 {name}")
 
             # g. 保存到数据库（dry_run 模式跳过持久化，避免记录未实际发送的回复）
@@ -339,10 +413,11 @@ async def _batch_reply_impl(
                         candidate_message=candidate_msg,
                         ai_message=reply,
                         action="auto_reply",
+                        user_id=user_id,
                     )
                     # 同时记录到 contact_records
                     db.insert_contact_record(
-                        boss_id=boss_id, action="replied", success=True,
+                        boss_id=boss_id, action="replied", success=True, user_id=user_id,
                     )
                 except Exception as e:
                     logger.warning(f"[F7] DB保存失败: {e}")
@@ -353,7 +428,20 @@ async def _batch_reply_impl(
                 "generation_method": generation_method,
             })
 
-            # 间隔休息，模拟人类操作
+            # 回复后下拉联系人列表，防止下个人找不到
+            try:
+                await automation.execute_js("""
+                (function(){
+                    var list = document.querySelector('.user-list,.contact-list,.chat-list,[class*=\"userList\"],[class*=\"chatList\"],.conversation-list,[class*=\"scroll\"]');
+                    if(list && list.scrollTop !== undefined){
+                        list.scrollTop += 300;
+                        return true;
+                    }
+                    return false;
+                })()
+                """)
+            except Exception:
+                pass
             await asyncio.sleep(random.uniform(1.5, 4))
 
         # 截图记录最终状态
@@ -367,10 +455,10 @@ async def _batch_reply_impl(
             "replied": replied,
             "failed": failed,
             "skipped": skipped,
-            "total_scanned": len(targets),
+            "total_scanned": contact_idx,
             "dry_run": dry_run,
             "results": results,
-            "message": f"批量回复完成: 成功{replied}, 失败{failed}, 跳过{skipped}, 共扫描{len(targets)}人",
+            "message": f"批量回复完成: 成功{replied}, 失败{failed}, 跳过{skipped}, 共扫描{contact_idx}人",
         }
         logger.info(f"[F7] 完成: {summary['message']}")
         return summary
