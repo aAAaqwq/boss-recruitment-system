@@ -58,25 +58,6 @@ python3 -m http.server 3001 &
 # API服务
 echo "🔌 API: http://localhost:8001"
 mkdir -p /app/data/chrome-profile
-
-# 清理 Chrome 持久化 profile 中跨容器残留的陈旧 SingletonLock
-# 持久化 ./data 会把上个容器的锁带到新容器; 主机名不匹配时 Chrome 拒绝回收 → CDP 端口超时
-PROFILE_DIR="${CHROME_PROFILE_DIR:-/app/data/chrome-profile}"
-if [ -L "$PROFILE_DIR/SingletonLock" ]; then
-    target="$(readlink "$PROFILE_DIR/SingletonLock" 2>/dev/null || true)"
-    lock_host="${target%-*}"   # <hostname>-<pid> → hostname
-    lock_pid="${target##*-}"   # → pid
-    if [ -n "$target" ] && [ "$lock_host" != "$(hostname)" ]; then
-        echo "🧹 Chrome: 清理陈旧 SingletonLock (他机 $lock_host ≠ 当前 $(hostname))"
-        rm -f "$PROFILE_DIR/SingletonLock" "$PROFILE_DIR/SingletonCookie" "$PROFILE_DIR/SingletonSocket"
-    elif [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
-        echo "🧹 Chrome: 清理陈旧 SingletonLock (PID $lock_pid 已退出)"
-        rm -f "$PROFILE_DIR/SingletonLock" "$PROFILE_DIR/SingletonCookie" "$PROFILE_DIR/SingletonSocket"
-    else
-        echo "ℹ️  Chrome: SingletonLock 持有者存活 (PID $lock_pid), 保留"
-    fi
-fi
-
 cd /app
 python3 -m uvicorn app.api:app --host 0.0.0.0 --port 8001 &
 

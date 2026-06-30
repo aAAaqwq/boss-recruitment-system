@@ -20,7 +20,7 @@ services:
     environment:
       - CUSTOMER_ID=customer-a
       - CUSTOMER_NAME=客户A
-      - VNC_PASSWORD=${CUSTOMER_A_PASSWORD:-customer-a-pass}
+      - VNC_PASSWORD=${CUSTOMER_A_PASSWORD}
       - DISPLAY=:1
       - DB_PATH=/app/data/customer_a.db
     volumes:
@@ -54,7 +54,7 @@ services:
     environment:
       - CUSTOMER_ID=customer-b
       - CUSTOMER_NAME=客户B
-      - VNC_PASSWORD=${CUSTOMER_B_PASSWORD:-customer-b-pass}
+      - VNC_PASSWORD=${CUSTOMER_B_PASSWORD}
       - DISPLAY=:1
       - DB_PATH=/app/data/customer_b.db
     volumes:
@@ -88,7 +88,7 @@ services:
     environment:
       - CUSTOMER_ID=customer-c
       - CUSTOMER_NAME=客户C
-      - VNC_PASSWORD=${CUSTOMER_C_PASSWORD:-customer-c-pass}
+      - VNC_PASSWORD=${CUSTOMER_C_PASSWORD}
       - DISPLAY=:1
       - DB_PATH=/app/data/customer_c.db
     volumes:
