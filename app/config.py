@@ -16,13 +16,11 @@ class Settings:
     
     # 数据库配置
     DATABASE_PATH = os.getenv("DATABASE_PATH", "data/boss_recruitment.db")
-    
-    # 对话流配置
-    CHAT_BOT_FLOW_PATH = os.getenv("CHAT_BOT_FLOW_PATH", "config/chat_bot_flow.json")
-    
-    # 屏幕配置
-    SCREEN_PROFILE_PATH = os.getenv("SCREEN_PROFILE_PATH", "config/screen_profile.json")
-    
+    PG_HOST = os.getenv("PG_HOST", "localhost")
+    PG_PORT = int(os.getenv("PG_PORT", "5432"))
+    PG_DB = os.getenv("PG_DB", "boss_recruitment")
+    PG_USER = os.getenv("PG_USER", "boss")
+    PG_PASSWORD = os.getenv("PG_PASSWORD", "boss123")
     # 每日上限
     DAILY_CONTACT_CAP = int(os.getenv("DAILY_CONTACT_CAP", "80"))
     DAILY_CHAT_ROUNDS_CAP = int(os.getenv("DAILY_CHAT_ROUNDS_CAP", "5"))

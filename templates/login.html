@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BOSS招聘自动化 - 登录</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #131314; color: #e8eaed;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh;
+        }
+        .card {
+            background: #1b1b1f; border: 1px solid rgba(255,255,255,.08);
+            border-radius: 16px; padding: 40px; width: 400px; max-width: 90vw;
+        }
+        h1 { font-size: 20px; margin-bottom: 8px; text-align: center; }
+        .sub { color: #a0a5ac; font-size: 13px; margin-bottom: 24px; text-align: center; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+        .tab {
+            flex:1; padding: 10px; text-align: center; border-radius: 8px;
+            background: #26262c; color: #a0a5ac; border: none; cursor: pointer;
+            font-size: 14px; font-weight: 500; transition: all .2s;
+        }
+        .tab.active { background: #8ab4f8; color: #131314; }
+        input {
+            width: 100%; padding: 12px; margin-bottom: 12px;
+            background: #26262c; border: 1px solid rgba(255,255,255,.1);
+            border-radius: 8px; color: #e8eaed; font-size: 14px; outline: none;
+        }
+        input:focus { border-color: #8ab4f8; }
+        .btn {
+            width: 100%; padding: 12px; border: none; border-radius: 8px;
+            font-size: 14px; font-weight: 500; cursor: pointer; transition: all .2s;
+        }
+        .btn-primary { background: #8ab4f8; color: #131314; }
+        .btn-primary:hover { background: #aecbfa; }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+        .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 20px; }
+        .msg.error { color: #f28b82; }
+        .msg.success { color: #81c995; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>BOSS 招聘自动化</h1>
+    <p class="sub">多租户驾驶舱</p>
+
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('login')" id="tabLogin">登录</button>
+        <button class="tab" onclick="switchTab('register')" id="tabRegister">注册</button>
+    </div>
+
+    <form id="formLogin" onsubmit="doLogin(event)">
+        <input type="text" id="loginUser" placeholder="用户名" required>
+        <input type="password" id="loginPass" placeholder="密码" required>
+        <button class="btn btn-primary" type="submit" id="btnLogin">登 录</button>
+    </form>
+
+    <form id="formRegister" onsubmit="doRegister(event)" style="display:none;">
+        <input type="text" id="regUser" placeholder="用户名" required>
+        <input type="text" id="regName" placeholder="显示名（选填）">
+        <input type="password" id="regPass" placeholder="密码" required>
+        <input type="password" id="regPass2" placeholder="确认密码" required>
+        <button class="btn btn-primary" type="submit" id="btnRegister">注 册</button>
+    </form>
+
+    <div id="msg" class="msg"></div>
+</div>
+
+<script>
+let mode = 'login';
+function switchTab(t) {
+    mode = t;
+    document.getElementById('tabLogin').classList.toggle('active', t==='login');
+    document.getElementById('tabRegister').classList.toggle('active', t==='register');
+    document.getElementById('formLogin').style.display = t==='login' ? '' : 'none';
+    document.getElementById('formRegister').style.display = t==='register' ? '' : 'none';
+    document.getElementById('msg').textContent = '';
+    document.getElementById('msg').className = 'msg';
+}
+
+async function doLogin(e) {
+    e.preventDefault();
+    const u = document.getElementById('loginUser').value.trim();
+    const p = document.getElementById('loginPass').value;
+    if (!u || !p) return msg('请输入用户名和密码', 'error');
+    setLoading(true);
+    try {
+        const r = await fetch('/api/auth/login', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({username:u, password:p})
+        });
+        const d = await r.json();
+        if (r.ok) {
+            localStorage.setItem('token', d.access_token);
+            localStorage.setItem('role', d.role || '');
+            msg('登录成功，跳转中……', 'success');
+            setTimeout(() => {
+                if (d.role === 'admin') location.href = '/admin';
+                else location.href = '/dashboard';
+            }, 500);
+        } else {
+            msg(d.detail || '登录失败', 'error');
+        }
+    } catch(e) { msg('网络错误: '+e.message, 'error'); }
+    setLoading(false);
+}
+
+async function doRegister(e) {
+    e.preventDefault();
+    const u = document.getElementById('regUser').value.trim();
+    const n = document.getElementById('regName').value.trim() || u;
+    const p = document.getElementById('regPass').value;
+    const p2 = document.getElementById('regPass2').value;
+    if (!u || !p) return msg('请输入用户名和密码', 'error');
+    if (p !== p2) return msg('两次密码不一致', 'error');
+    if (p.length < 6) return msg('密码至少6位', 'error');
+    setLoading(true);
+    try {
+        const r = await fetch('/api/auth/register', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({username:u, password:p, display_name:n})
+        });
+        const d = await r.json();
+        if (r.ok) {
+            msg('注册成功！请切换到登录页登录', 'success');
+            setTimeout(() => switchTab('login'), 800);
+        } else {
+            msg(d.detail || '注册失败', 'error');
+        }
+    } catch(e) { msg('网络错误: '+e.message, 'error'); }
+    setLoading(false);
+}
+
+function setLoading(v) {
+    document.getElementById('btnLogin').disabled = v;
+    document.getElementById('btnRegister').disabled = v;
+}
+function msg(t, cls) {
+    const m = document.getElementById('msg');
+    m.textContent = t; m.className = 'msg ' + (cls||'');
+}
+</script>
+</body>
+</html>

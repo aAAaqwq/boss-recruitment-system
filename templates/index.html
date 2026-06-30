@@ -6,51 +6,77 @@
     <title>BOSS招聘驾驶舱</title>
     <style>
     /* ═══════════════════════════════════════════
-       Design System — Gemini Deep Space
+       鲲界科技 · 深蓝科技风格
+       配色：#0B0F17 / #102A43 / #3D7CFF / #00E5FF / #E9EEF5
        ═══════════════════════════════════════════ */
     :root {
-        --bg-base: #131314;
-        --bg-surface: #1b1b1f;
-        --bg-elevated: #26262c;
-        --bg-hover: #2f3035;
-        --bg-active: #3a3b42;
+        /* 深色主基调 */
+        --dark-base: #0B0F17;
+        --dark-surface: #102A43;
+        --dark-elevated: #132a4a;
+        --dark-hover: #1a3560;
+        --dark-active: #204070;
 
-        --border: rgba(255,255,255,.06);
-        --border-default: rgba(255,255,255,.10);
-        --border-hover: rgba(255,255,255,.18);
-        --border-accent: rgba(138,180,248,.35);
+        /* 内容区浅色 */
+        --bg-base: #e9eef5;
+        --bg-surface: #f5f8fc;
+        --bg-elevated: #ffffff;
+        --bg-hover: #e2e8f0;
+        --bg-active: #d1d9e6;
 
-        --text: #e8eaed;
-        --text-secondary: #bdc1c6;
-        --text-muted: #a0a5ac;  /* bumped from #92979e for WCAG AA on elevated bg (~4.6:1) */
+        /* 边框 */
+        --border: rgba(61,124,255,.12);
+        --border-default: rgba(61,124,255,.18);
+        --border-hover: rgba(61,124,255,.30);
+        --border-accent: rgba(0,229,255,.35);
 
-        --accent: #8ab4f8;
-        --accent-light: #aecbfa;
-        --accent-bg: rgba(138,180,248,.08);
-        --accent-glow: rgba(138,180,248,.20);
-        --accent-gradient: linear-gradient(135deg, #8ab4f8, #c58af9, #f5a5c0);
+        /* 文字 */
+        --text: #e9eef5;
+        --text-secondary: #4a5568;
+        --text-muted: #4a5568;
+        --text-dark: #1e3a5f;
+        --text-dark2: #2c5282;
 
-        --green: #81c995;
-        --green-bg: rgba(129,201,149,.08);
-        --orange: #fcad70;
-        --orange-bg: rgba(252,173,112,.08);
-        --red: #f28b82;
-        --red-bg: rgba(242,139,130,.08);
-        --blue: #8ab4f8;
-        --blue-bg: rgba(138,180,248,.08);
+        /* 科技蓝渐变 */
+        --accent: #3D7CFF;
+        --accent-light: #5d93ff;
+        --accent-bg: rgba(61,124,255,.10);
+        --accent-glow: rgba(61,124,255,.25);
+        --accent-gradient: linear-gradient(135deg, #3D7CFF 0%, #00E5FF 100%);
+        --accent-cyan: #00E5FF;
+        --accent-glow-cyan: rgba(0,229,255,.30);
 
-        --font-sans: 'Google Sans', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
-        --font-mono: "Google Sans Mono", "SF Mono", "Monaco", "Menlo", monospace;
+        /* 状态色 */
+        --green: #10b981;
+        --green-bg: rgba(16,185,129,.10);
+        --orange: #f59e0b;
+        --orange-bg: rgba(245,158,11,.10);
+        --red: #ef4444;
+        --red-bg: rgba(239,68,68,.10);
+        --blue: #3D7CFF;
+        --blue-bg: rgba(61,124,255,.10);
+        --cyan: #00E5FF;
+        --cyan-bg: rgba(0,229,255,.08);
+        --gold: #f59e0b;
 
-        --radius-sm: 8px;
-        --radius-md: 12px;
-        --radius-lg: 16px;
+        /* 字体 */
+        --font-sans: -apple-system, "PingFang SC", "SF Pro Display", "Microsoft YaHei", sans-serif;
+        --font-mono: "SF Mono", "Monaco", "Menlo", monospace;
+
+        /* 圆角 */
+        --radius-sm: 6px;
+        --radius-md: 10px;
+        --radius-lg: 14px;
         --radius-pill: 20px;
 
-        --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
-        --shadow-md: 0 2px 8px rgba(0,0,0,.4);
-        --shadow-glow: 0 0 24px var(--accent-glow);
+        /* 阴影 */
+        --shadow-sm: 0 2px 8px rgba(0,0,0,.30);
+        --shadow-md: 0 4px 20px rgba(0,0,0,.40);
+        --shadow-card: 0 8px 32px rgba(0,0,0,.35);
+        --shadow-glow: 0 0 30px rgba(61,124,255,.20);
+        --shadow-glow-cyan: 0 0 30px rgba(0,229,255,.20);
 
+        /* 过渡 */
         --ease-out: cubic-bezier(.2,0,0,1);
         --transition-fast: 100ms var(--ease-out);
         --transition-normal: 200ms var(--ease-out);
@@ -67,16 +93,18 @@
     }
     .btn:focus-visible { outline-offset: 1px; }
 
-    /* ── Deep Space Glow ── */
-    body::before {
-        content: '';
-        position: fixed;
-        top: -20%; left: -10%;
-        width: 60%; height: 60%;
-        background: radial-gradient(ellipse at center, rgba(138,180,248,.03) 0%, transparent 70%);
-        pointer-events: none;
-        z-index: 0;
+    /* ── Selection ── */
+    ::selection {
+        background: var(--accent-bg);
+        color: var(--text);
     }
+
+    /* ── 深色背景 + 科技光效 ── */
+    body {
+        background: var(--dark-base);
+        color: var(--text);
+    }
+
 
     /* ── Layout Grid ── */
     body {
@@ -85,12 +113,40 @@
         grid-template-columns: 1fr 400px;
         height: 100vh;
         overflow: hidden;
-        background: var(--bg-base);
-        color: var(--text);
+        background: #ffffff;
+        color: #1a1a1a;
         font-family: var(--font-sans);
         font-size: 13px;
         line-height: 1.5;
         -webkit-font-smoothing: antialiased;
+    }
+
+    /* 内容区使用浅色背景 */
+    .main-content {
+        grid-column: 1;
+        grid-row: 2 / 4;
+        background: #ffffff;
+        overflow-y: auto;
+        padding: 16px;
+    }
+
+    .sidebar {
+        grid-column: 2;
+        grid-row: 1 / -1;
+        background: linear-gradient(180deg, #1e2d4a 0%, #152238 100%);
+        border-left: 1px solid rgba(61,124,255,.25);
+        overflow-y: auto;
+    }
+
+    /* 侧边栏内元素用浅色文字 */
+    .sidebar .section-title,
+    .sidebar .status-text,
+    .sidebar .log-entry {
+        color: var(--text);
+    }
+
+    .sidebar .section-title {
+        color: var(--accent-light);
     }
 
     /* ═══════════════════════════════════════════
@@ -99,8 +155,9 @@
     .header {
         grid-column: 1 / -1;
         grid-row: 1;
-        background: var(--bg-surface);
+        background: linear-gradient(135deg, var(--dark-surface) 0%, var(--dark-elevated) 100%);
         border-bottom: 1px solid var(--border-default);
+        box-shadow: 0 2px 20px rgba(0,0,0,.40), var(--shadow-glow);
         display: flex;
         align-items: center;
         padding: 0 16px;
@@ -114,7 +171,7 @@
         bottom: -1px;
         left: 0; right: 0;
         height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(138,180,248,.25), rgba(197,138,249,.15), transparent);
+        background: linear-gradient(90deg, transparent, rgba(37,99,235,.2), rgba(96,165,250,.12), transparent);
         pointer-events: none;
     }
 
@@ -135,7 +192,7 @@
         justify-content: center;
         font-weight: 800;
         font-size: 12px;
-        color: #131314;
+        color: #fff;
         letter-spacing: -.5px;
         flex-shrink: 0;
     }
@@ -147,11 +204,12 @@
     .logo-title {
         font-weight: 700;
         font-size: 13px;
-        color: var(--text);
+        color: var(--accent-cyan);
+        text-shadow: 0 0 20px var(--accent-glow-cyan);
     }
     .logo-sub {
         font-size: 12px;
-        color: var(--text-secondary);
+        color: var(--accent-light);
         letter-spacing: .3px;
     }
 
@@ -170,25 +228,26 @@
         flex-shrink: 0;
     }
     .h-stat {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
+        background: rgba(255,255,255,.06);
+        border: 1px solid var(--border-default);
         border-radius: var(--radius-sm);
         padding: 4px 10px;
         display: flex;
         align-items: center;
         gap: 6px;
+        box-shadow: var(--shadow-sm);
     }
     .h-stat-value {
         font-weight: 700;
         font-size: 14px;
         font-variant-numeric: tabular-nums;
-        color: var(--text);
+        color: #00e5ff;
         min-width: 2ch;
         text-align: center;
     }
     .h-stat-label {
         font-size: 12px;
-        color: var(--text-secondary);
+        color: #ffffff;
         text-transform: uppercase;
         letter-spacing: .5px;
     }
@@ -210,8 +269,8 @@
     .h-input {
         width: 100px;
         padding: 5px 8px;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-default);
+        background: #f5f8fc;
+        border: 1px solid var(--bd2);
         border-radius: var(--radius-sm);
         color: var(--text);
         font-size: 12px;
@@ -219,8 +278,8 @@
         outline: none;
         transition: border-color var(--transition-fast);
     }
-    .h-input:focus { border-color: var(--accent); }
-    .h-input::placeholder { color: var(--text-muted); }
+    .h-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg); }
+    .h-input::placeholder { color: #94a3b8; }
 
     .h-auth-btn {
         padding: 5px 12px;
@@ -236,9 +295,11 @@
         display: flex;
         align-items: center;
         gap: 4px;
+        box-shadow: 0 2px 0 #1e40af;
     }
-    .h-auth-btn:hover { background: var(--accent-light); }
-    .h-auth-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .h-auth-btn:hover { background: var(--accent-light); transform: translateY(-1px); box-shadow: 0 3px 0 #1e40af; }
+    .h-auth-btn:active { transform: translateY(0); box-shadow: 0 1px 0 #1e40af; }
+    .h-auth-btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
     .h-auth-btn.loading .spinner { display: block; }
     .h-auth-btn.loading .btn-text { display: none; }
     .h-auth-btn.loading { pointer-events: none; opacity: .7; }
@@ -247,7 +308,7 @@
         font-size: 12px;
         padding: 4px 10px;
         border-radius: var(--radius-sm);
-        background: var(--bg-elevated);
+        background: #ffffff;
         border: 1px solid var(--border);
         white-space: nowrap;
         display: none;
@@ -272,18 +333,18 @@
     }
     .status-dot.online {
         background: var(--green);
-        box-shadow: 0 0 0 0 rgba(129,201,149,.4);
+        box-shadow: 0 0 0 0 rgba(46,125,79,.4);
         animation: pulse-dot 2.5s ease-in-out infinite;
     }
     .status-dot.offline { background: var(--red); }
     .status-dot.busy { background: var(--orange); animation: pulse-dot-orange 1.5s ease-in-out infinite; }
     @keyframes pulse-dot {
-        0%,100% { box-shadow: 0 0 0 0 rgba(129,201,149,.35); }
-        50% { box-shadow: 0 0 0 5px rgba(129,201,149,0); }
+        0%,100% { box-shadow: 0 0 0 0 rgba(46,125,79,.35); }
+        50% { box-shadow: 0 0 0 5px rgba(46,125,79,0); }
     }
     @keyframes pulse-dot-orange {
-        0%,100% { box-shadow: 0 0 0 0 rgba(252,173,112,.35); }
-        50% { box-shadow: 0 0 0 5px rgba(252,173,112,0); }
+        0%,100% { box-shadow: 0 0 0 0 rgba(185,125,16,.35); }
+        50% { box-shadow: 0 0 0 5px rgba(185,125,16,0); }
     }
     .vnc-text {
         font-size: 12px;
@@ -326,7 +387,7 @@
     }
     .task-spinner {
         width: 12px; height: 12px;
-        border: 2px solid rgba(99,102,241,.25);
+        border: 2px solid rgba(37,99,235,.2);
         border-top-color: var(--accent);
         border-radius: 50%;
         animation: spin .7s linear infinite;
@@ -335,12 +396,12 @@
     .task-bar-name {
         font-size: 12px;
         font-weight: 600;
-        color: var(--accent-light);
+        color: var(--accent);
     }
     .task-bar-track {
         flex: 1;
         height: 5px;
-        background: rgba(99,102,241,.15);
+        background: rgba(37,99,235,.12);
         border-radius: 3px;
         overflow: hidden;
     }
@@ -356,7 +417,7 @@
         content: '';
         position: absolute;
         inset: 0;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,.2), transparent);
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent);
         background-size: 200% 100%;
         animation: shimmer 1.8s ease-in-out infinite;
     }
@@ -367,7 +428,7 @@
     .task-bar-pct {
         font-size: 12px;
         font-weight: 700;
-        color: var(--accent-light);
+        color: var(--accent);
         font-variant-numeric: tabular-nums;
         min-width: 36px;
         text-align: right;
@@ -391,7 +452,7 @@
         position: relative;
     }
     .vnc-toolbar {
-        background: var(--bg-surface);
+        background: var(--bg-elevated);
         border-bottom: 1px solid var(--border);
         padding: 5px 12px;
         display: flex;
@@ -399,8 +460,8 @@
         flex-shrink: 0;
     }
     .vnc-toolbar button {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
+        background: #ffffff;
+        border: 1px solid var(--border-default);
         color: var(--text-secondary);
         padding: 4px 10px;
         border-radius: var(--radius-sm);
@@ -452,7 +513,7 @@
     .control-panel {
         grid-column: 2;
         grid-row: 3;
-        background: var(--bg-surface);
+        background: #ffffff;
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -464,8 +525,8 @@
     }
     .cp-scroll::-webkit-scrollbar { width: 5px; }
     .cp-scroll::-webkit-scrollbar-track { background: transparent; }
-    .cp-scroll::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
-    .cp-scroll::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+    .cp-scroll::-webkit-scrollbar-thumb { background: #c4d0e0; border-radius: 3px; }
+    .cp-scroll::-webkit-scrollbar-thumb:hover { background: #a0b0c8; }
 
     /* Sections */
     .section {
@@ -477,29 +538,29 @@
         justify-content: space-between;
         padding: 7px 0;
         margin-bottom: 8px;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 2px solid rgba(61,124,255,.15);
     }
     .section-label {
-        font-size: 12px;
-        font-weight: 600;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        color: #1a1a1a;
         text-transform: uppercase;
-        letter-spacing: .8px;
-        color: var(--text-secondary);
     }
     .section-toggle {
         background: none;
         border: none;
-        color: var(--accent);
+        color: var(--text-muted);
         font-size: 12px;
         cursor: pointer;
         padding: 2px 6px;
         border-radius: 4px;
-        transition: background var(--transition-fast);
+        transition: all var(--transition-fast);
         display: flex;
         align-items: center;
         gap: 4px;
     }
-    .section-toggle:hover { background: var(--accent-bg); }
+    .section-toggle:hover { background: rgba(61,124,255,.08); color: var(--accent); }
     .section-toggle::before {
         content: '▸';
         display: inline-block;
@@ -524,39 +585,95 @@
         font-weight: 500;
         font-family: var(--font-sans);
         cursor: pointer;
-        transition: all var(--transition-fast);
+        transition: all var(--transition-normal);
         margin-bottom: 6px;
         position: relative;
         overflow: hidden;
     }
-    .btn:disabled { opacity: .45; cursor: not-allowed; }
-    .btn:active:not(:disabled) { transform: scale(.98); }
+    .btn::before {
+        content: '';
+        position: absolute;
+        top: 0; left: -100%;
+        width: 100%; height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,.15), transparent);
+        transition: left .5s;
+    }
+    .btn:hover::before { left: 100%; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+    .btn:active:not(:disabled) { transform: translateY(0); }
 
     .btn-primary {
-        background: var(--accent);
+        background: var(--accent-gradient);
         color: #fff;
+        box-shadow: 0 4px 15px rgba(61,124,255,.35);
+        border: none;
     }
     .btn-primary:hover:not(:disabled) {
-        background: var(--accent-light);
-        box-shadow: 0 0 16px var(--accent-glow);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(61,124,255,.50), 0 0 40px rgba(0,229,255,.15);
     }
-    .btn-success { background: var(--green); color: #fff; }
-    .btn-success:hover:not(:disabled) { background: #0ea472; box-shadow: 0 0 16px rgba(16,185,129,.3); }
-    .btn-info { background: var(--blue); color: #fff; }
-    .btn-info:hover:not(:disabled) { background: #2563eb; box-shadow: 0 0 16px rgba(59,130,246,.3); }
-    .btn-warning { background: var(--orange); color: #000; }
-    .btn-warning:hover:not(:disabled) { background: #d97706; }
-    .btn-danger { background: var(--red); color: #fff; }
-    .btn-danger:hover:not(:disabled) { background: #dc2626; box-shadow: 0 0 16px rgba(239,68,68,.3); }
+    .btn-success {
+        background: var(--accent-gradient);
+        color: #fff;
+        box-shadow: 0 4px 15px rgba(61,124,255,.35);
+        border: none;
+    }
+    .btn-success:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(61,124,255,.50), 0 0 40px rgba(0,229,255,.15);
+    }
+    .btn-info {
+        background: var(--accent-gradient);
+        color: #fff;
+        box-shadow: 0 4px 15px rgba(61,124,255,.35);
+        border: none;
+    }
+    .btn-info:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(61,124,255,.50), 0 0 40px rgba(0,229,255,.15);
+    }
+    .btn-warning {
+        background: var(--accent-gradient);
+        color: #fff;
+        box-shadow: 0 4px 15px rgba(61,124,255,.35);
+        border: none;
+    }
+    .btn-warning:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(61,124,255,.50), 0 0 40px rgba(0,229,255,.15);
+    }
+    .btn-danger {
+        background: var(--accent-gradient);
+        color: #fff;
+        box-shadow: 0 4px 15px rgba(61,124,255,.35);
+        border: none;
+    }
+    .btn-danger:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(61,124,255,.50), 0 0 40px rgba(0,229,255,.15);
+    }
     .btn-secondary {
-        background: var(--bg-elevated);
+        background: rgba(255,255,255,.05);
         color: var(--text-secondary);
         border: 1px solid var(--border-default);
+        box-shadow: none;
     }
     .btn-secondary:hover:not(:disabled) {
-        background: var(--bg-hover);
+        background: rgba(255,255,255,.10);
         color: var(--text);
         border-color: var(--border-hover);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 0 rgba(60,40,10,.1);
+    }
+    .btn-accent {
+        background: var(--accent-gradient);
+        color: #fff;
+        box-shadow: 0 4px 15px rgba(61,124,255,.35);
+        border: none;
+    }
+    .btn-accent:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(61,124,255,.50), 0 0 40px rgba(0,229,255,.15);
     }
 
     .btn-sm { padding: 7px 12px; font-size: 12px; }
@@ -583,19 +700,24 @@
     .input-row input[type="number"] {
         width: 72px;
         padding: 8px 8px;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-default);
+        background: #e8e8e8;
+        border: 1px solid #d0d0d0;
         border-radius: var(--radius-sm);
-        color: var(--text);
-        font-size: 13px;
+        color: #1a1a1a;
+        font-size: 14px;
+        font-weight: 700;
         font-family: var(--font-sans);
         outline: none;
         text-align: center;
-        transition: border-color var(--transition-fast);
+        transition: all var(--transition-fast);
         -moz-appearance: textfield;
     }
     .input-row input::-webkit-inner-spin-button { -webkit-appearance: none; }
-    .input-row input:focus { border-color: var(--accent); }
+    .input-row input:focus {
+        border-color: var(--accent-cyan);
+        box-shadow: 0 0 0 3px rgba(0,229,255,.15);
+        background: rgba(255,255,255,.08);
+    }
     .input-row .btn { flex: 1; margin-bottom: 0; }
 
     .btn-row {
@@ -617,10 +739,11 @@
     }
 
     .config-card {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
+        background: #ffffff;
+        border: 1px solid rgba(61,124,255,.18);
         border-radius: var(--radius-md);
         padding: 14px;
+        box-shadow: 0 2px 8px rgba(61,124,255,.08);
     }
     .form-group {
         margin-bottom: 12px;
@@ -629,33 +752,35 @@
     .form-group label {
         display: block;
         font-size: 12px;
-        font-weight: 500;
-        color: var(--text-secondary);
+        font-weight: 600;
+        color: #1a1a1a;
         margin-bottom: 5px;
     }
     .form-group input,
     .form-group select,
     .form-group textarea {
         width: 100%;
-        background: var(--bg-base);
-        border: 1px solid var(--border-default);
+        background: #f8fafc;
+        border: 1px solid rgba(61,124,255,.20);
         border-radius: var(--radius-sm);
         padding: 10px 12px;
-        color: var(--text);
+        color: var(--text-dark);
         font-size: 12px;
         font-family: var(--font-sans);
         outline: none;
-        transition: border-color var(--transition-fast);
+        transition: all var(--transition-fast);
     }
     .form-group input:focus,
     .form-group select:focus,
     .form-group textarea:focus {
         border-color: var(--accent);
-        box-shadow: 0 0 0 2px var(--accent-bg);
+        box-shadow: 0 0 0 3px rgba(61,124,255,.12);
     }
+    .form-group input::placeholder,
+    .form-group textarea::placeholder { color: var(--text-muted); }
 
     .form-group select:hover {
-        border-color: var(--border-hover);
+        border-color: rgba(61,124,255,.35);
     }
     .form-group textarea {
         min-height: 64px;
@@ -665,7 +790,7 @@
     }
     .form-group select {
         appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%233D7CFF'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 10px center;
         padding-right: 28px;
@@ -699,7 +824,7 @@
     .template-item:hover { border-color: var(--accent); }
     .template-name {
         font-size: 12px;
-        color: var(--accent-light);
+        color: var(--accent);
         font-weight: 500;
     }
     .template-text {
@@ -714,7 +839,7 @@
     .log-footer {
         grid-column: 1 / -1;
         grid-row: 4;
-        background: var(--bg-surface);
+        background: #ffffff;
         border-top: 1px solid var(--border-default);
         display: flex;
         flex-direction: column;
@@ -796,7 +921,8 @@
     }
     .log-body::-webkit-scrollbar { width: 5px; }
     .log-body::-webkit-scrollbar-track { background: transparent; }
-    .log-body::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+    .log-body::-webkit-scrollbar-thumb { background: #c4d0e0; border-radius: 3px; }
+    .log-body::-webkit-scrollbar-thumb:hover { background: #a0b0c8; }
 
     .log-line {
         margin: 2px 0;
@@ -836,16 +962,16 @@
             animation-iteration-count: 1 !important;
             transition-duration: 0.01ms !important;
         }
-        body::before { display: none; }
+        body::before, body::after { display: none; }
     }
 
     /* ── Tab Editor Styles ── */
     .tab-btn.active {
-        color: var(--text) !important;
+        color: var(--accent) !important;
         border-bottom-color: var(--accent) !important;
     }
     .tab-btn:hover {
-        color: var(--text) !important;
+        color: var(--accent) !important;
     }
     .tab-content {
         animation: fadeIn 0.2s var(--ease-out);
@@ -872,16 +998,36 @@
 
         <div class="header-stats" aria-live="polite">
             <div class="h-stat">
-                <span class="h-stat-value" id="statProcessed">0</span>
-                <span class="h-stat-label">已处理</span>
+                <span class="h-stat-value" id="statContacted">0</span>
+                <span class="h-stat-label">已打招呼</span>
+            </div>
+            <div class="h-stat">
+                <span class="h-stat-value" id="statReplied">0</span>
+                <span class="h-stat-label">已回复</span>
+            </div>
+            <div class="h-stat">
+                <span class="h-stat-value" id="statApplied">0</span>
+                <span class="h-stat-label">已申请</span>
             </div>
             <div class="h-stat">
                 <span class="h-stat-value" id="statResumes">0</span>
                 <span class="h-stat-label">简历</span>
             </div>
             <div class="h-stat">
-                <span class="h-stat-value" id="statReplied">0</span>
-                <span class="h-stat-label">已回复</span>
+                <span class="h-stat-value" id="statRecommend">0</span>
+                <span class="h-stat-label">可约面</span>
+            </div>
+            <div class="h-stat">
+                <span class="h-stat-value" id="statInvited">0</span>
+                <span class="h-stat-label">已约面</span>
+            </div>
+            <div class="h-stat" onclick="loadUserStats()" style="cursor:pointer;" title="刷新统计">
+                <span class="h-stat-value" style="font-size:11px;">🔄</span>
+                <span class="h-stat-label" style="font-size:10px;">刷新</span>
+            </div>
+            <div class="h-stat" onclick="toggleDataPanel()" style="cursor:pointer;" title="数据面板">
+                <span class="h-stat-value" style="font-size:11px;">📋</span>
+                <span class="h-stat-label" style="font-size:10px;">数据</span>
             </div>
         </div>
 
@@ -889,14 +1035,12 @@
 
         <div class="header-auth" id="authSection">
             <div class="auth-inputs">
-                <input type="text" id="login-user" value="admin" placeholder="用户" class="h-input" aria-label="API用户名">
-                <input type="password" id="login-pass" placeholder="密码" class="h-input" aria-label="API密码">
-                <button class="h-auth-btn" onclick="doLogin(event)">
-                    <span class="spinner" aria-hidden="true"></span>
-                    <span class="btn-text">登录</span>
-                </button>
+                <span id="loginUserDisplay" style="color:var(--text2);font-size:12px;"></span>
             </div>
-            <span class="auth-badge" id="authStatus" aria-live="polite">未登录</span>
+            <button class="h-auth-btn" id="btnLogout" onclick="doLogout()" style="font-size:12px;padding:4px 12px;flex-shrink:0;">
+                退出
+            </button>
+            <span class="auth-badge" id="authStatus" aria-live="polite">已登录</span>
         </div>
 
         <div class="h-divider"></div>
@@ -906,6 +1050,34 @@
             <span class="vnc-text" id="vncStatusText">未连接</span>
         </div>
     </header>
+
+    <!-- ═══ DATA PANEL MODAL ═══ -->
+    <div id="dataPanel" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.5);align-items:center;justify-content:center;">
+        <div style="background:var(--bg-surface);border-radius:16px;width:90vw;max-width:1000px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.25);">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);">
+                <span style="font-size:15px;font-weight:700;">📋 我的候选人数据</span>
+                <button onclick="toggleDataPanel()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);">✕</button>
+            </div>
+            <div style="padding:12px 20px;overflow-y:auto;flex:1;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead>
+                        <tr style="background:var(--bg-elevated);position:sticky;top:0;">
+                            <th style="padding:8px;text-align:left;border-bottom:1px solid var(--border);">姓名</th>
+                            <th style="padding:8px;text-align:left;border-bottom:1px solid var(--border);">学校</th>
+                            <th style="padding:8px;text-align:left;border-bottom:1px solid var(--border);">学历</th>
+                            <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">年限</th>
+                            <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">打招呼</th>
+                            <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">回复</th>
+                            <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">申请</th>
+                            <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">简历</th>
+                            <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">面试状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dataPanelBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
     <!-- ═══ TASK PROGRESS BAR ═══ -->
     <div class="task-bar" id="taskStatus" role="status" aria-live="polite">
@@ -961,10 +1133,6 @@
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">🌐 连接桌面</span>
                     </button>
-                    <button class="btn btn-info action-grid-full" onclick="checkLogin(event)">
-                        <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">✅ 检查登录状态</span>
-                    </button>
                     <button class="btn btn-secondary btn-sm" onclick="exportCookies(event)">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">💾 导出Cookie</span>
@@ -992,7 +1160,7 @@
                     <input type="number" id="resumeLimit" value="10" placeholder="人数" aria-label="获取简历人数上限" min="1" max="200">
                     <button class="btn btn-warning" onclick="batchGetResumes()" id="btnGetResumes">
                         <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">📄 批量获取简历</span>
+                        <span class="btn-text">📄 批量申请简历</span>
                     </button>
                 </div>
                 <div class="input-row">
@@ -1009,15 +1177,81 @@
                         <span class="btn-text">📥 下载已获取简历</span>
                     </button>
                 </div>
+                <div class="input-row">
+                    <input type="number" id="analyzeLimit" value="20" placeholder="人数" aria-label="AI分析简历数量上限" min="1" max="200">
+                    <button class="btn btn-info" onclick="batchAnalyzeResumes()" id="btnAnalyzeResumes">
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span class="btn-text">🤖 AI分析简历</span>
+                    </button>
+                </div>
+                <div class="input-row">
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('interviewConfig')" style="font-size:12px;padding:4px 10px;border:1px solid var(--border-default);border-radius:8px;background:var(--bg-surface);flex:none;width:72px;">⚙ 配置</button>
+                    <button class="btn btn-accent" onclick="batchInviteInterview()" id="btnInviteInterview">
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span class="btn-text">💼 约面试</span>
+                    </button>
+                </div>
+                <div class="config-content" id="interviewConfig">
+                    <div class="input-row" style="margin-top:4px;">
+                        <select id="interviewType" aria-label="面试类型">
+                            <option value="">不限</option>
+                            <option value="线下">线下面试</option>
+                            <option value="线上">线上面试</option>
+                        </select>
+                        <input type="date" id="interviewDate" aria-label="面试日期" style="width:140px">
+                        <select id="interviewTime" aria-label="面试时间">
+                            <option value="">默认</option>
+                            <option>08:05</option><option>08:30</option>
+                            <option>09:05</option><option>09:30</option>
+                            <option>10:05</option><option>10:30</option>
+                            <option>11:05</option><option>11:30</option>
+                            <option>12:05</option><option>12:30</option>
+                            <option>13:05</option><option>13:30</option>
+                            <option>14:05</option><option>14:30</option>
+                            <option>15:05</option><option>15:30</option>
+                            <option>16:05</option><option>16:30</option>
+                            <option>17:05</option><option>17:30</option>
+                            <option>18:05</option><option>18:30</option>
+                            <option>19:05</option><option>19:30</option>
+                            <option>20:05</option><option>20:30</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 可约面候选人 -->
+            <div class="section" id="interviewCandidatesSection" style="display:none;">
+                <div class="section-header">
+                    <span class="section-label">🎯 可约面候选人</span>
+                    <span id="interviewCandidateCount" style="font-size:12px;color:var(--text-muted);margin-right:8px;"></span>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('interviewCandidateList')">候选人</button>
+                </div>
+                <div class="config-content" id="interviewCandidateList" style="max-height:300px;overflow-y:auto;"></div>
+            </div>
+
+            <!-- AI分析报告 -->
+            <div class="section">
+                <div class="section-header">
+                    <span class="section-label">📊 分析报告</span>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('reportConfig')">报告</button>
+                </div>
+                <div class="config-content" id="reportConfig">
+                    <div class="config-card">
+                        <select id="reportSelect" onchange="loadReportContent()" style="width:100%;margin-bottom:8px;">
+                            <option value="">-- 选择报告 --</option>
+                        </select>
+                        <div id="reportContent" style="max-height:400px;overflow-y:auto;font-size:12px;line-height:1.7;white-space:pre-wrap;color:#1a1a1a;background:#f5f5f5;padding:10px;border-radius:8px;display:none;"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- 筛选条件 -->
             <div class="section">
                 <div class="section-header">
                     <span class="section-label">筛选条件</span>
-                    <button class="section-toggle expanded" aria-expanded="true" onclick="toggleConfig('filterConfig')">筛选条件</button>
+                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('filterConfig')">筛选条件</button>
                 </div>
-                <div class="config-content show" id="filterConfig">
+                <div class="config-content" id="filterConfig">
                     <div class="config-card">
                         <div class="form-group">
                             <label>学历要求</label>
@@ -1131,17 +1365,6 @@
                 </div>
             </div>
 
-            <!-- 快捷操作 -->
-            <div class="section">
-                <div class="section-header">
-                    <span class="section-label">快捷操作</span>
-                </div>
-                <div class="btn-row">
-                    <button class="btn btn-secondary btn-sm" onclick="navigateToChat()">💬 聊天页</button>
-                    <button class="btn btn-secondary btn-sm" onclick="navigateToList()">📋 候选人</button>
-                </div>
-            </div>
-
         </div>
     </aside>
 
@@ -1167,18 +1390,67 @@
         // API_BASE: Docker 容器服务 (8002→容器内8001)
         // 自动检测 API 地址: Docker 环境用 8002，本地用 8001
         const API_BASE = (() => {
+            const p = window.location.port;
+            if (p === '8321' || p === '3000' || p === '3101') {
+                return window.location.origin.replace(':' + p, ':8002');
+            }
+            if (p === '8002') return window.location.origin;
             if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-                // 优先尝试当前 host 的端口推断
-                const p = window.location.port;
-                if (p === '8321' || p === '3000' || p === '3101') return 'http://localhost:8002'; // Docker
-                if (p === '8002') return 'http://localhost:8002';
-                return 'http://localhost:8001'; // 本地
+                return 'http://localhost:8001';
             }
             return window.location.origin; // 同源部署
         })();
         let vncConnected = false;
         let vncScale = 1;
-        let authToken = localStorage.getItem('auth_token') || null;
+        let authToken = localStorage.getItem('token') || '';
+
+        // ── 退出登录 ──
+        async function doLogout() {
+            try {
+                await apiCall('/api/auth/logout', null, 'POST');
+            } catch (e) {}
+            localStorage.removeItem('token');
+            window.location = API_BASE + '/login';
+        }
+
+        // ── 数据面板 ──
+        function toggleDataPanel() {
+            const panel = document.getElementById('dataPanel');
+            if (panel.style.display === 'flex') {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'flex';
+            loadDataPanel();
+        }
+        async function loadDataPanel() {
+            const tbody = document.getElementById('dataPanelBody');
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-muted);">加载中...</td></tr>';
+            try {
+                const data = await apiCall('/api/user/candidates', null, 'GET');
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-muted);">暂无数据</td></tr>';
+                    return;
+                }
+                const statusMap = {discovered:'新发现',contacted:'已沟通',replied:'已回复',recommend_interview:'可约面',interview_invited:'已约面',not_recommended:'不匹配'};
+                tbody.innerHTML = data.map(c => `
+                    <tr style="border-bottom:1px solid var(--border);">
+                        <td style="padding:7px;">${c.candidate_name || '-'}</td>
+                        <td style="padding:7px;">${c.school || '-'}</td>
+                        <td style="padding:7px;">${c.degree || '-'}</td>
+                        <td style="padding:7px;text-align:center;">${c.years || '-'}</td>
+                        <td style="padding:7px;text-align:center;">${c.is_contacted ? '✅' : '—'}</td>
+                        <td style="padding:7px;text-align:center;">${c.is_replied ? '✅' : '—'}</td>
+                        <td style="padding:7px;text-align:center;">${c.is_applied ? '✅' : '—'}</td>
+                        <td style="padding:7px;text-align:center;">${c.is_downloaded ? '✅' : '—'}</td>
+                        <td style="padding:7px;text-align:center;font-size:11px;">${statusMap[c.interview_status] || c.interview_status || '-'}</td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--red);">加载失败: ${e.message}</td></tr>`;
+            }
+        }
+
         let config = {
             filter: {
                 degree: '',
@@ -1341,7 +1613,7 @@
         }
 
         function getAuthToken() {
-            return localStorage.getItem('auth_token') || localStorage.getItem('token') || authToken || null;
+            return authToken || localStorage.getItem('token') || null;
         }
 
         async function loadConfigFromAPI() {
@@ -1468,32 +1740,32 @@
                 overlay.id = 'textEditorOverlay';
                 overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
                 overlay.innerHTML = `
-                    <div style="background:var(--bg-surface);border-radius:12px;padding:24px;width:90%;max-width:720px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                    <div style="background:#ffffff;border-radius:12px;padding:24px;width:90%;max-width:720px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                            <h3 style="margin:0;color:var(--text);font-size:16px;">${title}</h3>
-                            <button onclick="closeTextEditor()" style="background:none;border:none;color:var(--text-secondary);font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
+                            <h3 style="margin:0;color:#1a1a1a;font-size:16px;font-weight:600;">${title}</h3>
+                            <button onclick="closeTextEditor()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
                         </div>
 
                         <!-- Tab 切换：国内 / 国外 -->
-                        <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border-default);">
-                            <button class="tab-btn active" data-tab="domestic" onclick="switchTab('domestic')" style="padding:8px 16px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;font-size:13px;">🇨🇳 国内高校</button>
-                            <button class="tab-btn" data-tab="international" onclick="switchTab('international')" style="padding:8px 16px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;font-size:13px;">🌍 国外高校</button>
+                        <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid #e5e7eb;">
+                            <button class="tab-btn active" data-tab="domestic" onclick="switchTab('domestic')" style="padding:8px 16px;background:transparent;border:none;color:#3b82f6;cursor:pointer;border-bottom:2px solid #3b82f6;font-size:13px;">🇨🇳 国内高校</button>
+                            <button class="tab-btn" data-tab="international" onclick="switchTab('international')" style="padding:8px 16px;background:transparent;border:none;color:#666;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;">🌍 国外高校</button>
                         </div>
 
                         <!-- Tab 内容：国内 -->
                         <div id="tab-domestic" class="tab-content" style="flex:1;display:block;">
-                            <div style="margin-bottom:8px;color:var(--text-secondary);font-size:12px;">国内高校列表（逗号分隔，如：清华大学,北京大学,浙江大学）</div>
-                            <textarea class="tab-textarea" data-category="domestic" style="flex:1;min-height:200px;width:100%;background:var(--bg-elevated);color:var(--text);border:1px solid var(--border-default);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${domesticValue.replace(/</g,'&lt;')}</textarea>
+                            <div style="margin-bottom:8px;color:#666;font-size:12px;">国内高校列表（逗号分隔，如：清华大学,北京大学,浙江大学）</div>
+                            <textarea class="tab-textarea" data-category="domestic" style="flex:1;min-height:200px;width:100%;background:#f9fafb;color:#1a1a1a;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${domesticValue.replace(/</g,'&lt;')}</textarea>
                         </div>
                         <!-- Tab 内容：国外 -->
                         <div id="tab-international" class="tab-content" style="flex:1;display:none;">
-                            <div style="margin-bottom:8px;color:var(--text-secondary);font-size:12px;">国外高校列表（逗号分隔，如：Harvard University,MIT,Oxford）</div>
-                            <textarea class="tab-textarea" data-category="international" style="flex:1;min-height:200px;width:100%;background:var(--bg-elevated);color:var(--text);border:1px solid var(--border-default);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${internationalValue.replace(/</g,'&lt;')}</textarea>
+                            <div style="margin-bottom:8px;color:#666;font-size:12px;">国外高校列表（逗号分隔，如：Harvard University,MIT,Oxford）</div>
+                            <textarea class="tab-textarea" data-category="international" style="flex:1;min-height:200px;width:100%;background:#f9fafb;color:#1a1a1a;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${internationalValue.replace(/</g,'&lt;')}</textarea>
                         </div>
 
                         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
-                            <button onclick="closeTextEditor()" style="padding:8px 16px;border-radius:6px;background:var(--bg-elevated);color:var(--text-secondary);border:1px solid var(--border-default);cursor:pointer;">取消</button>
-                            <button onclick="confirmSchoolEditor()" style="padding:8px 20px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
+                            <button onclick="closeTextEditor()" style="padding:8px 16px;border-radius:6px;background:#fff;color:#666;border:1px solid #e5e7eb;cursor:pointer;">取消</button>
+                            <button onclick="confirmSchoolEditor()" style="padding:8px 20px;border-radius:6px;background:#3b82f6;color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
                         </div>
                     </div>
                 `;
@@ -1533,15 +1805,15 @@
             overlay.id = 'textEditorOverlay';
             overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
             overlay.innerHTML = `
-                <div style="background:var(--bg-surface);border-radius:12px;padding:24px;width:90%;max-width:680px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                <div style="background:#ffffff;border-radius:12px;padding:24px;width:90%;max-width:680px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                        <h3 style="margin:0;color:var(--text);font-size:16px;">${title}</h3>
-                        <button onclick="closeTextEditor()" style="background:none;border:none;color:var(--text-secondary);font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
+                        <h3 style="margin:0;color:#1a1a1a;font-size:16px;font-weight:600;">${title}</h3>
+                        <button onclick="closeTextEditor()" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
                     </div>
-                    <textarea id="textEditorArea" style="flex:1;min-height:280px;width:100%;background:var(--bg-elevated);color:var(--text);border:1px solid var(--border-default);border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${value.replace(/</g,'&lt;')}</textarea>
+                    <textarea id="textEditorArea" style="flex:1;min-height:280px;width:100%;background:#f9fafb;color:#1a1a1a;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;">${value.replace(/</g,'&lt;')}</textarea>
                     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
-                        <button onclick="closeTextEditor()" style="padding:8px 16px;border-radius:6px;background:var(--bg-elevated);color:var(--text-secondary);border:1px solid var(--border-default);cursor:pointer;">取消</button>
-                        <button onclick="confirmTextEditor('${inputId}')" style="padding:8px 20px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
+                        <button onclick="closeTextEditor()" style="padding:8px 16px;border-radius:6px;background:#fff;color:#666;border:1px solid #e5e7eb;cursor:pointer;">取消</button>
+                        <button onclick="confirmTextEditor('${inputId}')" style="padding:8px 20px;border-radius:6px;background:#3b82f6;color:#fff;border:none;cursor:pointer;font-weight:500;">确认</button>
                     </div>
                 </div>
             `;
@@ -1569,12 +1841,12 @@
             document.querySelectorAll('.tab-btn').forEach(btn => {
                 btn.classList.remove('active');
                 btn.style.borderBottomColor = 'transparent';
-                btn.style.color = 'var(--text-secondary)';
+                btn.style.color = '#666';
             });
             const activeBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
             activeBtn.classList.add('active');
-            activeBtn.style.borderBottomColor = 'var(--accent)';
-            activeBtn.style.color = 'var(--text)';
+            activeBtn.style.borderBottomColor = '#3b82f6';
+            activeBtn.style.color = '#3b82f6';
 
             // 聚焦对应文本框
             const textarea = document.querySelector(`.tab-textarea[data-category="${tabName}"]`);
@@ -1646,8 +1918,8 @@
             if (active) {
                 panel.classList.add('active');
                 nameEl.textContent = name;
-                percentEl.textContent = progress + '%';
-                progressBar.style.width = progress + '%';
+                percentEl.textContent = '';
+                progressBar.style.width = '0%';
                 textEl.textContent = text;
                 if (cancelBtn) cancelBtn.style.display = '';
             } else {
@@ -1684,62 +1956,49 @@
             updateTaskStatus(false);
         }
 
-        function updateStats(processed, resumes, replied) {
-            // Merge: only update non-null arguments to avoid resetting other counters
-            const cur = (id) => parseInt(document.getElementById(id).textContent) || 0;
-            if (processed !== null && processed !== undefined) document.getElementById('statProcessed').textContent = cur('statProcessed') + processed;
-            if (resumes !== null && resumes !== undefined) document.getElementById('statResumes').textContent = cur('statResumes') + resumes;
-            if (replied !== null && replied !== undefined) document.getElementById('statReplied').textContent = cur('statReplied') + replied;
-        }
-
-        function setStats(processed, resumes, replied) {
-            // Hard-set all three counters (used for initial load)
-            document.getElementById('statProcessed').textContent = processed;
-            document.getElementById('statResumes').textContent = resumes;
-            document.getElementById('statReplied').textContent = replied;
-        }
-
-        // ── Auth ──
-        async function login() {
-            const username = document.getElementById('login-user')?.value || 'admin';
-            const password = document.getElementById('login-pass')?.value || '';
-            log(`🔑 正在登录 ${API_BASE} ...`, 'info');
+        async function loadUserStats() {
             try {
-                const resp = await fetch(`${API_BASE}/api/auth/login`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username, password})
-                });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    authToken = data.access_token;
-                    localStorage.setItem('auth_token', authToken);
-                    updateAuthUI(true);
-                    log('✅ API 登录成功', 'info');
-                    loadJobFiles();  // 登录后加载岗位列表
-                    return true;
-                } else {
-                    const err = await resp.json();
-                    updateAuthUI(false);
-                    log(`❌ 登录失败: ${err.detail || '用户名或密码错误'}`, 'error');
-                    return false;
-                }
-            } catch (e) {
-                updateAuthUI(false);
-                if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
-                    log(`❌ 无法连接API服务器 (${API_BASE})，请检查API服务是否启动`, 'error');
-                } else {
-                    log(`登录异常: ${e.message}`, 'error');
-                }
-                return false;
-            }
+                const d = await apiCall('/api/user/stats', null, 'GET');
+                if (!d) return;
+                const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v || 0; };
+                set('statContacted', d.contacted);
+                set('statReplied', d.replied);
+                set('statApplied', d.applied);
+                set('statResumes', d.downloaded);
+                set('statRecommend', d.recommend);
+                set('statInvited', d.invited);
+            } catch (e) { console.error('加载统计失败:', e); }
         }
 
-        async function doLogin(e) {
-            const btn = e && e.target ? (e.target.closest('.h-auth-btn') || e.target.closest('.btn')) : null;
-            setLoading(btn, true);
-            const ok = await login();
-            setLoading(btn, false);
+        let _statsTimer = null;
+        function startStatsSync() { if (_statsTimer) return; _statsTimer = setInterval(loadUserStats, 1000); }
+        function stopStatsSync() { if (_statsTimer) { clearInterval(_statsTimer); _statsTimer = null; } }
+
+        // ── Auth ──（从 /login 获取的 JWT，存在 localStorage）
+        let currentUserId = '';
+
+        function initAuth() {
+            // 只从 /login 页面拿的 JWT，清除旧残留
+            localStorage.removeItem('auth_token');
+            const token = localStorage.getItem('token');
+            if (!token) {
+                log('⚠ 未登录，跳转到登录页...', 'warn');
+                setTimeout(() => { location.href = API_BASE + '/login'; }, 500);
+                return;
+            }
+            authToken = token;
+            // 解析 JWT 拿 user_id
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                document.getElementById('loginUserDisplay').textContent = payload.sub || '';
+                currentUserId = payload.user_id || '';
+                localStorage.setItem('user_id', currentUserId);
+            } catch(e) {}
+            updateAuthUI(true);
+            log('✅ 已认证，正在启动桌面...', 'info');
+            loadJobFiles();
+            // 自动启动浏览器 + 连接桌面，用户直接看到BOSS直聘
+            setTimeout(() => { openBossZhipin(); }, 800);
         }
 
         function updateAuthUI(isLoggedIn) {
@@ -2002,15 +2261,32 @@
             const btn = e && e.target ? e.target.closest('.btn') : null;
             setLoading(btn, true);
             log('正在启动浏览器并打开BOSS直聘...', 'info');
+
+            // 先连VNC桌面，确保用户能看到
+            if (!vncConnected) {
+                try {
+                    log('正在连接VNC桌面...', 'info');
+                    await connectVNC({});
+                } catch(e) {
+                    log(`VNC连接失败: ${e.message}`, 'warn');
+                }
+            }
+
             try {
                 const data = await apiCall('/api/browser/open-boss');
                 setLoading(btn, false);
                 if (data && data.status === 'ok') {
                     log('✅ Chrome已启动，BOSS直聘已打开', 'info');
-                    if (!vncConnected) {
-                        log('正在连接VNC桌面以查看浏览器...', 'info');
-                        await connectVNC({});
-                    }
+                    // 尝试自动导入已保存的Cookie（免扫码登录）
+                    setTimeout(async () => {
+                        try {
+                            const ck = await apiCall('/api/browser/import-cookies');
+                            if (ck && ck.status === 'ok' && ck.imported > 0) {
+                                log(`🍪 已导入 ${ck.imported} 条Cookie，刷新页面...`, 'info');
+                                await apiCall('/api/browser/execute', { script: 'location.reload()' });
+                            }
+                        } catch(e) { /* 无Cookie可导入，正常扫码即可 */ }
+                    }, 3000);
                 } else if (data && data.status === 'error') {
                     log(`❌ 启动失败: ${data.message}`, 'error');
                 } else {
@@ -2031,7 +2307,11 @@
                 const vncConfig = await apiCall('/api/vnc/config', null, 'GET');
                 if (btn) setLoading(btn, false);
                 if (!vncConfig) { log('获取VNC配置失败', 'error'); return; }
-                const novncUrl = `${vncConfig.novnc_url}&password=${encodeURIComponent(vncConfig.password)}&resize=scale`;
+                // 使用 vnc_lite.html（自动连接，不弹密码框）+ scale=true 自动缩放到适应容器
+                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                const novncUrl = isLocal
+                    ? `http://${window.location.hostname}:6901/vnc_lite.html?password=${encodeURIComponent(vncConfig.password)}&scale=true`
+                    : `http://${window.location.hostname}/novnc/vnc_lite.html?password=${encodeURIComponent(vncConfig.password)}&scale=true`;
                 document.getElementById('vncPlaceholder').style.display = 'none';
                 const iframe = document.getElementById('vncFrame');
                 iframe.src = novncUrl;
@@ -2139,7 +2419,7 @@
                     method: method,
                     headers: { 'Content-Type': 'application/json' }
                 };
-                const token = localStorage.getItem('auth_token');
+                const token = getAuthToken();
                 if (token) {
                     options.headers = {...options.headers, 'Authorization': `Bearer ${token}`};
                 }
@@ -2149,7 +2429,7 @@
                 const response = await fetch(`${API_BASE}${endpoint}`, options);
                 if (response.status === 401) {
                     authToken = null;
-                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('token');
                     updateAuthUI(false);
                     log('⚠️ API 认证失败，请先登录', 'warn');
                     return null;
@@ -2310,15 +2590,14 @@
                 apiCall(`/api/filter/status/${taskId}`, null, 'GET').then(data => {
                     if (!data) return;
                     if (data.status === 'running') {
-                        const progress = data.progress || 0;
-                        updateTaskStatus(true, '筛选+打招呼', progress, `正在处理候选人...`);
-                        if (pollCount % 5 === 0) log(`⏳ 进行中... (${progress}%)`, 'info');
+                        updateTaskStatus(true, '筛选+打招呼', 0, `正在处理中...`);
+                        loadUserStats();
                     } else if (data.status === 'completed') {
                         clearInterval(_filterPollTimer); _filterPollTimer = null;
                         const r = data.result || {};
                         log(`✅ 任务完成! 联系:${r.contacted||0} 跳过:${r.skipped||0} 失败:${r.failed||0} 扫描:${r.total_scanned||0}`, 'info');
                         log(`📊 配额: ${r.cap_used || limit}`, 'info');
-                        updateStats(r.contacted || 0, null, null);
+                        loadUserStats();
                         clearTaskStatus();
                         setLoading(document.getElementById('btnFilterHello'), false);
                     } else if (data.status === 'failed' || data.status === 'error') {
@@ -2341,7 +2620,7 @@
                 if (data && data.status === 'started') {
                     log(`✅ 任务已启动，预计获取 ${limit} 份简历`, 'info');
                     currentTask = { type: 'resume', taskId: null, active: true };
-                    updateTaskStatus(true, '批量获取简历', 0, `正在处理候选人...`);
+                    updateTaskStatus(true, '批量获取简历', 0, `正在处理中...`);
                     pollResumeStatus(btn, limit);
                 } else if (data && data.status === 'error') {
                     log(`❌ ${data.message}`, 'error');
@@ -2367,8 +2646,8 @@
                     const data = await apiCall('/api/resume/status', null, 'GET');
                     if (!data) { clearInterval(interval); return; }
                     if (data.status === 'completed') {
-                        log(`✅ 简历下载任务完成`, 'info');
-                        loadResumeList();
+                        log(`✅ 简历申请任务完成`, 'info');
+                        loadUserStats();
                         clearInterval(interval);
                         clearTaskStatus();
                         setLoading(btn, false);
@@ -2378,11 +2657,9 @@
                         clearTaskStatus();
                         setLoading(btn, false);
                     } else if (data.status === 'running') {
-                        const processed = data.processed || 0;
-                        const total = data.total || limit;
-                        const progress = total > 0 ? Math.round((processed / total) * 100) : 0;
-                        updateTaskStatus(true, '批量获取简历', progress, `已处理 ${processed}/${total} 人`);
-                        if (pollCount % 5 === 0) log(`⏳ 任务进行中... (${processed}/${total})`, 'info');
+                        updateTaskStatus(true, '批量获取简历', 0, `正在处理中...`);
+                        loadUserStats();
+                        if (pollCount % 5 === 0) log(`⏳ 任务进行中...`, 'info');
                     }
                 } catch (e) { console.error('轮询状态失败:', e); }
             }, 3000);
@@ -2392,7 +2669,7 @@
             apiCall('/api/resume/list', null, 'GET').then(data => {
                 if (data && Array.isArray(data)) {
                     log(`📄 当前简历库: ${data.length} 份`, 'info');
-                    setStats(null, data.length, null);
+                    loadUserStats();
                 }
             });
         }
@@ -2407,7 +2684,7 @@
                 if (data && data.status === 'started') {
                     log(`✅ 任务已启动，预计下载 ${limit} 份简历`, 'info');
                     currentTask = { type: 'receivedResume', taskId: null, active: true };
-                    updateTaskStatus(true, '下载已获取简历', 0, `正在处理联系人...`);
+                    updateTaskStatus(true, '下载已获取简历', 0, `正在处理中...`);
                     pollReceivedResumeStatus(btn, limit);
                 } else if (data && data.status === 'error') {
                     log(`❌ ${data.message}`, 'error');
@@ -2434,7 +2711,7 @@
                     if (!data) { clearInterval(interval); return; }
                     if (data.status === 'completed') {
                         log(`✅ 已获取简历下载完成! 下载:${data.downloaded||0} 跳过:${data.skipped||0} 失败:${data.failed||0}`, 'info');
-                        updateStats(null, data.downloaded || 0, null);
+                        loadUserStats();
                         loadResumeList();
                         clearInterval(interval);
                         clearTaskStatus();
@@ -2445,13 +2722,202 @@
                         clearTaskStatus();
                         setLoading(btn, false);
                     } else if (data.status === 'running') {
-                        const done = (data.downloaded || 0) + (data.failed || 0) + (data.skipped || 0);
-                        const total = data.total || limit;
-                        const progress = total > 0 ? Math.round((done / total) * 100) : 0;
-                        updateTaskStatus(true, '下载已获取简历', progress, `已下载 ${data.downloaded||0}, 总 ${total} 人`);
-                        if (pollCount % 5 === 0) log(`⏳ 下载中... (${data.downloaded||0}/${total})`, 'info');
+                        updateTaskStatus(true, '下载已获取简历', 0, `正在处理中...`);
+                        loadUserStats();
                     }
                 } catch (e) { console.error('轮询状态失败:', e); }
+            }, 3000);
+        }
+
+        // ── AI简历分析 ──
+        function batchAnalyzeResumes() {
+            const btn = document.getElementById('btnAnalyzeResumes');
+            const limit = parseInt(document.getElementById('analyzeLimit').value) || 20;
+            if (!confirm(`确认分析最多 ${limit} 份已下载的简历？\n\n将使用 DeepSeek AI 分析简历与岗位匹配度。`)) return;
+            setLoading(btn, true);
+            log(`🤖 开始AI简历分析，上限 ${limit} 人...`, 'info');
+            apiCall('/api/resume/analyze', { limit: limit }).then(data => {
+                if (data && data.status === 'started') {
+                    log(`✅ 分析任务已启动，预计分析 ${limit} 份简历`, 'info');
+                    currentTask = { type: 'analyze', taskId: null, active: true };
+                    updateTaskStatus(true, 'AI简历分析', 0, '正在分析候选人简历...');
+                    pollAnalyzeStatus(btn, limit);
+                } else {
+                    setLoading(btn, false);
+                    log(`❌ 启动失败: ${(data && data.message) || '未知错误'}`, 'error');
+                }
+            });
+        }
+
+        function pollAnalyzeStatus(btn, limit) {
+            let pollCount = 0;
+            const interval = setInterval(async () => {
+                pollCount++;
+                if (pollCount > 200) {
+                    clearInterval(interval);
+                    log('⏰ 分析任务轮询超时', 'warn');
+                    clearTaskStatus();
+                    setLoading(btn, false);
+                    return;
+                }
+                try {
+                    const data = await apiCall('/api/resume/analyze-status', null, 'GET');
+                    if (!data) { clearInterval(interval); return; }
+                    if (data.status === 'completed') {
+                        log(`✅ 简历分析完成! 分析:${data.analyzed||0} 匹配:${data.matched||0}`, 'info');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'error') {
+                        log(`❌ 分析失败: ${data.message}`, 'error');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'running') {
+                        updateTaskStatus(true, 'AI简历分析', 0, `正在分析中...`);
+                        loadUserStats();
+                    }
+                } catch (e) { console.error('轮询分析状态失败:', e); }
+            }, 3000);
+        }
+
+        // ── 可约面候选人列表 ──
+        let recommendCandidates = [];
+        async function loadRecommendCandidates() {
+            try {
+                const data = await apiCall('/api/candidates/recommend-interview', null, 'GET');
+                recommendCandidates = data || [];
+                renderRecommendCandidates();
+            } catch (e) {
+                console.error('加载可约面候选人失败:', e);
+            }
+        }
+        function renderRecommendCandidates() {
+            const section = document.getElementById('interviewCandidatesSection');
+            const list = document.getElementById('interviewCandidateList');
+            const count = document.getElementById('interviewCandidateCount');
+            section.style.display = '';
+            count.textContent = recommendCandidates.length ? `共 ${recommendCandidates.length} 人` : '暂无';
+            if (recommendCandidates.length === 0) {
+                list.innerHTML = '<div style=\"padding:10px;color:var(--text-muted);font-size:12px;text-align:center;\">暂无推荐约面的候选人<br>运行「AI分析简历」后可产生推荐</div>';
+                return;
+            }
+            list.innerHTML = recommendCandidates.map((c, i) => `
+                <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;margin:2px 0;border-radius:8px;cursor:pointer;background:var(--bg-surface);border:1px solid var(--border);transition:border-color .15s;"
+                       onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border)'">
+                    <input type="radio" name="selectedCandidate" value="${c.boss_id}" style="margin-top:3px;flex:none;"
+                           ${i===0?'checked':''}>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:var(--text);">${c.name}</div>
+                        ${c.reason ? `<div style="font-size:11px;color:var(--green);margin-top:2px;line-height:1.4;">${c.reason}</div>` : ''}
+                    </div>
+                </label>
+            `).join('');
+        }
+        function getSelectedCandidateBossId() {
+            const radio = document.querySelector('input[name="selectedCandidate"]:checked');
+            return radio ? radio.value : null;
+        }
+        // 页面加载时拉取 + 轮询刷新
+        loadRecommendCandidates();
+        setInterval(loadRecommendCandidates, 30000);
+
+        // ── AI分析报告 ──
+        async function loadReportList() {
+            try {
+                const data = await apiCall('/api/resume/analyze-reports', null, 'GET');
+                const sel = document.getElementById('reportSelect');
+                sel.innerHTML = '<option value="">-- 选择报告 --</option>';
+                (data || []).forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r.filename;
+                    opt.textContent = r.filename + ' (' + new Date(r.modified).toLocaleString('zh-CN') + ')';
+                    sel.appendChild(opt);
+                });
+            } catch (e) { console.error('加载报告列表失败:', e); }
+        }
+        async function loadReportContent() {
+            const filename = document.getElementById('reportSelect').value;
+            const div = document.getElementById('reportContent');
+            if (!filename) { div.style.display = 'none'; return; }
+            try {
+                const data = await apiCall('/api/resume/analyze-reports/' + encodeURIComponent(filename), null, 'GET');
+                div.textContent = data.content;
+                div.style.display = '';
+            } catch (e) {
+                div.textContent = '加载失败: ' + e;
+                div.style.display = '';
+            }
+        }
+        // 折叠展开时加载报告列表
+        document.getElementById('reportConfig').addEventListener('transitionend', loadReportList);
+        document.getElementById('reportSelect').addEventListener('focus', loadReportList);
+        loadReportList();
+        // ── 约面试 ──
+        function batchInviteInterview() {
+            const btn = document.getElementById('btnInviteInterview');
+            const limit = 1;
+            const interviewType = document.getElementById('interviewType').value;
+            const interviewTime = document.getElementById('interviewTime').value;
+            const interviewDate = document.getElementById('interviewDate').value;
+            const bossId = getSelectedCandidateBossId();
+            const typeLabel = interviewType === '线下' ? '线下面试' : (interviewType === '线上' ? '线上面试' : '不限');
+            const timeLabel = interviewTime || '默认';
+            const dateLabel = interviewDate || '今天';
+            const selectedCandidate = recommendCandidates.find(c => c.boss_id === bossId);
+            const candidateLabel = selectedCandidate ? selectedCandidate.name : '未选择';
+            if (!bossId) {
+                alert('请先在可约面候选人列表中勾选一位候选人');
+                return;
+            }
+            if (!confirm(`确认对「${candidateLabel}」发起约面试（测试模式）？\n\n面试类型: ${typeLabel} | 面试日期: ${dateLabel} | 面试时间: ${timeLabel}\n仅测试流程，会点击"取消"而不会真正发送面试邀请。`)) return;
+            setLoading(btn, true);
+            log(`💼 开始约面试「${candidateLabel}」，类型: ${typeLabel}，日期: ${dateLabel}，时间: ${timeLabel}...`, 'info');
+            apiCall('/api/workflow/invite-interview', { limit: limit, dry_run: false, interview_type: interviewType || null, interview_time: interviewTime || null, interview_date: interviewDate || null, boss_id: bossId }).then(data => {
+                if (data && data.status === 'started') {
+                    log(`✅ 任务已启动，预计处理 ${limit} 人`, 'info');
+                    currentTask = { type: 'interview', taskId: null, active: true };
+                    updateTaskStatus(true, '批量约面试', 0, '正在处理中...');
+                    pollInterviewStatus(btn, limit);
+                } else if (data && data.status === 'error') {
+                    log(`❌ ${data.message}`, 'error');
+                    setLoading(btn, false);
+                } else {
+                    setLoading(btn, false);
+                }
+            });
+        }
+
+        function pollInterviewStatus(btn, limit) {
+            let pollCount = 0;
+            const interval = setInterval(async () => {
+                pollCount++;
+                if (pollCount > 200) {
+                    clearInterval(interval);
+                    log('⏰ 约面试任务轮询超时', 'warn');
+                    clearTaskStatus();
+                    setLoading(btn, false);
+                    return;
+                }
+                try {
+                    const data = await apiCall('/api/workflow/invite-interview-status', null, 'GET');
+                    if (!data) { clearInterval(interval); return; }
+                    if (data.status === 'completed') {
+                        log(`✅ 约面试完成! 已处理:${data.invited||0} 跳过:${data.skipped||0} 失败:${data.failed||0}`, 'info');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'error') {
+                        log(`❌ 任务失败: ${data.message}`, 'error');
+                        clearInterval(interval);
+                        clearTaskStatus();
+                        setLoading(btn, false);
+                    } else if (data.status === 'running') {
+                        const done = (data.invited || 0) + (data.failed || 0) + (data.skipped || 0);
+                        updateTaskStatus(true, '约面试', 0, `正在处理中...`);
+                        loadUserStats();
+                    }
+                } catch (e) { console.error('轮询约面试状态失败:', e); }
             }, 3000);
         }
 
@@ -2469,7 +2935,7 @@
                 if (data && (data.status === 'started' || data.status === 'queued')) {
                     log(`✅ 任务已启动，预计回复 ${limit} 人`, 'info');
                     currentTask = { type: 'reply', taskId: null, active: true };
-                    updateTaskStatus(true, '批量回复未读', 0, `正在处理联系人...`);
+                    updateTaskStatus(true, '批量回复未读', 0, `正在处理中...`);
                     pollChatReplyStatus(btn, limit);
                 } else if (data && data.message) {
                     log(`📋 ${data.message}`, 'info');
@@ -2504,7 +2970,7 @@
                         // API 返回 replied/failed/skipped 三个字段
                         const replySuccess = data.replied || data.success || 0;
                         log(`✅ 回复完成! 成功:${replySuccess} 失败:${data.failed||0} 跳过:${data.skipped||0}`, 'info');
-                        updateStats(null, null, replySuccess);
+                        loadUserStats();
                         clearTaskStatus();
                         setLoading(btn, false);
                     } else if (data.status === 'error' || data.status === 'failed') {
@@ -2515,9 +2981,8 @@
                     } else if (data.status === 'running') {
                         const done = (data.replied || 0) + (data.failed || 0) + (data.skipped || 0);
                         const total = data.total || limit;
-                        const progress = total > 0 ? Math.round((done / total) * 100) : 0;
-                        updateTaskStatus(true, '批量回复未读', progress, `已回复 ${data.replied||0}, 总 ${total} 人`);
-                        if (count % 10 === 0) log(`⏳ 回复中... (${done}/${total})`, 'info');
+                        updateTaskStatus(true, '批量回复未读', 0, `正在处理中...`);
+                        loadUserStats();
                     }
                 });
             }, 3000);
@@ -2536,12 +3001,10 @@
         // ── Init ──
         window.onload = function() {
             loadConfig();
-            const token = localStorage.getItem('auth_token');
-            updateAuthUI(!!token);
-            log('📡 系统就绪，请依次操作：连接桌面 → 打开BOSS直聘 → 检查登录', 'info');
-            if (!token) {
-                log('⚠️ 请先在顶栏输入密码登录API，否则批量操作不可用', 'warn');
-            }
+            initAuth();
+            loadUserStats();
+            startStatsSync();
+            log('📡 系统就绪，正在自动连接桌面...', 'info');
         };
     </script>
 </body>
