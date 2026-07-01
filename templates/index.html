@@ -324,6 +324,18 @@
     .h-auth-btn.loading .btn-text { display: none; }
     .h-auth-btn.loading { pointer-events: none; opacity: .7; }
 
+    /* ── Tutorial pulsing glow ── */
+    .tutorial-btn {
+        background: var(--accent-bg);
+        color: var(--accent);
+        border: 1px solid var(--accent);
+        animation: glow-pulse 2s ease-in-out infinite;
+    }
+    @keyframes glow-pulse {
+        0%, 100% { box-shadow: 0 0 4px var(--accent), 0 0 8px var(--accent-glow); }
+        50% { box-shadow: 0 0 8px var(--accent), 0 0 20px var(--accent-glow), 0 0 32px var(--accent-glow-cyan); }
+    }
+
     .auth-badge {
         font-size: 12px;
         padding: 4px 10px;
@@ -1103,6 +1115,9 @@
             <div class="auth-inputs">
                 <span id="loginUserDisplay" style="color:var(--text2);font-size:12px;"></span>
             </div>
+            <button class="h-auth-btn tutorial-btn" onclick="toggleGuide()" style="font-size:12px;padding:4px 10px;flex-shrink:0;margin-right:4px;">
+                📖 教程
+            </button>
             <button class="h-auth-btn" id="btnLogout" onclick="doLogout()" style="font-size:12px;padding:4px 12px;flex-shrink:0;">
                 退出
             </button>
@@ -1116,6 +1131,57 @@
             <span class="vnc-text" id="vncStatusText">未连接</span>
         </div>
     </header>
+
+    <!-- ═══ GUIDE MODAL ═══ -->
+    <div id="guidePanel" style="display:none;position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);align-items:center;justify-content:center;">
+        <div style="background:#ffffff;border-radius:16px;width:90vw;max-width:680px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.25);">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #e5e7eb;">
+                <span style="font-size:16px;font-weight:700;color:#1a1a1a;">📖 使用教程</span>
+                <button onclick="toggleGuide()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#666;">✕</button>
+            </div>
+            <div style="padding:16px 20px;overflow-y:auto;flex:1;line-height:1.8;color:#333;font-size:13px;">
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">1. 准备工作</div>
+                    <div style="padding-left:8px;color:#555;">登录驾驶舱后，系统会自动打开 BOSS 直聘，在 VNC 桌面中扫码登录即可。</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">2. 设置岗位话术库</div>
+                    <div style="padding-left:8px;color:#555;">展开「岗位话术库」，创建岗位描述文件（如"技术合伙人"），设为当前注入。AI 回复和分析都依赖此文件。</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">3. 设置筛选条件</div>
+                    <div style="padding-left:8px;color:#555;">展开「筛选条件」，设置学历、年限、学校白名单、关键词包含/排除。点击对应按钮编辑。</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">4. 筛选+打招呼（F5）</div>
+                    <div style="padding-left:8px;color:#555;">根据筛选条件在推荐页找到匹配候选人，自动点击打招呼按钮。</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">5. 申请简历（F6）</div>
+                    <div style="padding-left:8px;color:#555;">向已沟通的联系人申请获取附件简历。</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">6. 下载简历（F8）</div>
+                    <div style="padding-left:8px;color:#555;">下载已提供附件简历的联系人的简历文件到本地。下载前检查文件是否已存在避免重复。</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">7. AI 分析简历</div>
+                    <div style="padding-left:8px;color:#555;">对已下载的简历进行 AI 匹配度分析，标记适合约面试的候选人。分析依据岗位话术库。</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">8. AI 批量回复（F7）</div>
+                    <div style="padding-left:8px;color:#555;">自动回复未读消息，AI 根据岗位信息和对话历史生成回复内容。</div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div style="font-weight:700;color:#3b82f6;margin-bottom:4px;">9. 约面试（F9）</div>
+                    <div style="padding-left:8px;color:#555;">在可约面列表中勾选一人，展开⚙配置面试类型、日期、时间，点击约面试。当前为测试模式。</div>
+                </div>
+                <div style="padding:8px;background:#f0f7ff;border-radius:8px;color:#3b82f6;font-size:12px;">
+                    💡 推荐流程：打招呼 → 申请简历 → 下载简历 → AI分析 → 约面试。AI回复可随时使用。
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- ═══ DATA PANEL MODAL ═══ -->
     <div id="dataPanel" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.5);align-items:center;justify-content:center;">
@@ -1218,31 +1284,6 @@
     <aside class="control-panel" aria-label="控制面板">
         <div class="cp-scroll">
 
-            <!-- 浏览器控制 -->
-            <div class="section">
-                <div class="section-header">
-                    <span class="section-label">浏览器</span>
-                </div>
-                <div class="action-grid">
-                    <button class="btn btn-success" onclick="openBossZhipin(event)">
-                        <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">🚀 打开BOSS</span>
-                    </button>
-                    <button class="btn btn-primary" onclick="connectVNC(event)">
-                        <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">🌐 连接桌面</span>
-                    </button>
-                    <button class="btn btn-secondary btn-sm" onclick="exportCookies(event)">
-                        <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">💾 导出Cookie</span>
-                    </button>
-                    <button class="btn btn-secondary btn-sm" onclick="importCookies(event)">
-                        <span class="spinner" aria-hidden="true"></span>
-                        <span class="btn-text">📂 导入Cookie</span>
-                    </button>
-                </div>
-            </div>
-
             <!-- 批量自动化 -->
             <div class="section">
                 <div class="section-header">
@@ -1250,42 +1291,42 @@
                 </div>
                 <div class="input-row">
                     <input type="number" id="batchLimit" value="20" placeholder="人数" aria-label="打招呼人数上限" min="1" max="200">
-                    <button class="btn btn-success" onclick="batchFilterAndHello()" id="btnFilterHello">
+                    <button class="btn btn-success" onclick="batchFilterAndHello()" id="btnFilterHello" title="筛选联系人并对他们打招呼">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">👋 筛选+打招呼</span>
                     </button>
                 </div>
                 <div class="input-row">
                     <input type="number" id="resumeLimit" value="10" placeholder="人数" aria-label="获取简历人数上限" min="1" max="200">
-                    <button class="btn btn-warning" onclick="batchGetResumes()" id="btnGetResumes">
+                    <button class="btn btn-warning" onclick="batchGetResumes()" id="btnGetResumes" title="向联系人申请获取他们的附件简历">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">📄 批量申请简历</span>
                     </button>
                 </div>
                 <div class="input-row">
                     <input type="number" id="replyLimit" value="15" placeholder="人数" aria-label="回复消息人数上限" min="1" max="200">
-                    <button class="btn btn-danger" onclick="batchReplyMessages()" id="btnReplyMessages">
+                    <button class="btn btn-danger" onclick="batchReplyMessages()" id="btnReplyMessages" title="回复联系人的未读消息，回复内容根据岗位话术库设置，需要提前设置">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">💬 批量回复未读</span>
                     </button>
                 </div>
                 <div class="input-row">
                     <input type="number" id="receivedResumeLimit" value="10" placeholder="人数" aria-label="下载已获取简历人数上限" min="1" max="200">
-                    <button class="btn btn-success" onclick="batchDownloadReceivedResumes()" id="btnDownloadReceived">
+                    <button class="btn btn-success" onclick="batchDownloadReceivedResumes()" id="btnDownloadReceived" title="下载那些已经提供附件简历的联系人的简历">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">📥 下载已获取简历</span>
                     </button>
                 </div>
                 <div class="input-row">
                     <input type="number" id="analyzeLimit" value="20" placeholder="人数" aria-label="AI分析简历数量上限" min="1" max="200">
-                    <button class="btn btn-info" onclick="batchAnalyzeResumes()" id="btnAnalyzeResumes">
+                    <button class="btn btn-info" onclick="batchAnalyzeResumes()" id="btnAnalyzeResumes" title="分析下载的简历并给出可以约面试的联系人，分析依据根据岗位话术库，需要提前设置">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">🤖 AI分析简历</span>
                     </button>
                 </div>
                 <div class="input-row">
                     <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('interviewConfig')" style="font-size:12px;padding:4px 10px;border:1px solid var(--border-default);border-radius:8px;background:var(--bg-surface);flex:none;width:72px;">⚙ 配置</button>
-                    <button class="btn btn-accent" onclick="batchInviteInterview()" id="btnInviteInterview">
+                    <button class="btn btn-accent" onclick="batchInviteInterview()" id="btnInviteInterview" title="向选择的联系人约面试，面试时间通过配置设置">
                         <span class="spinner" aria-hidden="true"></span>
                         <span class="btn-text">💼 约面试</span>
                     </button>
@@ -1384,51 +1425,17 @@
                         </div>
                         <div class="form-group">
                             <label>学校白名单</label>
-                            <div style="display:flex;gap:6px;">
-                                <input type="text" id="schoolWhitelist" placeholder="清华大学,北京大学,浙江大学..." style="flex:1;">
-                                <button class="btn btn-sm" onclick="openTextEditor('schoolWhitelist','编辑学校白名单')" title="展开编辑" style="flex-shrink:0;padding:4px 10px;">📝</button>
-                            </div>
+                            <button class="btn btn-sm" onclick="openTextEditor('schoolWhitelist','编辑学校白名单')" title="展开编辑" style="width:100%;text-align:left;justify-content:flex-start;">📝 编辑学校白名单</button>
                         </div>
                         <div class="form-group">
                             <label>关键词包含</label>
-                            <div style="display:flex;gap:6px;">
-                                <input type="text" id="requireKeywords" placeholder="Python,Java,全栈..." style="flex:1;">
-                                <button class="btn btn-sm" onclick="openTextEditor('requireKeywords','编辑包含关键词')" title="展开编辑" style="flex-shrink:0;padding:4px 10px;">📝</button>
-                            </div>
+                            <button class="btn btn-sm" onclick="openTextEditor('requireKeywords','编辑包含关键词')" title="展开编辑" style="width:100%;text-align:left;justify-content:flex-start;">📝 编辑包含关键词</button>
                         </div>
                         <div class="form-group">
                             <label>关键词排除</label>
-                            <div style="display:flex;gap:6px;">
-                                <input type="text" id="excludeKeywords" placeholder="外包,实习,初级..." style="flex:1;">
-                                <button class="btn btn-sm" onclick="openTextEditor('excludeKeywords','编辑排除关键词')" title="展开编辑" style="flex-shrink:0;padding:4px 10px;">📝</button>
-                            </div>
+                            <button class="btn btn-sm" onclick="openTextEditor('excludeKeywords','编辑排除关键词')" title="展开编辑" style="width:100%;text-align:left;justify-content:flex-start;">📝 编辑排除关键词</button>
                         </div>
                         <button class="btn btn-secondary btn-sm" onclick="saveFilterConfig()">保存筛选配置</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 回复话术 -->
-            <div class="section">
-                <div class="section-header">
-                    <span class="section-label">回复话术</span>
-                    <button class="section-toggle" aria-expanded="false" onclick="toggleConfig('templateConfig')">话术模板</button>
-                </div>
-                <div class="config-content" id="templateConfig">
-                    <div class="config-card">
-                        <div class="form-group">
-                            <label>打招呼话术</label>
-                            <textarea id="helloTemplate" placeholder="您好，我对您的经历很感兴趣，希望能进一步了解...">您好，我对您的经历很感兴趣，希望能进一步了解您的背景，方便的话可以聊一聊吗？</textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>求简历话术</label>
-                            <textarea id="resumeTemplate" placeholder="您好，我对您的背景很认可，方便发一份简历参考吗？">您好，看了您的资料非常匹配我们的需求，方便发一份简历参考吗？</textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>后续跟进话术</label>
-                            <textarea id="followTemplate" placeholder="感谢回复，关于...">感谢回复，关于我们公司的情况，您想了解哪方面的信息呢？</textarea>
-                        </div>
-                        <button class="btn btn-secondary btn-sm" onclick="saveTemplateConfig()">保存话术配置</button>
                     </div>
                 </div>
             </div>
@@ -1514,6 +1521,13 @@
             } catch (e) {}
             localStorage.removeItem('token');
             window.location = API_BASE + '/login';
+        }
+
+        // ── 使用教程 ──
+        function toggleGuide() {
+            const panel = document.getElementById('guidePanel');
+            if (!panel) return;
+            panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
         }
 
         // ── 数据面板 ──
@@ -1708,9 +1722,6 @@
             const schEl = document.getElementById('schoolWhitelist');
             const reqKwEl = document.getElementById('requireKeywords');
             const excKwEl = document.getElementById('excludeKeywords');
-            const helloEl = document.getElementById('helloTemplate');
-            const resumeEl = document.getElementById('resumeTemplate');
-            const followEl = document.getElementById('followTemplate');
             if (degEl) degEl.value = config.filter.degree || '';
             if (yrsMinEl) yrsMinEl.value = config.filter.yearsMin || 0;
             if (yrsMaxEl) yrsMaxEl.value = config.filter.yearsMax || 100;
@@ -1729,9 +1740,6 @@
             }
             if (reqKwEl) reqKwEl.value = config.filter.requireKeywords || '';
             if (excKwEl) excKwEl.value = config.filter.excludeKeywords || '';
-            if (helloEl) helloEl.value = config.templates.hello || '';
-            if (resumeEl) resumeEl.value = config.templates.resume || '';
-            if (followEl) followEl.value = config.templates.follow || '';
         }
 
         function getAuthToken() {
@@ -1845,9 +1853,6 @@
 
         // ── 弹出大文本编辑器 ──
         function openTextEditor(inputId, title) {
-            const input = document.getElementById(inputId);
-            if (!input) return;
-
             let overlay = document.getElementById('textEditorOverlay');
             if (overlay) overlay.remove();
 
@@ -1913,14 +1918,8 @@
                 value = config.filter.requireKeywords;
             } else if (inputId === 'excludeKeywords' && config.filter.excludeKeywords) {
                 value = config.filter.excludeKeywords;
-            } else if (inputId === 'helloTemplate' && config.templates.hello) {
-                value = config.templates.hello;
-            } else if (inputId === 'resumeTemplate' && config.templates.resume) {
-                value = config.templates.resume;
-            } else if (inputId === 'followTemplate' && config.templates.follow) {
-                value = config.templates.follow;
             } else {
-                value = input.value || '';
+                value = '';
             }
 
             overlay = document.createElement('div');
@@ -2017,8 +2016,13 @@
         function confirmTextEditor(inputId) {
             const area = document.getElementById('textEditorArea');
             const input = document.getElementById(inputId);
-            if (area && input) {
-                input.value = area.value;
+            if (area) {
+                if (input) {
+                    input.value = area.value;
+                }
+                // 同步到 config
+                if (inputId === 'requireKeywords') config.filter.requireKeywords = area.value;
+                if (inputId === 'excludeKeywords') config.filter.excludeKeywords = area.value;
             }
             closeTextEditor();
         }
@@ -2164,16 +2168,14 @@
         }
 
         function saveFilterConfig() {
-            // 学历 + 工作年限 — 这两个才是"筛选条件"部分的配置
+            // 学历 + 工作年限
             config.filter.degree = document.getElementById('degreeFilter').value;
             config.filter.yearsMin = parseInt(document.getElementById('yearsMin').value);
             config.filter.yearsMax = parseInt(document.getElementById('yearsMax').value);
-            config.filter.requireKeywords = document.getElementById('requireKeywords').value;
-            config.filter.excludeKeywords = document.getElementById('excludeKeywords').value;
-            // 学校白名单由弹出编辑器独立管理（confirmSchoolEditor 已自动保存），此处不再重复处理
+            // 关键词和学校白名单由各自的弹出编辑器管理，此处不重复处理
             saveConfig();
             saveFilterConfigToAPI();
-            log('✅ 筛选配置已保存（学历+年限+关键词）', 'info');
+            log('✅ 筛选配置已保存（学历+年限）', 'info');
             flashSave(event && event.target ? event.target.closest('.btn') : null, '已保存');
         }
 
@@ -2220,15 +2222,6 @@
             } catch (e) {
                 console.warn('Failed to sync config to API:', e);
             }
-        }
-
-        function saveTemplateConfig() {
-            config.templates.hello = document.getElementById('helloTemplate').value;
-            config.templates.resume = document.getElementById('resumeTemplate').value;
-            config.templates.follow = document.getElementById('followTemplate').value;
-            saveConfig();
-            log('✅ 话术配置已保存', 'info');
-            flashSave(event && event.target ? event.target.closest('.btn') : null, '已保存');
         }
 
         // ── Position Files (job_info/ 文件夹) ──
@@ -2399,16 +2392,6 @@
                 setLoading(btn, false);
                 if (data && data.status === 'ok') {
                     log('✅ Chrome已启动，BOSS直聘已打开', 'info');
-                    // 尝试自动导入已保存的Cookie（免扫码登录）
-                    setTimeout(async () => {
-                        try {
-                            const ck = await apiCall('/api/browser/import-cookies');
-                            if (ck && ck.status === 'ok' && ck.imported > 0) {
-                                log(`🍪 已导入 ${ck.imported} 条Cookie，刷新页面...`, 'info');
-                                await apiCall('/api/browser/execute', { script: 'location.reload()' });
-                            }
-                        } catch(e) { /* 无Cookie可导入，正常扫码即可 */ }
-                    }, 3000);
                 } else if (data && data.status === 'error') {
                     log(`❌ 启动失败: ${data.message}`, 'error');
                 } else {
@@ -2620,45 +2603,13 @@
             });
         }
 
-        function exportCookies(e) {
-            const btn = e && e.target ? e.target.closest('.btn') : null;
-            setLoading(btn, true);
-            log('正在导出Cookie备份...');
-            apiCall('/api/browser/export-cookies').then(data => {
-                setLoading(btn, false);
-                if (data && data.status === 'ok') log('✅ Cookie已导出 (' + data.count + '条)', 'info');
-                else log('❌ 导出失败: ' + (data?.message || '未知错误'), 'error');
-            });
-        }
-
-        function importCookies(e) {
-            const btn = e && e.target ? e.target.closest('.btn') : null;
-            setLoading(btn, true);
-            log('📂 正在恢复Cookie...');
-            apiCall('/api/browser/import-cookies').then(data => {
-                setLoading(btn, false);
-                if (data && data.status === 'ok') {
-                    log('✅ Cookie已恢复 (' + data.imported + '/' + data.total + '条)', 'info');
-                    log('🔄 正在刷新页面使Cookie生效...', 'info');
-                    apiCall('/api/browser/execute', { script: 'location.reload()' }).then(() => {
-                        setTimeout(() => {
-                            log('🔍 正在验证登录状态...', 'info');
-                            _doCheckLogin();
-                        }, 3000);
-                    });
-                } else {
-                    log('❌ 恢复失败: ' + (data?.message || '未知错误'), 'error');
-                }
-            });
-        }
-
         // ── Batch Operations ──
         let _filterPollTimer = null;
 
         function batchFilterAndHello() {
             const btn = document.getElementById('btnFilterHello');
             const limit = parseInt(document.getElementById('batchLimit').value) || 20;
-            if (!confirm(`确认向最多 ${limit} 位候选人打招呼？\n\n请确保已配置筛选条件和话术。`)) return;
+            if (!confirm(`确认向最多 ${limit} 位候选人打招呼？\n\n请确保已配置筛选条件。`)) return;
             setLoading(btn, true);
             log(`👋 开始筛选+打招呼，上限 ${limit} 人...`, 'info');
             if (_filterPollTimer) { clearInterval(_filterPollTimer); _filterPollTimer = null; }
@@ -3046,7 +2997,7 @@
         function batchReplyMessages() {
             const btn = document.getElementById('btnReplyMessages');
             const limit = parseInt(document.getElementById('replyLimit').value) || 15;
-            if (!confirm(`确认批量回复最多 ${limit} 位候选人的未读消息？\n\n请确保已配置回复话术。`)) return;
+            if (!confirm(`确认批量回复最多 ${limit} 位候选人的未读消息？（AI自动生成回复内容）`)) return;
             setLoading(btn, true);
             log(`💬 开始批量回复未读消息，上限 ${limit} 人...`, 'info');
             apiCall('/api/chat/batch', {
@@ -3126,6 +3077,9 @@
             initAuth();
             loadUserStats();
             startStatsSync();
+            // 教程面板点击遮罩关闭
+            const gp = document.getElementById('guidePanel');
+            if (gp) gp.addEventListener('click', function(e) { if (e.target === gp) toggleGuide(); });
             log('📡 系统就绪，正在自动连接桌面...', 'info');
         };
     </script>

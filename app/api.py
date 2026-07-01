@@ -653,16 +653,10 @@ async def open_boss_browser(current_user: dict = Depends(verify_token)):
     nav_result = await automation.navigate("https://www.zhipin.com/")
     await asyncio.sleep(3)
 
-    # Step 5: 注入当前用户的 BOSS cookie
-    user_id = current_user.get("id") or current_user.get("user_id")
-    cookie_result = None
+    # Step 5: 清除旧的 BOSS cookie（不导入，让用户扫码登录）
     try:
-        cookie_result = await automation.import_cookies(user_id=user_id)
-        api_logger.info(f"Cookie注入结果: {cookie_result}")
-        if cookie_result and cookie_result.get("imported", 0) > 0:
-            await asyncio.sleep(1)
-            await automation.execute_js("location.reload()")
-            await asyncio.sleep(2)
+        await automation.clear_boss_cookies()
+        api_logger.info("已清除旧的 BOSS cookie")
     except Exception as e:
         api_logger.warning(f"Cookie注入失败（非致命）: {e}")
 
@@ -671,7 +665,6 @@ async def open_boss_browser(current_user: dict = Depends(verify_token)):
         "message": "Chrome已启动并打开BOSS直聘，可在VNC桌面中查看",
         "connect_result": connect_result if not automation._connected else {"status": "already_connected"},
         "nav_result": nav_result,
-        "cookie_injection": cookie_result,
     }
 
 
@@ -785,8 +778,6 @@ def _run_reply_in_thread(max_count: int, dry_run: bool = False, custom_template:
                 _reply_task_status["status"] = "error"
                 _reply_task_status["message"] = "浏览器连接失败"
                 return
-
-            await automation.import_cookies(user_id=user_id)
 
             result = await _batch_reply_impl(
                 max_count=max_count,
@@ -1557,6 +1548,75 @@ async def download_resume(
         conn.close()
 
 
+@app.get("/api/resume/preview")
+async def preview_resume(
+    path: str,
+    token: Optional[str] = None,
+):
+    """预览简历文件（PDF预览或下载），token 可从 query 参数传入（window.open 无法带 header）"""
+    from app.auth import SECRET_KEY, ALGORITHM
+    from jose import jwt, JWTError
+
+    if not token:
+        raise HTTPException(status_code=401, detail="未提供认证令牌")
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        current_user = payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="令牌已过期")
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"无效的令牌: {str(e)}")
+
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+
+    # 安全检查：确保路径在允许的目录内
+    from urllib.parse import unquote
+    # 解码 URL 编码（处理单次/双重编码）
+    raw_path = unquote(unquote(path))
+    # 统一路径分隔符
+    raw_path = raw_path.replace('\\', '/')
+    file_path = Path(raw_path)
+    user_id = str(current_user.get("id") or current_user.get("user_id"))
+    allowed_dir = DATA_DIR / "resumes" / user_id
+
+    # 如果 path 不是有效路径或文件不存在，尝试按候选人姓名模糊搜索
+    if not file_path.exists() or not file_path.is_file():
+        candidate_name = raw_path
+        # 精确匹配：姓名 + 年.pdf
+        for ext in [".pdf", ".doc", ".docx"]:
+            candidate_path = allowed_dir / f"{candidate_name}{ext}"
+            if candidate_path.exists():
+                file_path = candidate_path
+                break
+        # 模糊匹配：文件名中包含候选人姓名
+        if not file_path.exists() and allowed_dir.exists():
+            for f in allowed_dir.iterdir():
+                if f.is_file() and candidate_name in f.name:
+                    file_path = f
+                    break
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail=f"文件不存在: {raw_path}")
+
+    # 规范化路径，防止目录遍历
+    try:
+        resolved = file_path.resolve()
+        allowed_resolved = allowed_dir.resolve()
+        if not str(resolved).startswith(str(allowed_resolved)):
+            raise HTTPException(status_code=403, detail="无权访问该文件")
+    except Exception:
+        raise HTTPException(status_code=400, detail="无效的文件路径")
+
+    from urllib.parse import quote
+    return FileResponse(
+        path=str(file_path),
+        filename=file_path.name,
+        media_type="application/pdf" if file_path.suffix.lower() == ".pdf" else "application/octet-stream",
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(file_path.name)}"}
+    )
+
+
 @app.get("/api/resume/stats")
 async def get_resume_stats(current_user: dict = Depends(verify_token)):
     """获取简历统计信息"""
@@ -1749,15 +1809,9 @@ def _run_filter_contact_in_thread(
             api_logger.error(f"任务 {task_id} 失败: 浏览器连接失败")
             return
 
-        # === F5 线程隔离修复：先导入 cookie，再检查登录 ===
-        # 问题：新创建的浏览器实例没有 cookie，check_login 会失败
-        # 解决：connect → import_cookies → navigate → wait → check_login → retry
+        # === F5 线程：跳过 cookie 导入，保留浏览器已有登录态 ===
 
-        # Step 1: 立即导入当前用户已保存的 cookie
-        await automation.import_cookies(user_id=user_id)
-        api_logger.info(f"任务 {task_id} 已导入 cookie（user_id={user_id}）")
-
-        # Step 2: 显式导航到推荐页并等待 cookie 生效
+        # Step 1: 检查登录状态（带重试）
         await automation.navigate("https://www.zhipin.com/web/chat/recommend")
         import asyncio as _asyncio_thread
         await _asyncio_thread.sleep(5)  # 等待页面加载 + cookie 应用
@@ -2777,7 +2831,20 @@ async def get_user_candidates(current_user: dict = Depends(verify_token)):
             WHERE c.user_id = %s
             ORDER BY c.candidate_name, c.updated_at DESC
         """, (user_id, user_id, user_id, user_id, user_id))
-        return [dict(r) for r in db.cursor.fetchall()]
+        rows = [dict(r) for r in db.cursor.fetchall()]
+
+        # 查找已下载简历的路径
+        resumes_dir = DATA_DIR / "resumes" / str(user_id)
+        for row in rows:
+            row["resume_file"] = ""
+            if resumes_dir.exists():
+                for ext in [".pdf", ".doc", ".docx"]:
+                    potential_file = resumes_dir / f"{row['candidate_name']}{ext}"
+                    if potential_file.exists():
+                        row["resume_file"] = str(potential_file)
+                        break
+
+        return rows
     finally:
         db.close()
 
