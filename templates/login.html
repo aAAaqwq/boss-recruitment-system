@@ -3,77 +3,429 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BOSS招聘自动化 - 登录</title>
+    <title>鲲界 · 智聘 — AI 招聘驾驶舱</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        /* ═══════════════════════════════════════════════════════
+           鲲界科技 · 数字生命体 · 冰蓝未来
+           深海蓝 #102A43 / 科技蓝 #3D7CFF / 荧光青 #00E5FF
+           浅雾灰 #E9EEF5 / 近黑蓝 #0B0F17
+           ═══════════════════════════════════════════════════════ */
+        :root {
+            --deep:    #102A43;
+            --tech:    #3D7CFF;
+            --cyan:    #00E5FF;
+            --fog:     #E9EEF5;
+            --ink:     #0B0F17;
+            --tech-light: #6fa0ff;
+
+            --grad-brand: linear-gradient(120deg, #3D7CFF 0%, #00E5FF 100%);
+            --font-display: "Sora", -apple-system, "PingFang SC", sans-serif;
+            --font-cjk: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+            --ease: cubic-bezier(.16,1,.3,1);
+        }
         * { margin:0; padding:0; box-sizing:border-box; }
+        html, body { height:100%; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #131314; color: #e8eaed;
-            display: flex; justify-content: center; align-items: center;
-            min-height: 100vh;
+            font-family: var(--font-cjk);
+            color: #0f2238;
+            background: var(--fog);
+            display: grid;
+            grid-template-columns: 1.05fr .95fr;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ─────────── 左侧品牌剧场 ─────────── */
+        .stage {
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: clamp(36px, 4.5vw, 72px);
+            background:
+                radial-gradient(120% 90% at 78% 8%, rgba(0,229,255,.20), transparent 46%),
+                radial-gradient(110% 80% at 12% 92%, rgba(61,124,255,.30), transparent 50%),
+                linear-gradient(155deg, #0B0F17 0%, #102A43 60%, #0c1f33 100%);
+            color: #eaf2ff;
+            isolation: isolate;
+        }
+        /* 网格纹理 */
+        .stage::before {
+            content:'';
+            position:absolute; inset:0;
+            background-image:
+                linear-gradient(rgba(120,170,255,.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(120,170,255,.06) 1px, transparent 1px);
+            background-size: 48px 48px;
+            -webkit-mask-image: radial-gradient(80% 80% at 60% 40%, #000 30%, transparent 78%);
+                    mask-image: radial-gradient(80% 80% at 60% 40%, #000 30%, transparent 78%);
+            z-index:-1;
+        }
+        /* 光晕极光 */
+        .aurora {
+            position:absolute; border-radius:50%;
+            filter: blur(60px); opacity:.55; z-index:-1;
+            pointer-events:none;
+        }
+        .aurora.a1 { width:420px; height:420px; top:-120px; right:-80px;
+            background: radial-gradient(circle, rgba(0,229,255,.9), transparent 65%);
+            animation: drift 14s var(--ease) infinite alternate; }
+        .aurora.a2 { width:520px; height:520px; bottom:-180px; left:-120px;
+            background: radial-gradient(circle, rgba(61,124,255,.85), transparent 62%);
+            animation: drift 18s var(--ease) infinite alternate-reverse; }
+        @keyframes drift {
+            from { transform: translate(0,0) scale(1); }
+            to   { transform: translate(40px,-30px) scale(1.12); }
+        }
+
+        /* 顶部品牌字标 */
+        .wordmark { display:flex; align-items:center; gap:14px; position:relative; z-index:2; }
+        .wordmark .kun-badge {
+            width:46px; height:46px; flex-shrink:0;
+            display:flex; align-items:center; justify-content:center;
+            border-radius:14px;
+            background: linear-gradient(150deg, rgba(61,124,255,.25), rgba(0,229,255,.12));
+            border:1px solid rgba(120,200,255,.32);
+            box-shadow: 0 8px 28px rgba(0,170,255,.30), inset 0 1px 0 rgba(255,255,255,.18);
+            backdrop-filter: blur(6px);
+        }
+        .wordmark .kun-badge svg { width:30px; height:30px; }
+        .wm-text { display:flex; flex-direction:column; line-height:1.1; }
+        .wm-cn { font-size:18px; font-weight:700; letter-spacing:3px; color:#fff; }
+        .wm-en {
+            font-family: var(--font-display);
+            font-size:10px; font-weight:600; letter-spacing:5px;
+            color: var(--cyan); text-transform:uppercase; margin-top:3px;
+        }
+
+        /* 中部 IP + 文案 */
+        .hero { position:relative; z-index:2; margin: auto 0; }
+        .kun-stage {
+            position:relative; width:200px; height:200px; margin-bottom:30px;
+        }
+        .kun-halo {
+            position:absolute; inset:-10% ; border-radius:50%;
+            background: radial-gradient(circle, rgba(0,229,255,.35), transparent 60%);
+            filter: blur(18px); animation: pulse 5s ease-in-out infinite;
+        }
+        .kun-float { position:relative; animation: bob 6s ease-in-out infinite; }
+        .kun-ring {
+            position:absolute; inset:6%; border-radius:50%;
+            border:1px dashed rgba(120,200,255,.35);
+            animation: spin 26s linear infinite;
+        }
+        .kun-ring::after {
+            content:''; position:absolute; top:-4px; left:50%; width:7px; height:7px;
+            margin-left:-3px; border-radius:50%; background:var(--cyan);
+            box-shadow:0 0 12px 2px var(--cyan);
+        }
+        @keyframes bob { 0%,100%{ transform:translateY(0) rotate(-1deg);} 50%{ transform:translateY(-16px) rotate(1.5deg);} }
+        @keyframes pulse { 0%,100%{ opacity:.5; transform:scale(1);} 50%{ opacity:.9; transform:scale(1.06);} }
+        @keyframes spin { to { transform:rotate(360deg);} }
+
+        .eyebrow {
+            display:inline-flex; align-items:center; gap:8px;
+            font-size:12px; letter-spacing:2px; color:#bcd6ff;
+            padding:6px 14px; border-radius:999px;
+            background: rgba(120,170,255,.10);
+            border:1px solid rgba(120,200,255,.22);
+            margin-bottom:22px;
+        }
+        .eyebrow .pip { width:7px; height:7px; border-radius:50%; background:var(--cyan); box-shadow:0 0 10px var(--cyan); }
+        .hero h1 {
+            font-size: clamp(30px, 3.4vw, 50px);
+            font-weight:800; line-height:1.16; letter-spacing:.5px;
+            color:#fff; margin-bottom:18px;
+        }
+        .hero h1 .glow {
+            background: var(--grad-brand);
+            -webkit-background-clip:text; background-clip:text; color:transparent;
+            filter: drop-shadow(0 0 24px rgba(0,229,255,.45));
+        }
+        .hero p {
+            font-size:15px; line-height:1.8; color:#a9c2e6;
+            max-width:30em; margin-bottom:30px;
+        }
+        .chips { display:flex; flex-wrap:wrap; gap:10px; }
+        .chip {
+            font-size:12.5px; letter-spacing:.5px; color:#dceaff;
+            padding:8px 15px; border-radius:12px;
+            background: linear-gradient(135deg, rgba(61,124,255,.16), rgba(0,229,255,.06));
+            border:1px solid rgba(120,200,255,.20);
+            backdrop-filter: blur(4px);
+            transition: transform .35s var(--ease), border-color .35s var(--ease);
+        }
+        .chip:hover { transform:translateY(-3px); border-color: rgba(0,229,255,.5); }
+        .chip b { color:var(--cyan); font-weight:700; }
+
+        .stage-foot {
+            position:relative; z-index:2;
+            font-size:11.5px; letter-spacing:1px; color:#6f8bb3;
+        }
+
+        /* ─────────── 右侧登录区 ─────────── */
+        .auth {
+            display:flex; align-items:center; justify-content:center;
+            padding: 40px;
+            position:relative;
+            background:
+                radial-gradient(120% 70% at 100% 0%, rgba(0,229,255,.08), transparent 50%),
+                radial-gradient(90% 60% at 0% 100%, rgba(61,124,255,.10), transparent 55%),
+                var(--fog);
         }
         .card {
-            background: #1b1b1f; border: 1px solid rgba(255,255,255,.08);
-            border-radius: 16px; padding: 40px; width: 400px; max-width: 90vw;
+            width: 392px; max-width: 100%;
+            background: rgba(255,255,255,.72);
+            border:1px solid rgba(255,255,255,.9);
+            border-radius: 24px;
+            padding: 40px 36px 34px;
+            box-shadow:
+                0 30px 70px -30px rgba(16,42,67,.40),
+                0 2px 0 rgba(255,255,255,.8) inset;
+            backdrop-filter: blur(22px) saturate(140%);
+            -webkit-backdrop-filter: blur(22px) saturate(140%);
+            animation: rise .7s var(--ease) both;
         }
-        h1 { font-size: 20px; margin-bottom: 8px; text-align: center; }
-        .sub { color: #a0a5ac; font-size: 13px; margin-bottom: 24px; text-align: center; }
-        .tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+        @keyframes rise { from{ opacity:0; transform:translateY(22px) scale(.98);} to{ opacity:1; transform:none;} }
+
+        .card-head { text-align:left; margin-bottom:26px; }
+        .card-head h2 { font-size:23px; font-weight:800; letter-spacing:.5px; color:#0f2238; }
+        .card-head h2 .wave { display:inline-block; animation: wave 2.4s ease-in-out infinite; transform-origin:70% 70%; }
+        @keyframes wave { 0%,60%,100%{transform:rotate(0);} 15%{transform:rotate(16deg);} 30%{transform:rotate(-8deg);} 45%{transform:rotate(12deg);} }
+        .card-head p { font-size:13px; color:#5a7290; margin-top:7px; }
+
+        .tabs {
+            position:relative; display:flex; padding:4px;
+            background: rgba(16,42,67,.06);
+            border-radius: 14px; margin-bottom:24px;
+        }
+        .tab-ink {
+            position:absolute; top:4px; left:4px; height:calc(100% - 8px);
+            width:calc(50% - 4px); border-radius:10px;
+            background: #fff;
+            box-shadow: 0 4px 14px rgba(61,124,255,.20);
+            transition: transform .4s var(--ease);
+        }
+        body.reg .tab-ink { transform: translateX(100%); }
         .tab {
-            flex:1; padding: 10px; text-align: center; border-radius: 8px;
-            background: #26262c; color: #a0a5ac; border: none; cursor: pointer;
-            font-size: 14px; font-weight: 500; transition: all .2s;
+            flex:1; z-index:1; padding:11px; text-align:center; border:none; background:none;
+            cursor:pointer; font-size:14px; font-weight:600; color:#7e93ac;
+            font-family:var(--font-cjk); letter-spacing:1px;
+            transition: color .3s var(--ease);
         }
-        .tab.active { background: #8ab4f8; color: #131314; }
-        input {
-            width: 100%; padding: 12px; margin-bottom: 12px;
-            background: #26262c; border: 1px solid rgba(255,255,255,.1);
-            border-radius: 8px; color: #e8eaed; font-size: 14px; outline: none;
+        .tab.active { color: var(--tech); }
+
+        .field { position:relative; margin-bottom:14px; }
+        .field .ico {
+            position:absolute; left:14px; top:50%; transform:translateY(-50%);
+            width:17px; height:17px; color:#9fb2c9; pointer-events:none;
+            transition: color .25s var(--ease);
         }
-        input:focus { border-color: #8ab4f8; }
+        .field input {
+            width:100%; padding:13px 14px 13px 42px;
+            background: rgba(255,255,255,.85);
+            border:1.5px solid rgba(16,42,67,.10);
+            border-radius:13px; color:#0f2238; font-size:14px; outline:none;
+            font-family:var(--font-cjk);
+            transition: border-color .25s var(--ease), box-shadow .25s var(--ease), background .25s var(--ease);
+        }
+        .field input::placeholder { color:#9fb2c9; }
+        .field input:focus {
+            border-color: var(--tech);
+            background:#fff;
+            box-shadow: 0 0 0 4px rgba(61,124,255,.12);
+        }
+        .field input:focus + .ico,
+        .field:focus-within .ico { color: var(--tech); }
+
         .btn {
-            width: 100%; padding: 12px; border: none; border-radius: 8px;
-            font-size: 14px; font-weight: 500; cursor: pointer; transition: all .2s;
+            width:100%; padding:14px; border:none; border-radius:13px;
+            font-size:15px; font-weight:700; letter-spacing:2px; cursor:pointer;
+            font-family:var(--font-cjk); color:#fff; margin-top:6px;
+            background: var(--grad-brand);
+            background-size:160% 160%;
+            box-shadow: 0 12px 26px -8px rgba(61,124,255,.55);
+            transition: transform .2s var(--ease), box-shadow .25s var(--ease), background-position .5s var(--ease);
         }
-        .btn-primary { background: #8ab4f8; color: #131314; }
-        .btn-primary:hover { background: #aecbfa; }
-        .btn:disabled { opacity: .5; cursor: not-allowed; }
-        .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 20px; }
-        .msg.error { color: #f28b82; }
-        .msg.success { color: #81c995; }
+        .btn:hover { transform:translateY(-2px); background-position:100% 0; box-shadow:0 16px 32px -8px rgba(0,229,255,.5); }
+        .btn:active { transform:translateY(0); }
+        .btn:disabled { opacity:.55; cursor:not-allowed; transform:none; box-shadow:none; }
+
+        .msg { margin-top:16px; font-size:13px; text-align:center; min-height:20px; letter-spacing:.5px; transition:.2s; }
+        .msg.error   { color:#e5484d; }
+        .msg.success { color:#10b981; }
+
+        .card-foot { margin-top:22px; text-align:center; font-size:11.5px; color:#90a3bb; letter-spacing:.5px; }
+        .card-foot .dot { color:var(--tech); }
+
+        /* ─────────── 响应式 ─────────── */
+        @media (max-width: 940px) {
+            body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+            .stage { padding:28px 28px 22px; justify-content:flex-start; gap:18px; }
+            .stage .kun-stage, .stage .chips, .stage .stage-foot { display:none; }
+            .hero { margin:8px 0 0; }
+            .hero h1 { font-size:clamp(24px,6vw,32px); margin-bottom:10px; }
+            .hero p { display:none; }
+            .eyebrow { margin-bottom:14px; }
+            .auth { padding:26px 20px 40px; align-items:flex-start; }
+        }
+        @media (max-width: 420px) {
+            .card { padding:30px 24px 26px; border-radius:20px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation:none !important; }
+        }
     </style>
 </head>
 <body>
-<div class="card">
-    <h1>BOSS 招聘自动化</h1>
-    <p class="sub">多租户驾驶舱</p>
 
-    <div class="tabs">
-        <button class="tab active" onclick="switchTab('login')" id="tabLogin">登录</button>
-        <button class="tab" onclick="switchTab('register')" id="tabRegister">注册</button>
-    </div>
+    <!-- ═══════════ 左 · 品牌剧场 ═══════════ -->
+    <section class="stage" aria-hidden="true">
+        <span class="aurora a1"></span>
+        <span class="aurora a2"></span>
 
-    <form id="formLogin" onsubmit="doLogin(event)">
-        <input type="text" id="loginUser" placeholder="用户名" required>
-        <input type="password" id="loginPass" placeholder="密码" required>
-        <button class="btn btn-primary" type="submit" id="btnLogin">登 录</button>
-    </form>
+        <div class="wordmark">
+            <span class="kun-badge">
+                <!-- 鲲界科技 · 无限 ∞ 标志 -->
+                <svg viewBox="10 6 88 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="鲲界科技">
+                    <defs>
+                        <linearGradient id="infLogin" x1="52" y1="14" x2="94" y2="50" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#3D7CFF"/><stop offset="1" stop-color="#00E5FF"/>
+                        </linearGradient>
+                    </defs>
+                    <circle cx="38" cy="32" r="16" stroke="#5b8bff" stroke-width="9"/>
+                    <circle cx="70" cy="32" r="16" stroke="url(#infLogin)" stroke-width="9"/>
+                </svg>
+            </span>
+            <span class="wm-text">
+                <span class="wm-cn">鲲界科技</span>
+                <span class="wm-en">Kunjie AI Tech</span>
+            </span>
+        </div>
 
-    <form id="formRegister" onsubmit="doRegister(event)" style="display:none;">
-        <input type="text" id="regUser" placeholder="用户名" required>
-        <input type="text" id="regName" placeholder="显示名（选填）">
-        <input type="password" id="regPass" placeholder="密码" required>
-        <input type="password" id="regPass2" placeholder="确认密码" required>
-        <button class="btn btn-primary" type="submit" id="btnRegister">注 册</button>
-    </form>
+        <div class="hero">
+            <div class="kun-stage">
+                <span class="kun-halo"></span>
+                <span class="kun-ring"></span>
+                <div class="kun-float">
+                    <svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="小鲲 KUN 数字员工">
+                        <defs>
+                            <linearGradient id="kBody" x1="60" y1="52" x2="120" y2="168" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#FFFFFF"/><stop offset=".55" stop-color="#EAF4FF"/><stop offset="1" stop-color="#C4E2FF"/>
+                            </linearGradient>
+                            <linearGradient id="kFin" x1="140" y1="66" x2="196" y2="140" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#9AD6FF"/><stop offset="1" stop-color="#3D7CFF"/>
+                            </linearGradient>
+                            <linearGradient id="kInf" x1="84" y1="70" x2="112" y2="82" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#3D7CFF"/><stop offset="1" stop-color="#00E5FF"/>
+                            </linearGradient>
+                            <radialGradient id="kUnder" cx="0" cy="0" r="1" gradientTransform="translate(100 160) scale(54 12)">
+                                <stop stop-color="#3D7CFF" stop-opacity=".38"/><stop offset="1" stop-color="#3D7CFF" stop-opacity="0"/>
+                            </radialGradient>
+                        </defs>
+                        <!-- 底部光影 -->
+                        <ellipse cx="100" cy="160" rx="54" ry="12" fill="url(#kUnder)"/>
+                        <!-- 尾鳍（身后） -->
+                        <path d="M138 94 C 160 72, 184 68, 195 77 C 183 85, 179 98, 185 110 C 172 110, 150 107, 138 94 Z" fill="url(#kFin)" opacity=".92"/>
+                        <path d="M150 116 C 168 116, 185 126, 189 139 C 176 139, 156 132, 148 120 Z" fill="url(#kFin)" opacity=".78"/>
+                        <!-- 身体 -->
+                        <path d="M96 52 C 58 52, 34 78, 34 108 C 34 140, 62 163, 98 163 C 133 163, 157 142, 157 111 C 157 79, 132 52, 96 52 Z" fill="url(#kBody)"/>
+                        <!-- 侧鳍（前） -->
+                        <path d="M74 150 C 66 167, 51 173, 43 168 C 49 158, 56 150, 66 144 Z" fill="url(#kFin)" opacity=".85"/>
+                        <!-- 顶部高光 -->
+                        <path d="M62 80 C 84 62, 112 62, 132 78" stroke="#FFFFFF" stroke-opacity=".75" stroke-width="6" stroke-linecap="round"/>
+                        <!-- 额头 ∞ 光标 -->
+                        <g stroke="url(#kInf)" stroke-width="3.4" fill="none">
+                            <circle cx="90" cy="76" r="5.2"/><circle cx="104" cy="76" r="5.2"/>
+                        </g>
+                        <!-- 眼睛 -->
+                        <ellipse cx="80" cy="105" rx="10.5" ry="12.5" fill="#0B1B2E"/>
+                        <ellipse cx="116" cy="105" rx="10.5" ry="12.5" fill="#0B1B2E"/>
+                        <circle cx="84" cy="100" r="3.6" fill="#fff"/>
+                        <circle cx="120" cy="100" r="3.6" fill="#fff"/>
+                        <circle cx="77" cy="109" r="1.8" fill="#fff" opacity=".7"/>
+                        <circle cx="113" cy="109" r="1.8" fill="#fff" opacity=".7"/>
+                        <!-- 微笑 -->
+                        <path d="M89 125 Q98 134 108 125" stroke="#0B1B2E" stroke-opacity=".55" stroke-width="3" stroke-linecap="round" fill="none"/>
+                    </svg>
+                </div>
+            </div>
 
-    <div id="msg" class="msg"></div>
-</div>
+            <span class="eyebrow"><span class="pip"></span>企业级 AI 数字员工 · 招聘官</span>
+            <h1>让每一家企业<br><span class="glow">拥有自己的数字员工</span></h1>
+            <p>小鲲 KUN 接管 BOSS 直聘的繁琐流程——智能筛选、自动沟通、简历分析到面试邀约，让 AI 从工具变成企业真正的生产力。</p>
+            <div class="chips">
+                <span class="chip"><b>智能</b>筛选</span>
+                <span class="chip"><b>自动</b>打招呼</span>
+                <span class="chip">简历 <b>AI</b> 分析</span>
+                <span class="chip"><b>一键</b>约面</span>
+            </div>
+        </div>
+
+        <div class="stage-foot">鲲界科技 · KUNJIE AI TECH &nbsp;·&nbsp; 清透 · 智能 · 陪伴式 AI &nbsp;·&nbsp; Powered by <b style="color:#8fb6ff;font-weight:600;">OpenCAIO</b></div>
+    </section>
+
+    <!-- ═══════════ 右 · 登录 ═══════════ -->
+    <main class="auth">
+        <div class="card">
+            <div class="card-head">
+                <h2>欢迎回来 <span class="wave">👋</span></h2>
+                <p>登录你的 AI 招聘驾驶舱，让小鲲继续干活</p>
+            </div>
+
+            <div class="tabs" role="tablist">
+                <span class="tab-ink" aria-hidden="true"></span>
+                <button class="tab active" onclick="switchTab('login')" id="tabLogin" role="tab">登 录</button>
+                <button class="tab" onclick="switchTab('register')" id="tabRegister" role="tab">注 册</button>
+            </div>
+
+            <form id="formLogin" onsubmit="doLogin(event)">
+                <div class="field">
+                    <input type="text" id="loginUser" placeholder="用户名" autocomplete="username" required>
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+                </div>
+                <div class="field">
+                    <input type="password" id="loginPass" placeholder="密码" autocomplete="current-password" required>
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                </div>
+                <button class="btn" type="submit" id="btnLogin">登 录</button>
+            </form>
+
+            <form id="formRegister" onsubmit="doRegister(event)" style="display:none;">
+                <div class="field">
+                    <input type="text" id="regUser" placeholder="用户名" autocomplete="username" required>
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+                </div>
+                <div class="field">
+                    <input type="text" id="regName" placeholder="显示名（选填）">
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20a8 8 0 0 1 16 0"/><circle cx="12" cy="7" r="4"/></svg>
+                </div>
+                <div class="field">
+                    <input type="password" id="regPass" placeholder="密码（至少 6 位）" required>
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                </div>
+                <div class="field">
+                    <input type="password" id="regPass2" placeholder="确认密码" required>
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+                </div>
+                <button class="btn" type="submit" id="btnRegister">创建账号</button>
+            </form>
+
+            <div id="msg" class="msg"></div>
+
+            <div class="card-foot">让每一家企业拥有自己的数字员工<br><span style="opacity:.75;">鲲界科技 <span class="dot">·</span> Powered by OpenCAIO</span></div>
+        </div>
+    </main>
 
 <script>
 let mode = 'login';
 function switchTab(t) {
     mode = t;
+    document.body.classList.toggle('reg', t==='register');
     document.getElementById('tabLogin').classList.toggle('active', t==='login');
     document.getElementById('tabRegister').classList.toggle('active', t==='register');
     document.getElementById('formLogin').style.display = t==='login' ? '' : 'none';
@@ -97,7 +449,7 @@ async function doLogin(e) {
         if (r.ok) {
             localStorage.setItem('token', d.access_token);
             localStorage.setItem('role', d.role || '');
-            msg('登录成功，跳转中……', 'success');
+            msg('登录成功，正在进入驾驶舱……', 'success');
             setTimeout(() => {
                 if (d.role === 'admin') location.href = '/admin';
                 else location.href = '/dashboard';
@@ -126,7 +478,7 @@ async function doRegister(e) {
         });
         const d = await r.json();
         if (r.ok) {
-            msg('注册成功！请切换到登录页登录', 'success');
+            msg('注册成功！正在为你切换到登录', 'success');
             setTimeout(() => switchTab('login'), 800);
         } else {
             msg(d.detail || '注册失败', 'error');
