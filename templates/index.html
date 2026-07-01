@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BOSS招聘驾驶舱</title>
+    <title>鲲界 · 智聘驾驶舱</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&display=swap" rel="stylesheet">
     <style>
     /* ═══════════════════════════════════════════
        鲲界科技 · 深蓝科技风格
@@ -184,33 +187,44 @@
         flex-shrink: 0;
     }
     .logo-mark {
-        width: 30px; height: 30px;
-        background: var(--accent-gradient);
-        border-radius: var(--radius-sm);
+        width: 34px; height: 34px;
+        background: linear-gradient(150deg, rgba(61,124,255,.30), rgba(0,229,255,.14));
+        border: 1px solid rgba(120,200,255,.32);
+        border-radius: 11px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-weight: 800;
-        font-size: 12px;
-        color: #fff;
-        letter-spacing: -.5px;
         flex-shrink: 0;
+        box-shadow: 0 6px 18px rgba(0,170,255,.28), inset 0 1px 0 rgba(255,255,255,.20);
+        position: relative;
+        overflow: hidden;
     }
+    .logo-mark svg { width: 26px; height: auto; }
+    @keyframes kun-bob { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-2px) rotate(1.5deg); } }
     .logo-text {
         display: flex;
         flex-direction: column;
-        line-height: 1.15;
+        line-height: 1.12;
     }
     .logo-title {
         font-weight: 700;
-        font-size: 13px;
-        color: var(--accent-cyan);
-        text-shadow: 0 0 20px var(--accent-glow-cyan);
+        font-size: 14px;
+        letter-spacing: 1px;
+        color: #eaf2ff;
+    }
+    .logo-title .accent {
+        background: var(--accent-gradient);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        filter: drop-shadow(0 0 14px var(--accent-glow-cyan));
     }
     .logo-sub {
-        font-size: 12px;
-        color: var(--accent-light);
-        letter-spacing: .3px;
+        font-family: "Sora", var(--font-sans);
+        font-size: 9px;
+        font-weight: 600;
+        color: var(--accent-cyan);
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        margin-top: 2px;
     }
 
     /* Divider */
@@ -228,20 +242,26 @@
         flex-shrink: 0;
     }
     .h-stat {
-        background: rgba(255,255,255,.06);
-        border: 1px solid var(--border-default);
-        border-radius: var(--radius-sm);
-        padding: 4px 10px;
+        background: linear-gradient(135deg, rgba(120,170,255,.10), rgba(0,229,255,.04));
+        border: 1px solid rgba(120,200,255,.18);
+        border-radius: 9px;
+        padding: 4px 11px;
         display: flex;
         align-items: center;
         gap: 6px;
-        box-shadow: var(--shadow-sm);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+        transition: transform var(--transition-fast), border-color var(--transition-fast);
+    }
+    .h-stat:hover {
+        transform: translateY(-1px);
+        border-color: var(--border-accent);
     }
     .h-stat-value {
         font-weight: 700;
         font-size: 14px;
         font-variant-numeric: tabular-nums;
         color: #00e5ff;
+        text-shadow: 0 0 14px rgba(0,229,255,.35);
         min-width: 2ch;
         text-align: center;
     }
@@ -479,9 +499,23 @@
         display: flex;
         align-items: stretch;
         justify-content: stretch;
-        background: #0a0a0b;
+        background:
+            radial-gradient(120% 80% at 80% 12%, rgba(0,229,255,.14), transparent 48%),
+            radial-gradient(120% 90% at 14% 96%, rgba(61,124,255,.20), transparent 52%),
+            linear-gradient(155deg, #0B0F17 0%, #102A43 70%, #0c1f33 100%);
         position: relative;
         overflow: hidden;
+    }
+    .vnc-viewport::before {
+        content: '';
+        position: absolute; inset: 0;
+        background-image:
+            linear-gradient(rgba(120,170,255,.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(120,170,255,.05) 1px, transparent 1px);
+        background-size: 46px 46px;
+        -webkit-mask-image: radial-gradient(70% 70% at 50% 45%, #000 25%, transparent 80%);
+                mask-image: radial-gradient(70% 70% at 50% 45%, #000 25%, transparent 80%);
+        pointer-events: none;
     }
     .vnc-viewport canvas {
         position: absolute;
@@ -495,11 +529,33 @@
         align-items: center;
         justify-content: center;
         text-align: center;
-        color: var(--text-muted);
-        gap: 12px;
+        color: #9fb6d8;
+        gap: 18px;
+        z-index: 1;
     }
-    .vnc-placeholder svg { width: 72px; height: 64px; opacity: .35; }
-    .vnc-placeholder p { font-size: 13px; }
+    .vnc-kun {
+        position: relative;
+        width: 132px; height: 132px;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .vnc-kun::before {
+        content: '';
+        position: absolute; inset: -8%;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0,229,255,.28), transparent 62%);
+        filter: blur(16px);
+        animation: kun-halo 5s ease-in-out infinite;
+    }
+    .vnc-kun svg { width: 116px; height: 116px; position: relative; animation: kun-bob 6s ease-in-out infinite; }
+    @keyframes kun-halo { 0%,100% { opacity:.5; transform:scale(1);} 50% { opacity:.85; transform:scale(1.06);} }
+    .vnc-placeholder .ph-title { font-size: 17px; font-weight: 700; letter-spacing: 1px; color: #eaf2ff; }
+    .vnc-placeholder p { font-size: 13px; color: #8fa9cc; letter-spacing: .5px; }
+    .vnc-placeholder .ph-hint {
+        font-size: 12px; color: #7c95ba;
+        padding: 7px 16px; border-radius: 999px;
+        background: rgba(120,170,255,.08);
+        border: 1px solid rgba(120,200,255,.18);
+    }
     .vnc-iframe {
         width: 100%; height: 100%;
         border: none;
@@ -987,10 +1043,20 @@
     <!-- ═══ HEADER ═══ -->
     <header class="header" aria-label="主导航栏">
         <div class="header-brand">
-            <div class="logo-mark">BO</div>
+            <div class="logo-mark" title="鲲界科技 · KUNJIE AI TECH">
+                <svg viewBox="10 6 88 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="鲲界科技">
+                    <defs>
+                        <linearGradient id="infIndex" x1="52" y1="14" x2="94" y2="50" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#3D7CFF"/><stop offset="1" stop-color="#00E5FF"/>
+                        </linearGradient>
+                    </defs>
+                    <circle cx="38" cy="32" r="16" stroke="#5b8bff" stroke-width="9"/>
+                    <circle cx="70" cy="32" r="16" stroke="url(#infIndex)" stroke-width="9"/>
+                </svg>
+            </div>
             <div class="logo-text">
-                <span class="logo-title">招聘驾驶舱</span>
-                <span class="logo-sub">BOSS Zhipin Automation</span>
+                <span class="logo-title">鲲界<span class="accent">科技</span> · 驾驶舱</span>
+                <span class="logo-sub">Kunjie AI Tech</span>
             </div>
         </div>
 
@@ -1071,6 +1137,7 @@
                             <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">申请</th>
                             <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">简历</th>
                             <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">面试状态</th>
+                            <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border);">操作</th>
                         </tr>
                     </thead>
                     <tbody id="dataPanelBody"></tbody>
@@ -1105,11 +1172,43 @@
         </div>
         <div class="vnc-viewport" id="vncViewport">
             <div class="vnc-placeholder" id="vncPlaceholder">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <rect x="2" y="3" width="20" height="14" rx="2"/>
-                    <path d="M8 21h8"/><path d="M12 17v4"/>
-                </svg>
-                <p>点击「打开BOSS直聘」启动浏览器</p>
+                <div class="vnc-kun">
+                    <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="小鲲 KUN">
+                        <defs>
+                            <linearGradient id="vBody" x1="60" y1="52" x2="120" y2="168" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#FFFFFF"/><stop offset=".55" stop-color="#EAF4FF"/><stop offset="1" stop-color="#C4E2FF"/>
+                            </linearGradient>
+                            <linearGradient id="vFin" x1="140" y1="66" x2="196" y2="140" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#9AD6FF"/><stop offset="1" stop-color="#3D7CFF"/>
+                            </linearGradient>
+                            <linearGradient id="vInf" x1="84" y1="70" x2="112" y2="82" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#3D7CFF"/><stop offset="1" stop-color="#00E5FF"/>
+                            </linearGradient>
+                            <radialGradient id="vUnder" cx="0" cy="0" r="1" gradientTransform="translate(100 160) scale(54 12)">
+                                <stop stop-color="#3D7CFF" stop-opacity=".38"/><stop offset="1" stop-color="#3D7CFF" stop-opacity="0"/>
+                            </radialGradient>
+                        </defs>
+                        <ellipse cx="100" cy="160" rx="54" ry="12" fill="url(#vUnder)"/>
+                        <path d="M138 94 C 160 72, 184 68, 195 77 C 183 85, 179 98, 185 110 C 172 110, 150 107, 138 94 Z" fill="url(#vFin)" opacity=".92"/>
+                        <path d="M150 116 C 168 116, 185 126, 189 139 C 176 139, 156 132, 148 120 Z" fill="url(#vFin)" opacity=".78"/>
+                        <path d="M96 52 C 58 52, 34 78, 34 108 C 34 140, 62 163, 98 163 C 133 163, 157 142, 157 111 C 157 79, 132 52, 96 52 Z" fill="url(#vBody)"/>
+                        <path d="M74 150 C 66 167, 51 173, 43 168 C 49 158, 56 150, 66 144 Z" fill="url(#vFin)" opacity=".85"/>
+                        <path d="M62 80 C 84 62, 112 62, 132 78" stroke="#FFFFFF" stroke-opacity=".75" stroke-width="6" stroke-linecap="round"/>
+                        <g stroke="url(#vInf)" stroke-width="3.4" fill="none">
+                            <circle cx="90" cy="76" r="5.2"/><circle cx="104" cy="76" r="5.2"/>
+                        </g>
+                        <ellipse cx="80" cy="105" rx="10.5" ry="12.5" fill="#0B1B2E"/>
+                        <ellipse cx="116" cy="105" rx="10.5" ry="12.5" fill="#0B1B2E"/>
+                        <circle cx="84" cy="100" r="3.6" fill="#fff"/>
+                        <circle cx="120" cy="100" r="3.6" fill="#fff"/>
+                        <circle cx="77" cy="109" r="1.8" fill="#fff" opacity=".7"/>
+                        <circle cx="113" cy="109" r="1.8" fill="#fff" opacity=".7"/>
+                        <path d="M89 125 Q98 134 108 125" stroke="#0B1B2E" stroke-opacity=".55" stroke-width="3" stroke-linecap="round" fill="none"/>
+                    </svg>
+                </div>
+                <span class="ph-title">小鲲已就位，待命中</span>
+                <p>你的 AI 数字招聘官 · 智能筛选 · 自动沟通 · 简历分析</p>
+                <span class="ph-hint">点击「🚀 打开BOSS」唤醒小鲲，开始干活</span>
             </div>
             <iframe class="vnc-iframe" id="vncFrame" style="display:none;" allow="clipboard-read; clipboard-write" title="VNC远程桌面查看器"></iframe>
         </div>
@@ -1375,6 +1474,7 @@
             <span class="log-title">操作日志</span>
             <span class="log-count" id="logCount">0</span>
             <span class="log-spacer"></span>
+            <span style="font-size:11px;letter-spacing:.5px;color:var(--text-muted);margin-right:12px;">鲲界科技 · Powered by <b style="color:var(--accent);font-weight:600;">OpenCAIO</b></span>
             <button class="log-btn" onclick="clearLogs()">清除</button>
             <button class="log-btn" onclick="toggleLogPanel()" id="logToggleBtn">▲ 展开</button>
         </div>
@@ -1403,6 +1503,9 @@
         let vncConnected = false;
         let vncScale = 1;
         let authToken = localStorage.getItem('token') || '';
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+        }
 
         // ── 退出登录 ──
         async function doLogout() {
@@ -1425,11 +1528,11 @@
         }
         async function loadDataPanel() {
             const tbody = document.getElementById('dataPanelBody');
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-muted);">加载中...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--text-muted);">加载中...</td></tr>';
             try {
                 const data = await apiCall('/api/user/candidates', null, 'GET');
                 if (!data || data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-muted);">暂无数据</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--text-muted);">暂无数据</td></tr>';
                     return;
                 }
                 const statusMap = {discovered:'新发现',contacted:'已沟通',replied:'已回复',recommend_interview:'可约面',interview_invited:'已约面',not_recommended:'不匹配'};
@@ -1444,11 +1547,30 @@
                         <td style="padding:7px;text-align:center;">${c.is_applied ? '✅' : '—'}</td>
                         <td style="padding:7px;text-align:center;">${c.is_downloaded ? '✅' : '—'}</td>
                         <td style="padding:7px;text-align:center;font-size:11px;">${statusMap[c.interview_status] || c.interview_status || '-'}</td>
+                        <td style="padding:7px;text-align:center;">
+                            ${c.is_downloaded ? `<button onclick="previewResume('${escapeHtml(c.resume_file || c.candidate_name)}')" style="background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent);padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">📄 预览</button>` : '—'}
+                        </td>
                     </tr>
                 `).join('');
             } catch (e) {
-                tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--red);">加载失败: ${e.message}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--red);">加载失败: ${e.message}</td></tr>`;
             }
+        }
+        function previewResume(filePath) {
+            const t = localStorage.getItem('token');
+            if (!t) { alert('请先登录'); return; }
+            const encoded = encodeURIComponent(decodeURIComponent(filePath));
+            const url = `${API_BASE}/api/resume/preview?path=${encoded}&token=${encodeURIComponent(t)}`;
+            fetch(url)
+                .then(r => r.blob())
+                .then(blob => {
+                    const objectUrl = URL.createObjectURL(blob);
+                    const win = window.open('', '_blank');
+                    if (win) {
+                        win.document.write(`<iframe src="${objectUrl}" style="width:100%;height:100%;border:none;" title="简历预览"></iframe>`);
+                    }
+                })
+                .catch(() => window.open(url, '_blank'));
         }
 
         let config = {

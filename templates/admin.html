@@ -3,74 +3,135 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BOSS招聘自动化 - 管理后台</title>
+    <title>鲲界 · 智聘 — 管理后台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
         :root {
-            --bg: #131314; --surface: #1b1b1f; --elevated: #26262c;
-            --text: #e8eaed; --text2: #bdc1c6; --accent: #8ab4f8;
-            --green: #81c995; --red: #f28b82; --border: rgba(255,255,255,.08);
+            --ink: #0B0F17; --deep: #102A43;
+            --surface: rgba(255,255,255,.04); --elevated: rgba(120,170,255,.08);
+            --text: #eaf2ff; --text2: #9fb6d8;
+            --accent: #3D7CFF; --cyan: #00E5FF;
+            --green: #34d399; --red: #fb7185;
+            --border: rgba(120,200,255,.16);
+            --grad-brand: linear-gradient(120deg, #3D7CFF 0%, #00E5FF 100%);
         }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: var(--bg); color: var(--text); padding: 24px;
-            display: grid; grid-template-rows: auto 1fr; height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+            color: var(--text); padding: 28px 32px;
+            display: grid; grid-template-rows: auto 1fr; height: 100vh; overflow:hidden;
+            background:
+                radial-gradient(120% 70% at 90% -10%, rgba(0,229,255,.12), transparent 45%),
+                radial-gradient(110% 80% at -5% 110%, rgba(61,124,255,.18), transparent 50%),
+                linear-gradient(155deg, #0B0F17 0%, #102A43 70%, #0c1f33 100%);
+            -webkit-font-smoothing: antialiased;
         }
         .header {
             display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 24px;
+            margin-bottom: 26px;
         }
-        .header h1 { font-size: 18px; }
-        .header-right { display: flex; gap: 12px; align-items: center; }
+        .brand { display:flex; align-items:center; gap:12px; }
+        .brand .mark {
+            width:40px; height:40px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+            border-radius:12px;
+            background: linear-gradient(150deg, rgba(61,124,255,.28), rgba(0,229,255,.12));
+            border:1px solid rgba(120,200,255,.30);
+            box-shadow: 0 6px 20px rgba(0,170,255,.28), inset 0 1px 0 rgba(255,255,255,.18);
+        }
+        .brand .mark svg { width:26px; height:26px; }
+        .brand h1 { font-size:18px; font-weight:800; letter-spacing:1px; line-height:1.1; }
+        .brand .sub { display:block; font-family:"Sora",sans-serif; font-size:9px; font-weight:600;
+            letter-spacing:3px; color:var(--cyan); text-transform:uppercase; margin-top:2px; }
+        .header-right { display: flex; gap: 10px; align-items: center; }
+        .header-right #loginUser { color:var(--text2); font-size:13px; }
         .btn {
-            padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
-            font-size: 13px; font-weight: 500;
+            padding: 8px 16px; border-radius: 10px; border: none; cursor: pointer;
+            font-size: 13px; font-weight: 600; letter-spacing:.5px; transition: all .2s cubic-bezier(.16,1,.3,1);
+            font-family: inherit;
         }
-        .btn-accent { background: var(--accent); color: #131314; }
-        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text2); }
-        .btn-danger { background: var(--red); color: #131314; }
-        .btn-sm { padding: 4px 10px; font-size: 12px; margin-right: 4px; }
-        .tab-bar { display: flex; gap: 8px; margin-bottom: 20px; }
+        .btn-accent { background: var(--grad-brand); color: #fff; box-shadow: 0 8px 20px -8px rgba(61,124,255,.6); }
+        .btn-accent:hover { transform: translateY(-2px); box-shadow: 0 12px 24px -8px rgba(0,229,255,.55); }
+        .btn-outline { background: rgba(120,170,255,.06); border: 1px solid var(--border); color: var(--text2); }
+        .btn-outline:hover { border-color: rgba(0,229,255,.4); color: var(--text); }
+        .btn-danger { background: rgba(251,113,133,.15); border:1px solid rgba(251,113,133,.4); color: var(--red); }
+        .btn-danger:hover { background: rgba(251,113,133,.25); }
+        .btn-sm { padding: 4px 11px; font-size: 12px; margin-right: 4px; border-radius:8px; }
+        .tab-bar { display: flex; gap: 8px; margin-bottom: 0; }
         .tab {
-            padding: 8px 20px; background: var(--elevated); border: 1px solid var(--border);
-            border-radius: 8px 8px 0 0; color: var(--text2); cursor: pointer; font-size: 13px;
+            padding: 9px 22px; background: rgba(120,170,255,.05); border: 1px solid var(--border);
+            border-bottom: none;
+            border-radius: 12px 12px 0 0; color: var(--text2); cursor: pointer; font-size: 13px; font-weight:600;
+            transition: all .2s;
         }
-        .tab.active { background: var(--surface); border-bottom-color: var(--surface); color: var(--accent); }
-        .panel { background: var(--surface); border-radius: 0 12px 12px 12px; padding: 20px; }
+        .tab:hover { color: var(--text); }
+        .tab.active { background: rgba(120,170,255,.10); color: var(--cyan); box-shadow: inset 0 2px 0 var(--cyan); }
+        .panel {
+            background: rgba(13,28,48,.55);
+            border: 1px solid var(--border);
+            border-radius: 0 14px 14px 14px; padding: 22px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 24px 60px -30px rgba(0,0,0,.6);
+            overflow:auto;
+        }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { text-align: left; color: var(--text2); padding: 10px 12px; border-bottom: 1px solid var(--border); font-weight: 500; }
-        td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.04); }
+        th { text-align: left; color: var(--text2); padding: 11px 12px; border-bottom: 1px solid var(--border);
+            font-weight: 600; font-size:11px; letter-spacing:1px; text-transform:uppercase; }
+        td { padding: 11px 12px; border-bottom: 1px solid rgba(120,200,255,.06); }
+        tbody tr { transition: background .18s; }
+        tbody tr:hover { background: rgba(120,170,255,.05); }
         .badge {
-            display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
-            font-weight: 500;
+            display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px;
+            font-weight: 600; letter-spacing:.5px;
         }
-        .badge-admin { background: rgba(138,180,248,.15); color: var(--accent); }
-        .badge-user { background: rgba(129,201,149,.15); color: var(--green); }
-        .badge-active { background: rgba(129,201,149,.15); color: var(--green); }
-        .badge-inactive { background: rgba(242,139,130,.15); color: var(--red); }
+        .badge-admin { background: rgba(61,124,255,.18); color: #8ab6ff; border:1px solid rgba(61,124,255,.3); }
+        .badge-user { background: rgba(0,229,255,.12); color: var(--cyan); border:1px solid rgba(0,229,255,.25); }
+        .badge-active { background: rgba(52,211,153,.14); color: var(--green); border:1px solid rgba(52,211,153,.3); }
+        .badge-inactive { background: rgba(251,113,133,.14); color: var(--red); border:1px solid rgba(251,113,133,.3); }
         input {
-            padding: 8px 12px; background: var(--elevated); border: 1px solid var(--border);
-            border-radius: 6px; color: var(--text); font-size: 13px; margin-right: 8px;
+            padding: 10px 12px; background: rgba(255,255,255,.06); border: 1px solid var(--border);
+            border-radius: 9px; color: var(--text); font-size: 13px; margin-right: 8px; outline:none;
+            font-family: inherit; transition: border-color .2s, box-shadow .2s;
         }
+        input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(61,124,255,.14); }
+        input::placeholder { color:#7c95ba; }
         .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,.6);
+            position: fixed; inset: 0; background: rgba(7,12,22,.66);
             display: flex; justify-content: center; align-items: center; z-index: 100;
+            backdrop-filter: blur(6px);
         }
         .modal {
-            background: var(--surface); border-radius: 12px; padding: 24px; width: 360px;
+            background: linear-gradient(160deg, rgba(19,38,62,.96), rgba(12,24,40,.96));
+            border: 1px solid var(--border);
+            border-radius: 18px; padding: 26px; width: 380px;
+            box-shadow: 0 40px 90px -30px rgba(0,0,0,.7);
         }
-        .modal h3 { margin-bottom: 16px; }
-        .modal input { width: 100%; margin-bottom: 10px; }
-        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+        .modal h3 { margin-bottom: 18px; font-size:16px; font-weight:700; }
+        .modal input { width: 100%; margin-bottom: 11px; }
+        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
         .hidden { display: none !important; }
-        .msg { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-top: 12px; }
-        .msg.ok { background: rgba(129,201,149,.1); color: var(--green); }
-        .msg.err { background: rgba(242,139,130,.1); color: var(--red); }
+        .msg { padding: 9px 13px; border-radius: 9px; font-size: 13px; margin-top: 12px; }
+        .msg.ok { background: rgba(52,211,153,.12); color: var(--green); }
+        .msg.err { background: rgba(251,113,133,.12); color: var(--red); }
     </style>
 </head>
 <body>
 <div class="header">
-    <h1>🔧 管理后台</h1>
+    <div class="brand">
+        <span class="mark">
+            <svg viewBox="10 6 88 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="鲲界科技">
+                <defs><linearGradient id="infAdmin" x1="52" y1="14" x2="94" y2="50" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#3D7CFF"/><stop offset="1" stop-color="#00E5FF"/></linearGradient></defs>
+                <circle cx="38" cy="32" r="16" stroke="#5b8bff" stroke-width="9"/>
+                <circle cx="70" cy="32" r="16" stroke="url(#infAdmin)" stroke-width="9"/>
+            </svg>
+        </span>
+        <div>
+            <h1>鲲界科技 · 管理后台</h1>
+            <span class="sub">Kunjie AI Tech</span>
+        </div>
+    </div>
     <div class="header-right">
         <span style="color:var(--text2);font-size:13px;" id="loginUser"></span>
         <button class="btn btn-outline" onclick="location.href='/'">驾驶舱</button>
@@ -112,6 +173,10 @@
             <tbody id="statsTable"></tbody>
         </table>
     </div>
+</div>
+
+<div style="position:fixed;left:0;right:0;bottom:14px;text-align:center;font-size:11.5px;letter-spacing:.5px;color:#6f8bb3;pointer-events:none;">
+    鲲界科技 · KUNJIE AI TECH &nbsp;·&nbsp; Powered by <b style="color:#8fb6ff;font-weight:600;">OpenCAIO</b>
 </div>
 
 <!-- 添加用户弹窗 -->
