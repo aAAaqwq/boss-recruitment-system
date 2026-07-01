@@ -817,34 +817,7 @@ class BrowserAutomation:
                 logger.info("有 bst cookie 且不在登录页，判定已登录（页面可能仍在加载）")
                 return {"logged_in": True, "message": "已登录（cookie检测，页面加载中）"}
 
-            # --- Step 6: 未检测到登录态 → 尝试 cookie 恢复 ---
-            cookie_file = _cookie_file(user_id)
-            if cookie_file.exists():
-                logger.info(f"尝试导入备份cookie恢复登录态 (user_id={user_id})...")
-                try:
-                    import_result = await self.import_cookies(user_id=user_id)
-                    logger.info(f"导入: {import_result.get('imported',0)}/{import_result.get('total',0)}")
-                    if import_result.get("imported", 0) > 0:
-                        try:
-                            await self.page.get("https://www.zhipin.com/web/chat/recommend")
-                        except Exception:
-                            pass
-                        await asyncio.sleep(8)
-                        # 重做一次检测
-                        retry_url = await self._safe_evaluate("window.location.href")
-                        if retry_url and "/web/user/" not in retry_url and "passport" not in retry_url:
-                            retry_text = await self._safe_evaluate("document.body.innerText.substring(0,500)")
-                            if "职位管理" in retry_text or "牛人管理" in retry_text:
-                                logger.info("Cookie恢复成功")
-                                try:
-                                    await self.export_cookies(user_id=user_id)
-                                except Exception:
-                                    pass
-                                return {"logged_in": True, "message": "已登录（cookie恢复）"}
-                except Exception as e:
-                    logger.warning(f"Cookie恢复失败: {e}")
-
-            # 未登录 — 不再主动导航到登录页（避免破坏已有会话）
+            # --- Step 6: 未检测到登录态（不再尝试 cookie 导入恢复）---
             logger.info("未检测到登录态")
             return {
                 "logged_in": False,

@@ -96,3 +96,11 @@ _archive/
 # 日报 / 临时笔记
 # ============================================
 日报_*.md
+*.bak
+*.bak2
+*.bak3
+*.bak.bw
+docs
+boss-recruitment.tar
+job_info
+项目进度报告.md

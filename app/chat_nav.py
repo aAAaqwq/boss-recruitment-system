@@ -458,13 +458,6 @@ _JS_CLICK_UNREAD = """
                 }
             }
         }
-        // 可能"未读"直接在filterArea文本中
-        var ft = (filterArea.innerText || '').trim();
-        if (ft.indexOf('未读') >= 0) {
-            var fr = filterArea.getBoundingClientRect();
-            filterArea.click();
-            return {found: true, text: 'filter-click', x: fr.x + fr.width/2, y: fr.y + fr.height/2};
-        }
     }
 
     // 策略2: 全局搜索"未读"文本的span
